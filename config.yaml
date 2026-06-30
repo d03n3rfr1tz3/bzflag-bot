@@ -1,0 +1,53 @@
+# bzflag-bot Konfiguration
+# Alle Werte sind optional – nicht angegebene Werte verwenden die Defaults.
+
+# ── Server ────────────────────────────────────────────────────────────────
+host: "localhost"        # Hostname oder IP des BZFlag-Servers
+port: 5154               # Standard-Port für BZFlag
+
+# ── Bot-Anzahl ────────────────────────────────────────────────────────────
+max_bots: 3              # Maximale Anzahl gleichzeitiger Bots
+min_bots: 1              # Mindestanzahl (wird niemals unterschritten,
+                         # auch wenn echte Spieler online sind)
+
+# ── Bot-Identität ─────────────────────────────────────────────────────────
+# Prefix, den JEDER Bot erhält – dient zugleich der zuverlässigen Bot-Erkennung
+# (jeder Bot erkennt Peers am Prefix, auch ohne vollständige Namensliste).
+bot_name_prefix: "[b0t] "
+
+# Basisnamen der Bots (OHNE Prefix). In-Game-Callsign = bot_name_prefix + Basisname,
+# z.B. "[b0t] Tank You". Ist die Liste leer, greift bot_name_prefix + fortlaufende Nummer.
+bot_callsigns: ["Tank You", "Tank Solo", "Tanky Kong", "Tank Vader", "Tanky Chan", "Tank Sparrow", "Tanktop"]
+
+# Callsign des Fallback-Observers (verbindet nur, wenn kein Bot Spielerzahlen liefert,
+# z.B. bei min_bots=0 oder kurz vor dem ersten Bot).
+observer_callsign: "Spectanktor"
+
+team: 65534              # 65534 = 0xFFFE = automatisches Team,
+                         # 0=Rogue, 1=Red, 2=Green, 3=Blue, 4=Purple, 5=Observer, 6=Rabbit, 7=Hunter
+motto: ""                # Motto-Text (kann leer bleiben)
+token: ""                # BZFlag-Auth-Token (leer = nicht registriert)
+
+# ── Welt ──────────────────────────────────────────────────────────────────
+world_half: 400.0        # Halbe Weltgröße in Einheiten (Standard: 800x800)
+                         # Der Manager versucht, diese aus dem Server zu lesen.
+
+# ── Verhalten ─────────────────────────────────────────────────────────────
+check_interval: 5.0      # Sekunden zwischen Rebalance-Prüfungen
+reconnect_delay: 10.0    # Sekunden vor Observer-Reconnect nach Verbindungsabbruch
+
+# ── Flag-Strategie ────────────────────────────────────────────────────────
+# Gute Flags: behalten und beim Schießen nutzen (Standard: GM SW L SB MG V TR SE ID)
+# good_flags: ["GM", "SW", "L", "SB", "MG", "V", "TR", "SE", "ID"]
+# Schlechte Flags: sofort ablegen (Standard: WG NJ B RC O JM)
+# bad_flags: ["WG", "NJ", "B", "RC", "O", "JM"]
+# Alle anderen Flags: ebenfalls sofort ablegen (konservative Strategie für Phase 2)
+
+# ── Bot-Lebensdauer ───────────────────────────────────────────────────────
+# Nach Ablauf der zufälligen Lebensdauer wird der Bot gestoppt und durch einen
+# neuen mit anderem Namen ersetzt (Statistiken werden damit zurückgesetzt).
+# bot_lifetime_min: 900    # Minimum in Sekunden (Standard: 15 Minuten)
+# bot_lifetime_max: 7200   # Maximum in Sekunden (Standard: 2 Stunden)
+
+# ── Logging ───────────────────────────────────────────────────────────────
+log_level: "INFO"        # DEBUG | INFO | WARNING | ERROR
