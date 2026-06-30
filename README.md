@@ -47,7 +47,7 @@ python bzbot.py --host mein-server.de --callsign "Robo"
 | `min_bots`        | `0`         | Mindestanzahl (nie unterschritten)                                           |
 | `bot_name_prefix` | `Bot_`      | Präfix, den **jeder** Bot erhält (dient zugleich der zuverlässigen Bot-Erkennung) |
 | `bot_callsigns`   | `[]`        | **Basisnamen** der Bots (ohne Präfix, z.B. `["Zwiebel", "Tomate"]`); In-Game-Name = `bot_name_prefix` + Basisname. Leer → `bot_name_prefix` + Nummer (`Bot_01`, …) |
-| `observer_callsign` | `[b0t] Observer` | Callsign des Fallback-Observers (verbindet nur, wenn kein Bot Spielerzahlen liefert) |
+| `observer_callsign` | `Bot-Manager` | Callsign des Fallback-Observers (verbindet nur, wenn kein Bot Spielerzahlen liefert) |
 | `team`            | `65534`     | Team-ID: `0`=Rogue, `1`=Red, `2`=Green, `3`=Blue, `4`=Purple, `5`=Observer, `6`=Rabbit, `7`=Hunter, `65534`=auto |
 | `motto`           | `""`        | Bot-Motto                                                                    |
 | `token`           | `""`        | BZFlag-Auth-Token (leer = unregistriert)                                     |
@@ -90,7 +90,7 @@ python bzbot.py [Optionen]
   --team TEAM             Team-ID                            (Default: 65534)
   --motto TEXT            Motto
   --token TOKEN           BZFlag-Auth-Token
-  --world-half FLOAT      Halbe Weltgröße                    (Default: 200.0)
+  --world-half FLOAT      Halbe Weltgröße                    (Default: 400.0)
   --bot-name-prefix P     Präfix zur Eigenbot-Erkennung      (Default: Bot_)
   --bot-callsigns NAMEN   Kommagetrennte Bot-Namen zur Eigenbot-Erkennung
   --log-level LEVEL       Log-Level                          (Default: INFO)
