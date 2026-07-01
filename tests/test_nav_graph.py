@@ -18,6 +18,7 @@ from bzflag.nav_graph import (
     _mark_blocked, _nearest_walkable, _smooth_path, _clip_to_footprint, _h,
     _segment_crosses_thin_obs, _obstacle_blocks_layer, _margin_for,
     _insert_jump_runups, _runup_crosses_thin_wall,
+    _point_in_rotated_box, ObstacleGrid,
 )
 
 
@@ -189,6 +190,60 @@ class TestGetFloorZ:
         ng = NavGraph(wm)
         fz = ng.get_floor_z(0.0, 0.0, 5.0)
         assert fz == pytest.approx(0.0, abs=0.01)  # Bot IST innerhalb des Gebäudes
+
+
+# ---------------------------------------------------------------------------
+# ObstacleGrid / get_floor_z: Broad-Phase-Äquivalenz zur Brute-Force-Referenz
+# ---------------------------------------------------------------------------
+
+def _floor_z_bruteforce(ng, x, y, z, overhang):
+    """Referenz: lineare Schleife über alle _obs (= get_floor_z vor der Grid-Optimierung)."""
+    floor_z = 0.0
+    for obs in ng._obs:
+        roof_z = obs.roof_z
+        if roof_z > z + 2.0:
+            continue
+        if _point_in_rotated_box(obs, x, y, margin=overhang):
+            if roof_z > floor_z:
+                floor_z = roof_z
+    return floor_z
+
+
+class TestGetFloorZGridEquivalence:
+    """Das Grid ist nur eine gepolsterte Übermenge → get_floor_z muss bit-identisch zur linearen
+    Brute-Force-Referenz sein, auch an Box-Kanten und bei rotierten/überlappenden Dächern."""
+
+    def _world(self):
+        boxes = [
+            _make_box(0.0, 0.0, 0.0, 10.0, 10.0, 8.0),      # niedriges Dach
+            _make_box(5.0, 5.0, 0.0, 6.0, 6.0, 15.0),       # überlappt, höheres Dach
+            _make_box(-40.0, 20.0, 0.0, 8.0, 3.0, 12.0, angle=math.radians(30.0)),   # rotiert
+            _make_box(40.0, -40.0, 0.0, 5.0, 20.0, 10.0, angle=math.radians(45.0)),  # rotiert, länglich
+            _make_box(60.0, 60.0, 0.0, 4.0, 4.0, 6.0),      # isoliert
+        ]
+        return _make_world(boxes=boxes, world_half=100.0)
+
+    def test_matches_bruteforce_over_raster(self):
+        ng = NavGraph(self._world())
+        coords = [c * 2.5 for c in range(-40, 41)]   # -100..100 in 2.5u-Schritten
+        for overhang in (0.0, 1.4):
+            for z in (0.0, 5.0, 8.1, 15.1):
+                for x in coords:
+                    for y in coords:
+                        got = ng.get_floor_z(x, y, z, overhang=overhang)
+                        want = _floor_z_bruteforce(ng, x, y, z, overhang)
+                        assert got == want, (x, y, z, overhang, got, want)
+
+    def test_query_point_no_false_negatives(self):
+        """Jede Box, in deren gepolstertem Footprint ein Punkt liegt, muss Grid-Kandidat sein."""
+        ng = NavGraph(self._world())
+        grid = ng._solid_grid
+        for x in (c * 5.0 for c in range(-20, 21)):
+            for y in (c * 5.0 for c in range(-20, 21)):
+                cands = set(id(b) for b in grid.query_point(x, y))
+                for obs in ng._obs:
+                    if _point_in_rotated_box(obs, x, y, margin=1.4):
+                        assert id(obs) in cands, (x, y, obs)
 
 
 # ---------------------------------------------------------------------------

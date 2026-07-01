@@ -56,6 +56,13 @@ ASTAR_MAX_EXPANSIONS = 5000  # Knoten-Expansionslimit pro A*-Suche. Die hohe Spr
 ASTAR_MAX_MS = 125.0         # Wall-Clock-Budget pro A*-Suche (ms). Alle 1024 Expansionen geprüft; bei
                              # Überschreitung → gleicher Best-Effort-Teilpfad wie beim Knotenlimit. Robuster
                              # als reine Knotenzahl, da µs/Knoten mit der Layer-Dichte schwankt. Tests patchbar.
+GRID_CELL = 16.0             # Zellgröße (u) des ObstacleGrid-Broad-Phase für die 60-Hz-Punkt-Queries
+                             # (get_floor_z, Wall-Slide/Decken-Kollision, Box-Innen-Check).
+GRID_PAD  = 0.5 + TANK_HALF_WIDTH + 0.01  # Polsterung der Box-AABB bei der Grid-Registrierung. Muss ≥ dem
+                             # maximalen Prüf-Margin sein: get_floor_z testet auf half+0.5+overhang
+                             # (overhang ≤ TANK_HALF_WIDTH), der Physik-Wall-Slide auf half+eff_half_width
+                             # (≤ TANK_HALF_WIDTH). +0.01 Float-Sicherheit. Größer = mehr Kandidaten, aber nie
+                             # False Negatives (die exakte Narrow-Phase entscheidet unverändert).
 
 DIRS_8 = [(-1, -1), (-1, 0), (-1, 1),
           (0,  -1),           (0,  1),
@@ -136,6 +143,76 @@ class FloorLayer:
 
 
 # ---------------------------------------------------------------------------
+# ObstacleGrid — Spatial-Hash Broad-Phase
+# ---------------------------------------------------------------------------
+
+class ObstacleGrid:
+    """Uniformes Spatial-Hash-Grid über eine STATISCHE Hindernisliste (Broad-Phase).
+
+    Ersetzt den linearen Scan über alle Hindernisse in den 60-Hz-Punkt-Abfragen (get_floor_z,
+    Wall-Slide/Decken-Kollision, Box-Innen-Check). Jede Box wird — um ihre rotierte AABB plus
+    ``pad`` geweitet — in alle überlappten Grid-Zellen eingetragen. ``query_point`` liefert dann nur
+    die Kandidaten der Punkt-Zelle; die exakte Narrow-Phase (rotierter Box-Test) bleibt beim Aufrufer.
+
+    Korrektheit (keine False Negatives): liegt ein Punkt innerhalb ``Box + margin`` mit
+    ``margin ≤ pad``, dann überlappt die gepolsterte AABB die Punkt-Zelle → die Box ist dort
+    registriert. Ein zu großes ``pad`` liefert nur mehr Kandidaten, nie zu wenige.
+    """
+
+    __slots__ = ("cell", "_grid", "_order")
+
+    def __init__(self, boxes: List[BoxObstacle],
+                 cell: float = GRID_CELL, pad: float = GRID_PAD) -> None:
+        self.cell = cell
+        self._grid: Dict[Tuple[int, int], List[BoxObstacle]] = {}
+        # Eingabe-Reihenfolge (id→Index): stellt in query_segment die ursprüngliche Iterations-
+        # Reihenfolge wieder her (die reaktive Kollision ist bei Mehrfach-Treffern reihenfolge-
+        # abhängig). Bucket-Listen sind bereits in Eingabe-Reihenfolge (query_point braucht kein Sort).
+        self._order: Dict[int, int] = {id(b): i for i, b in enumerate(boxes)}
+        for box in boxes:
+            ext_x = box.half_w * abs(box.cos_a) + box.half_d * abs(box.sin_a) + pad
+            ext_y = box.half_w * abs(box.sin_a) + box.half_d * abs(box.cos_a) + pad
+            gx0 = int(math.floor((box.cx - ext_x) / cell))
+            gx1 = int(math.floor((box.cx + ext_x) / cell))
+            gy0 = int(math.floor((box.cy - ext_y) / cell))
+            gy1 = int(math.floor((box.cy + ext_y) / cell))
+            for gx in range(gx0, gx1 + 1):
+                for gy in range(gy0, gy1 + 1):
+                    self._grid.setdefault((gx, gy), []).append(box)
+
+    def query_point(self, x: float, y: float) -> List[BoxObstacle]:
+        """Kandidaten-Boxen der Zelle, die (x, y) enthält (leer wenn keine)."""
+        return self._grid.get((int(math.floor(x / self.cell)),
+                               int(math.floor(y / self.cell))), _EMPTY_BOXES)
+
+    def query_segment(self, x1: float, y1: float,
+                      x2: float, y2: float) -> List[BoxObstacle]:
+        """Kandidaten-Boxen über alle Zellen im Bounding-Rechteck der Strecke (x1,y1)-(x2,y2),
+        jede Box höchstens einmal. Für die reaktive Wall-Slide-Kollision: der prädizierte Punkt
+        (px+vx·dt, py+vy·dt) wandert innerhalb der Schleife (Geschwindigkeit wird geklemmt) — die
+        Strecke ist sub-zellig, daher genügt das Zell-AABB (kein DDA), und die Dedup bewahrt die
+        Ein-Box-pro-Iteration-Semantik der Originalschleife."""
+        c = self.cell
+        gx0 = int(math.floor(min(x1, x2) / c)); gx1 = int(math.floor(max(x1, x2) / c))
+        gy0 = int(math.floor(min(y1, y2) / c)); gy1 = int(math.floor(max(y1, y2) / c))
+        if gx0 == gx1 and gy0 == gy1:
+            return self._grid.get((gx0, gy0), _EMPTY_BOXES)
+        seen: set = set()
+        out: List[BoxObstacle] = []
+        for gx in range(gx0, gx1 + 1):
+            for gy in range(gy0, gy1 + 1):
+                for box in self._grid.get((gx, gy), ()):
+                    if id(box) not in seen:
+                        seen.add(id(box))
+                        out.append(box)
+        out.sort(key=lambda b: self._order[id(b)])  # Eingabe-Reihenfolge wiederherstellen
+        return out
+
+
+_EMPTY_BOXES: List[BoxObstacle] = []
+
+
+# ---------------------------------------------------------------------------
 # NavGraph
 # ---------------------------------------------------------------------------
 
@@ -152,6 +229,10 @@ class NavGraph:
         for _t in self._teleporters:
             self._obs.extend(teleporter_solid_boxes(_t))
         self._los_obs    = [b for b in world_map.boxes if not b.shoot_through]
+        # Broad-Phase-Grid über die soliden Boxen (statisch) für die 60-Hz-Punkt-Queries:
+        # get_floor_z sowie die reaktive Physik (Wall-Slide/Decken-Kollision, Box-Innen-Check in
+        # bzbot_ai, die denselben Kandidatensatz world_map.boxes+tele_solid − drive_through nutzen).
+        self._solid_grid = ObstacleGrid(self._obs)
         # NAV-19: Hindernisse nach Unterkante (bottom_z) gruppieren — meist nur wenige distinkte
         # Höhen. Erlaubt den Sprungbogen-Überhang-Check via geschlossener Kopf-Kreuzung pro Höhe
         # (kein Sampling) statt eines Scans über alle Boxen. Siehe _arc_clears_overhangs.
@@ -232,8 +313,8 @@ class NavGraph:
                 continue
             # Begehbare Fläche auf dem Dach = AABB des Gebäudes − TANK_MARGIN auf jeder Seite
             # (AABB weil Dach-Layer achsenparallel ausgerichtet ist)
-            cos_a = abs(math.cos(obs.angle))
-            sin_a = abs(math.sin(obs.angle))
+            cos_a = abs(obs.cos_a)
+            sin_a = abs(obs.sin_a)
             ext_x = obs.half_w * cos_a + obs.half_d * sin_a
             ext_y = obs.half_w * sin_a + obs.half_d * cos_a
             w = ext_x - TANK_MARGIN
@@ -279,8 +360,8 @@ class NavGraph:
             return
 
         for obs in thin_obs:
-            cos_a = abs(math.cos(obs.angle))
-            sin_a = abs(math.sin(obs.angle))
+            cos_a = abs(obs.cos_a)
+            sin_a = abs(obs.sin_a)
             ext_x = obs.half_w * cos_a + obs.half_d * sin_a + CELL_SIZE * 3
             ext_y = obs.half_w * sin_a + obs.half_d * cos_a + CELL_SIZE * 3
 
@@ -326,15 +407,17 @@ class NavGraph:
         darf bis ~Tank-Halbbreite über die Kante hinaus). Default 0.0 = exakter Mittelpunkt-Test.
         """
         floor_z = 0.0
-        for obs in self._obs:
-            roof_z = obs.bottom_z + obs.height
-            # Dächer die weit über dem Bot hängen überspringen (2u Puffer wegen Landung)
-            if roof_z > z + 2.0:
+        # Broad-Phase: nur Boxen der Punkt-Zelle statt linear über alle _obs (Ergebnis identisch,
+        # das Grid ist eine korrekt gepolsterte Übermenge — s. ObstacleGrid).
+        for obs in self._solid_grid.query_point(x, y):
+            roof_z = obs.roof_z
+            # Dächer die weit über dem Bot hängen überspringen (2u Puffer wegen Landung); tiefere
+            # Dächer als das bisherige Maximum können es ohnehin nicht heben → früher Cut.
+            if roof_z > z + 2.0 or roof_z <= floor_z:
                 continue
             # Nur wenn der Bot wirklich über diesem Gebäude steht (Box-Test; Pixel-on via overhang)
             if _point_in_rotated_box(obs, x, y, margin=overhang):
-                if roof_z > floor_z:
-                    floor_z = roof_z
+                floor_z = roof_z
         return floor_z
 
     def find_layer_at(self, x: float, y: float, z: float) -> int:
@@ -923,9 +1006,9 @@ class NavGraph:
             for obs in group:
                 if id(obs) in skip:
                     continue
-                cos_a = math.cos(-obs.angle); sin_a = math.sin(-obs.angle)
-                lx = (x - obs.cx) * cos_a - (y - obs.cy) * sin_a
-                ly = (x - obs.cx) * sin_a + (y - obs.cy) * cos_a
+                cos_a = obs.cos_a; sin_a = obs.sin_a
+                lx = (x - obs.cx) * cos_a + (y - obs.cy) * sin_a
+                ly = -(x - obs.cx) * sin_a + (y - obs.cy) * cos_a
                 if abs(lx) < obs.half_w + TANK_HALF_WIDTH and abs(ly) < obs.half_d + TANK_HALF_WIDTH:
                     return False
         return True
@@ -1047,7 +1130,7 @@ def _entry_point(dst: FloorLayer, wx: float, wy: float) -> Tuple[float, float, f
     Sprung-Landewegpunkt) genutzt — eine Quelle der Wahrheit."""
     obs = dst.source_obstacle
     if obs is not None and abs(obs.angle) > 0.01:
-        ca = math.cos(obs.angle); sa = math.sin(obs.angle)
+        ca = obs.cos_a; sa = obs.sin_a
         lx = (wx - dst.cx) * ca + (wy - dst.cy) * sa
         ly = -(wx - dst.cx) * sa + (wy - dst.cy) * ca
         aabb_dist = max(0.0, abs(lx) - obs.half_w, abs(ly) - obs.half_d)
@@ -1065,8 +1148,8 @@ def _clip_to_footprint(layer: FloorLayer, obs: BoxObstacle,
     """Markiert Zellen außerhalb des tatsächlichen rotierten Obstacle-Footprints als
     non-walkable. Notwendig für diagonale Obstacles, deren AABB deutlich größer als der
     physische Footprint ist (z.B. hw=4, hd=550, angle=45° → AABB ≈ 391×391u)."""
-    cos_r = math.cos(-obs.angle)
-    sin_r = math.sin(-obs.angle)
+    cos_a = obs.cos_a
+    sin_a = obs.sin_a
     hw_inner = obs.half_w - margin
     hd_inner = obs.half_d - margin
     for iy in range(layer.n_y):
@@ -1076,8 +1159,8 @@ def _clip_to_footprint(layer: FloorLayer, obs: BoxObstacle,
             wx, wy = layer.cell_to_world(ix, iy)
             dx = wx - obs.cx
             dy = wy - obs.cy
-            lx = dx * cos_r - dy * sin_r
-            ly = dx * sin_r + dy * cos_r
+            lx = dx * cos_a + dy * sin_a
+            ly = -dx * sin_a + dy * cos_a
             if abs(lx) > hw_inner or abs(ly) > hd_inner:
                 layer.walkable[iy][ix] = False
 
@@ -1086,25 +1169,22 @@ def _mark_blocked(layer: FloorLayer, obs: BoxObstacle,
                   margin: float) -> None:
     """Markiert Zellen in layer als blockiert durch obs (exakter Rotated-Box-Test + margin)."""
     # AABB des rotierten Obstacles: äußere Hülle für die Schleifengrenzen
-    cos_a = abs(math.cos(obs.angle))
-    sin_a = abs(math.sin(obs.angle))
-    ext_x = obs.half_w * cos_a + obs.half_d * sin_a + margin
-    ext_y = obs.half_w * sin_a + obs.half_d * cos_a + margin
+    cos_a = obs.cos_a
+    sin_a = obs.sin_a
+    ext_x = obs.half_w * abs(cos_a) + obs.half_d * abs(sin_a) + margin
+    ext_y = obs.half_w * abs(sin_a) + obs.half_d * abs(cos_a) + margin
     ix0, iy0 = layer.world_to_cell(obs.cx - ext_x, obs.cy - ext_y)
     ix1, iy1 = layer.world_to_cell(obs.cx + ext_x, obs.cy + ext_y)
     ix0, iy0 = max(0, ix0), max(0, iy0)
     ix1, iy1 = min(layer.n_x - 1, ix1), min(layer.n_y - 1, iy1)
-    # Rotationsmatrix einmal vorausberechnen (gilt für alle Zellen dieses Obstacles)
-    cos_r = math.cos(-obs.angle)
-    sin_r = math.sin(-obs.angle)
     for row in range(iy0, iy1 + 1):
         for col in range(ix0, ix1 + 1):
             # Zell-Mitte in lokale Obstacle-Koordinaten drehen und prüfen
             wx, wy = layer.cell_to_world(col, row)
             dx = wx - obs.cx
             dy = wy - obs.cy
-            lx = dx * cos_r - dy * sin_r
-            ly = dx * sin_r + dy * cos_r
+            lx = dx * cos_a + dy * sin_a
+            ly = -dx * sin_a + dy * cos_a
             # Nur blockieren wenn die Zell-Mitte wirklich im Obstacle + margin liegt
             if abs(lx) <= obs.half_w + margin and abs(ly) <= obs.half_d + margin:
                 layer.walkable[row][col] = False
@@ -1114,10 +1194,10 @@ def _point_in_rotated_box(obs: BoxObstacle, x: float, y: float, margin: float = 
     """Punkt-in-rotierter-Box-Test (für get_floor_z). margin weitet die Box (Pixel-on-Auflage)."""
     dx = x - obs.cx
     dy = y - obs.cy
-    cos_a = math.cos(-obs.angle)
-    sin_a = math.sin(-obs.angle)
-    lx =  dx * cos_a - dy * sin_a
-    ly =  dx * sin_a + dy * cos_a
+    cos_a = obs.cos_a
+    sin_a = obs.sin_a
+    lx =  dx * cos_a + dy * sin_a
+    ly = -dx * sin_a + dy * cos_a
     return (abs(lx) <= obs.half_w + 0.5 + margin
             and abs(ly) <= obs.half_d + 0.5 + margin)
 
@@ -1161,12 +1241,12 @@ def _segment_crosses_thin_obs(
 ) -> bool:
     """Slab-Test: kreuzt Segment (x1,y1)-(x2,y2) den 2D-Footprint von obs?"""
     ddx, ddy = x2 - x1, y2 - y1
-    cos_r = math.cos(-obs.angle)
-    sin_r = math.sin(-obs.angle)
-    ox = (x1 - obs.cx) * cos_r - (y1 - obs.cy) * sin_r
-    oy = (x1 - obs.cx) * sin_r + (y1 - obs.cy) * cos_r
-    dx = ddx * cos_r - ddy * sin_r
-    dy = ddx * sin_r + ddy * cos_r
+    cos_a = obs.cos_a
+    sin_a = obs.sin_a
+    ox = (x1 - obs.cx) * cos_a + (y1 - obs.cy) * sin_a
+    oy = -(x1 - obs.cx) * sin_a + (y1 - obs.cy) * cos_a
+    dx = ddx * cos_a + ddy * sin_a
+    dy = -ddx * sin_a + ddy * cos_a
     t_min, t_max = 0.0, 1.0
     for o, d, h in ((ox, dx, obs.half_w), (oy, dy, obs.half_d)):
         if abs(d) < 1e-9:

@@ -2251,8 +2251,8 @@ def _dump_world_map(wm, path: str, nav=None) -> None:
         return [["." for _ in range(n)] for _ in range(n)]
 
     def mark_box_aabb(grid, b, char):
-        cos_a = abs(_math.cos(b.angle))
-        sin_a = abs(_math.sin(b.angle))
+        cos_a = abs(b.cos_a)
+        sin_a = abs(b.sin_a)
         ext_x = b.half_w * cos_a + b.half_d * sin_a
         ext_y = b.half_w * sin_a + b.half_d * cos_a
         x0, y0 = world_to_gi(b.cx - ext_x, b.cy - ext_y)

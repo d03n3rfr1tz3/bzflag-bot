@@ -67,7 +67,7 @@ class Config:
         self.check_interval   = 5.0    # Sekunden zwischen Überprüfungen
         self.reconnect_delay  = 10.0   # Sekunden vor Reconnect-Versuch
         self.log_level        = "INFO"
-        self.bot_lifetime_min = 1800.0 # Minimale Bot-Lebensdauer in Sekunden (15 min)
+        self.bot_lifetime_min = 900.0  # Minimale Bot-Lebensdauer in Sekunden (15 min)
         self.bot_lifetime_max = 7200.0 # Maximale Bot-Lebensdauer in Sekunden (2 h)
         # Reject-/Crash-Backoff: ein früh beendeter Bot-Slot wartet zunehmend, statt
         # im Sekundentakt neu zu starten (verhindert Hot-Restart-Loop & Log-Spam).

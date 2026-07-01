@@ -622,10 +622,10 @@ class BZBotAI:
                 continue
             dx = px - obs.cx
             dy = py - obs.cy
-            cos_a = math.cos(-obs.angle)
-            sin_a = math.sin(-obs.angle)
-            lx = dx * cos_a - dy * sin_a
-            ly = dx * sin_a + dy * cos_a
+            cos_a = obs.cos_a
+            sin_a = obs.sin_a
+            lx = dx * cos_a + dy * sin_a
+            ly = -dx * sin_a + dy * cos_a
             if abs(lx) <= obs.half_w and abs(ly) <= obs.half_d:
                 return True
         return False
@@ -1837,18 +1837,23 @@ class BZBotAI:
         # P3-NAV-02: Teleporter-Posts + Crossbar als solide Boxen mitprüfen (Decken-Kollision von
         # unten gegen den Crossbar, Wall-Slide an den Posts). Das Querungsfeld bleibt frei.
         _solid = world_map.boxes + getattr(self, '_tele_solid_boxes', [])
+        # Broad-Phase: bei vorhandenem NavGraph nur die Boxen der Bot-Zelle statt linear über alle.
+        # nav._obs = non-drive_through world_map.boxes + dieselben Teleporter-Solidboxen → deckungs-
+        # gleicher Kandidatensatz wie _solid nach dem drive_through-Skip. Ohne nav: linearer Fallback.
+        _grid = getattr(getattr(self, '_nav_graph', None), '_solid_grid', None)
         # ── Decken-Kollision: Bot-Kopf stößt von unten an Plattform-Boden ──────
         bot_top = pz + self._tank_height
-        for obs in _solid:
+        ceil_cands = _grid.query_point(px, py) if _grid is not None else _solid
+        for obs in ceil_cands:
             if obs.drive_through:
                 continue
             # pz < obs.bottom_z: Bot ist unterhalb — nicht bereits darin (OO-Flagge etc.)
             if not (pz < obs.bottom_z <= bot_top):
                 continue
-            cos_a = math.cos(-obs.angle); sin_a = math.sin(-obs.angle)
+            cos_a = obs.cos_a; sin_a = obs.sin_a
             dx, dy = px - obs.cx, py - obs.cy
-            lx = dx * cos_a - dy * sin_a
-            ly = dx * sin_a + dy * cos_a
+            lx = dx * cos_a + dy * sin_a
+            ly = -dx * sin_a + dy * cos_a
             hw = obs.half_w + self._effective_half_width()
             hd = obs.half_d + self._effective_half_width()
             if abs(lx) < hw and abs(ly) < hd:
@@ -1859,7 +1864,12 @@ class BZBotAI:
                 bot_top = pz + self._tank_height
                 break
         # ── XY-Wall-Sliding ───────────────────────────────────────────────────
-        for obs in _solid:
+        # Broad-Phase über die Strecke Bot→prädizierter Punkt: der prädizierte Punkt (nx,ny) wandert
+        # innerhalb der Schleife (vx/vy werden geklemmt), deshalb query_segment über die (sub-zellige)
+        # Anfangsstrecke — deckt alle geprüften Zwischenpunkte ab, jede Box genau einmal.
+        slide_cands = (_grid.query_segment(px, py, px + vx * dt, py + vy * dt)
+                       if _grid is not None else _solid)
+        for obs in slide_cands:
             if obs.drive_through:
                 continue
             tank_top = pz + self._tank_height
@@ -1867,17 +1877,17 @@ class BZBotAI:
                 continue
             nx = px + vx * dt
             ny = py + vy * dt
-            cos_a = math.cos(-obs.angle)
-            sin_a = math.sin(-obs.angle)
+            cos_a = obs.cos_a
+            sin_a = obs.sin_a
             dx, dy = nx - obs.cx, ny - obs.cy
-            lnx = dx * cos_a - dy * sin_a
-            lny = dx * sin_a + dy * cos_a
+            lnx = dx * cos_a + dy * sin_a
+            lny = -dx * sin_a + dy * cos_a
             hw = obs.half_w + self._effective_half_width()
             hd = obs.half_d + self._effective_half_width()
             if abs(lnx) >= hw or abs(lny) >= hd:
                 continue
-            lvx = vx * cos_a - vy * sin_a
-            lvy = vx * sin_a + vy * cos_a
+            lvx = vx * cos_a + vy * sin_a
+            lvy = -vx * sin_a + vy * cos_a
             overlap_x = hw - abs(lnx)
             overlap_y = hd - abs(lny)
             # Kleineres Overlap = Trennungsachse: Geschwindigkeit entlang dieser Achse auf 0
@@ -1888,10 +1898,9 @@ class BZBotAI:
             else:
                 if lny * lvy < 0:
                     lvy = 0.0
-            cos_b = math.cos(obs.angle)
-            sin_b = math.sin(obs.angle)
-            vx = lvx * cos_b - lvy * sin_b
-            vy = lvx * sin_b + lvy * cos_b
+            # Rück-Rotation local→world (cos_a/sin_a = cos/sin(angle))
+            vx = lvx * cos_a - lvy * sin_a
+            vy = lvx * sin_a + lvy * cos_a
         self.vel[0] = vx
         self.vel[1] = vy
 
@@ -2903,7 +2912,7 @@ class BZBotAI:
             return True
         dx = ex - ox; dy = ey - oy; dz = ez - oz
         for box in nav._los_obs:
-            cos_a = math.cos(box.angle); sin_a = math.sin(box.angle)
+            cos_a = box.cos_a; sin_a = box.sin_a
             rx = ox - box.cx; ry = oy - box.cy
             lox =  rx * cos_a + ry * sin_a
             loy = -rx * sin_a + ry * cos_a
@@ -2938,9 +2947,9 @@ class BZBotAI:
             return None
         ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + TANK_HEIGHT * 0.5
         dx = math.cos(az) * max_dist; dy = math.sin(az) * max_dist
-        best_t = 2.0; best_axis = -1; best_angle = 0.0
+        best_t = 2.0; best_axis = -1; best_box = None
         for box in nav._los_obs:
-            cos_a = math.cos(box.angle); sin_a = math.sin(box.angle)
+            cos_a = box.cos_a; sin_a = box.sin_a
             rx = ox - box.cx; ry = oy - box.cy
             lox =  rx * cos_a + ry * sin_a
             loy = -rx * sin_a + ry * cos_a
@@ -2963,12 +2972,12 @@ class BZBotAI:
                     t_max = min(t_max, max(t1, t2))
             if not hit or t_min > t_max or t_min >= best_t or t_min_axis not in (0, 1):
                 continue   # kein Treffer / weiter weg / Eintritt über Z-Ebene (Dach/Boden)
-            best_t = t_min; best_axis = t_min_axis; best_angle = box.angle
-        if best_axis < 0:
+            best_t = t_min; best_axis = t_min_axis; best_box = box
+        if best_axis < 0 or best_box is None:
             return None
         # Einfallswinkel zur getroffenen Fläche: Normalkomponente der (normierten) Fahrtrichtung
         # entlang der Eintritts-Achse. dz=0 → |Richtung| == max_dist. Steil ⇔ Komponente > sin(60°).
-        cos_a = math.cos(best_angle); sin_a = math.sin(best_angle)
+        cos_a = best_box.cos_a; sin_a = best_box.sin_a
         ndx = ( dx * cos_a + dy * sin_a) / max_dist
         ndy = (-dx * sin_a + dy * cos_a) / max_dist
         normal_comp = abs(ndx) if best_axis == 0 else abs(ndy)

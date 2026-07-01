@@ -30,6 +30,19 @@ class BoxObstacle:
     z_flip: bool    = False    # True = invertierte Pyramide (_FLIP_Z 0x04)
     ricochet: bool  = False    # True = Schüsse prallen ab (_RICOCHET 0x08)
 
+    # Vorberechnete, abgeleitete Werte (Hindernisse sind nach dem Welt-Laden STATISCH — angle,
+    # bottom_z und height werden nie mutiert). Sparen die per-Aufruf-Trigonometrie in den heißen
+    # Kollisions-/Boden-/LoS-Schleifen (get_floor_z, _apply_obstacle_bounds, _segment_clear, …).
+    # World→Local-Konvention überall: lx = dx*cos_a + dy*sin_a; ly = -dx*sin_a + dy*cos_a.
+    cos_a: float  = field(init=False, repr=False)  # cos(angle)
+    sin_a: float  = field(init=False, repr=False)  # sin(angle)
+    roof_z: float = field(init=False, repr=False)  # bottom_z + height (Oberkante)
+
+    def __post_init__(self) -> None:
+        self.cos_a  = math.cos(self.angle)
+        self.sin_a  = math.sin(self.angle)
+        self.roof_z = self.bottom_z + self.height
+
 
 @dataclass
 class TeleporterObstacle:
