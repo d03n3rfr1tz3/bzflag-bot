@@ -2911,7 +2911,11 @@ class BZBotAI:
         if nav is None:
             return True
         dx = ex - ox; dy = ey - oy; dz = ez - oz
-        for box in nav._los_obs:
+        # Broad-Phase: nur Boxen entlang des Strahls (DDA) statt linear über alle _los_obs.
+        # Fallback (nav ohne _los_grid, z.B. Test-Stub) auf den linearen Scan.
+        _grid = getattr(nav, "_los_grid", None)
+        _boxes = _grid.query_ray(ox, oy, ex, ey) if _grid is not None else nav._los_obs
+        for box in _boxes:
             cos_a = box.cos_a; sin_a = box.sin_a
             rx = ox - box.cx; ry = oy - box.cy
             lox =  rx * cos_a + ry * sin_a
@@ -2948,7 +2952,10 @@ class BZBotAI:
         ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + TANK_HEIGHT * 0.5
         dx = math.cos(az) * max_dist; dy = math.sin(az) * max_dist
         best_t = 2.0; best_axis = -1; best_box = None
-        for box in nav._los_obs:
+        # Broad-Phase: nur Boxen entlang des Strahls (DDA); Fallback auf linearen Scan ohne _los_grid.
+        _grid = getattr(nav, "_los_grid", None)
+        _boxes = _grid.query_ray(ox, oy, ox + dx, oy + dy) if _grid is not None else nav._los_obs
+        for box in _boxes:
             cos_a = box.cos_a; sin_a = box.sin_a
             rx = ox - box.cx; ry = oy - box.cy
             lox =  rx * cos_a + ry * sin_a

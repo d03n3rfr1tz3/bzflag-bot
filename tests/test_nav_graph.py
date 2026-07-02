@@ -247,6 +247,84 @@ class TestGetFloorZGridEquivalence:
 
 
 # ---------------------------------------------------------------------------
+# ObstacleGrid.query_ray: LoS-Broad-Phase-Äquivalenz zum linearen Slab-Test
+# ---------------------------------------------------------------------------
+
+def _segment_blocked_ref(boxes, ox, oy, oz, ex, ey, ez):
+    """Referenz: 3D-Slab-Test über eine gegebene Box-Liste (= _segment_clear-Narrow-Phase, invertiert:
+    True wenn IRGENDEINE Box das Segment schneidet)."""
+    dx = ex - ox; dy = ey - oy; dz = ez - oz
+    for box in boxes:
+        cos_a = box.cos_a; sin_a = box.sin_a
+        rx = ox - box.cx; ry = oy - box.cy
+        lox =  rx * cos_a + ry * sin_a
+        loy = -rx * sin_a + ry * cos_a
+        ldx =  dx * cos_a + dy * sin_a
+        ldy = -dx * sin_a + dy * cos_a
+        t_min = 0.0; t_max = 1.0; hit = True
+        for o_v, d_v, lo_v, hi_v in (
+            (lox, ldx, -box.half_w, box.half_w),
+            (loy, ldy, -box.half_d, box.half_d),
+            (oz,  dz,   box.bottom_z, box.bottom_z + box.height),
+        ):
+            if abs(d_v) < 1e-9:
+                if o_v < lo_v or o_v > hi_v:
+                    hit = False; break
+            else:
+                t1 = (lo_v - o_v) / d_v; t2 = (hi_v - o_v) / d_v
+                t_min = max(t_min, min(t1, t2))
+                t_max = min(t_max, max(t1, t2))
+        if hit and t_min <= t_max:
+            return True
+    return False
+
+
+class TestLosRayGridEquivalence:
+    """query_ray ist nur eine gepolsterte Übermenge entlang des Strahls → der Slab-Test über die
+    Grid-Kandidaten muss dasselbe Blockiert/Frei liefern wie über ALLE _los_obs, auch bei rotierten
+    Boxen und langen Diagonal-Strahlen."""
+
+    def _nav(self):
+        boxes = [
+            _make_box(0.0, 0.0, 0.0, 8.0, 8.0, 10.0),
+            _make_box(30.0, 10.0, 0.0, 5.0, 5.0, 6.0),
+            _make_box(-25.0, -30.0, 0.0, 10.0, 3.0, 12.0, angle=math.radians(40.0)),
+            _make_box(50.0, -20.0, 0.0, 4.0, 25.0, 10.0, angle=math.radians(20.0)),
+            _make_box(-60.0, 40.0, 5.0, 6.0, 6.0, 8.0),   # schwebend (bottom_z>0)
+            _make_box(70.0, 70.0, 0.0, 5.0, 5.0, 15.0),
+        ]
+        return NavGraph(_make_world(boxes=boxes, world_half=120.0))
+
+    def test_segment_clear_matches_bruteforce_random(self):
+        import random
+        rnd = random.Random(20260701)
+        ng = self._nav()
+        grid = ng._los_grid
+        for _ in range(4000):
+            ox = rnd.uniform(-120, 120); oy = rnd.uniform(-120, 120); oz = rnd.uniform(0.0, 14.0)
+            ex = rnd.uniform(-120, 120); ey = rnd.uniform(-120, 120); ez = rnd.uniform(0.0, 14.0)
+            cands = grid.query_ray(ox, oy, ex, ey)
+            got = _segment_blocked_ref(cands, ox, oy, oz, ex, ey, ez)
+            want = _segment_blocked_ref(ng._los_obs, ox, oy, oz, ex, ey, ez)
+            assert got == want, (ox, oy, oz, ex, ey, ez, got, want)
+
+    def test_query_ray_degenerate(self):
+        """Achsenparallele, Null-Längen- und Einzelzell-Strahlen dürfen keinen Kandidaten verschlucken."""
+        ng = self._nav()
+        grid = ng._los_grid
+        # Null-Länge in einer Box → deren Zelle liefert die Box
+        assert any(b.cx == 0.0 for b in grid.query_ray(0.0, 0.0, 0.0, 0.0))
+        # exakt horizontal quer durch die Mittel-Box
+        want = _segment_blocked_ref(ng._los_obs, -120.0, 0.0, 5.0, 120.0, 0.0, 5.0)
+        got = _segment_blocked_ref(grid.query_ray(-120.0, 0.0, 120.0, 0.0), -120.0, 0.0, 5.0, 120.0, 0.0, 5.0)
+        assert got == want is True
+        # exakt vertikal (in y)
+        w2 = _segment_blocked_ref(ng._los_obs, 30.0, -120.0, 3.0, 30.0, 120.0, 3.0)
+        g2 = _segment_blocked_ref(grid.query_ray(30.0, -120.0, 30.0, 120.0), 30.0, -120.0, 3.0, 30.0, 120.0, 3.0)
+        assert g2 == w2
+
+
+# ---------------------------------------------------------------------------
 # A*-Pfadsuche
 # ---------------------------------------------------------------------------
 
