@@ -558,6 +558,19 @@ class BZBotAI:
         v = self._effective_jump_velocity()
         return v * v / (2.0 * abs(self._effective_gravity()))
 
+    def _jump_launch_vz(self, cur_vz: float) -> float:
+        """Vertikale Velocity direkt nach einem Sprung — faithful zu LocalPlayer.cxx doJump()
+        (Z. 1449-1467). WG (Wings): additiv beim Fallen (bremst den Fall nur ab), behält höhere
+        Steig-Velocity bei; alle anderen (Normal/JM): fester Wert. Eine Quelle der Wahrheit für
+        jede Sprung-Velocity-Zuweisung."""
+        v = self._effective_jump_velocity()
+        if self.own_flag == "WG":
+            if cur_vz < 0.0:
+                return v + cur_vz
+            if cur_vz > v:
+                return cur_vz
+        return v
+
     def _next_slot_ready(self, now: float) -> bool:
         """True wenn der nächste Slot (Zyklus-Reihenfolge) seinen Reload abgewartet hat."""
         while len(self._slot_reload_at) < self._max_shots:
@@ -761,9 +774,10 @@ class BZBotAI:
         self.pos[0] = max(-half, min(half, self.pos[0]))
         self.pos[1] = max(-half, min(half, self.pos[1]))
 
-        # WG: zusätzlicher Luftsprung beim Abwärtsbogen
+        # WG: zusätzlicher Luftsprung beim Abwärtsbogen. Faithful zu doJump(): im Fallen wird die
+        # Velocity nur additiv angehoben (v + vz, hier vz<0), kein voller neuer Bogen.
         if self.own_flag == "WG" and self.vel[2] < 0 and self._can_jump(now):
-            self.vel[2] = self._jump_velocity
+            self.vel[2] = self._jump_launch_vz(self.vel[2])
             self._wings_jumps_used += 1
 
         if self._is_landed():
@@ -1100,7 +1114,7 @@ class BZBotAI:
                              self.callsign, self._jump_ang_vel, math.degrees(self.azimuth))
         self.vel[0] = math.cos(self.azimuth) * self._tank_speed
         self.vel[1] = math.sin(self.azimuth) * self._tank_speed
-        self.vel[2] = self._jump_velocity
+        self.vel[2] = self._jump_launch_vz(self.vel[2])
         self._jumping = True
         self._jump_pending = False
         self._transition_to(AIState.JUMPING)
@@ -1351,7 +1365,7 @@ class BZBotAI:
             if self._evade_cleared_shots.get(threat_key, 0.0) > now:
                 return False
             # Fix E3: DODGE_JUMP — defensiver Sprung, minimale Rotation
-            self.vel[2] = self._jump_velocity
+            self.vel[2] = self._jump_launch_vz(self.vel[2])
             self._jumping = True
             jump_time = 2.0 * self._effective_jump_velocity() / max(abs(self._effective_gravity()), 0.001)
             if self.own_flag != "WG":
@@ -2743,7 +2757,7 @@ class BZBotAI:
         self._nav_jump_target_z = wp[2]
         v0 = self._effective_jump_velocity()
         g_abs = abs(self._effective_gravity())
-        self.vel[2] = v0
+        self.vel[2] = self._jump_launch_vz(self.vel[2])
         dz       = wp[2] - self.pos[2]
         hdist    = math.hypot(wp[0] - self.pos[0], wp[1] - self.pos[1])
         az_to_wp = math.atan2(wp[1] - self.pos[1], wp[0] - self.pos[0])
@@ -3156,7 +3170,7 @@ class BZBotAI:
             min(abs(ang_diff / max(t_fire, 0.001)), self._tank_turn_rate), ang_diff)
 
         # Sprung starten
-        self.vel[2] = self._jump_velocity
+        self.vel[2] = self._jump_launch_vz(self.vel[2])
         self._jumping = True
         self._z_attack_mode = True
         # ABSOLUTE Feuer-Höhe (Tick vergleicht gegen pos[2]); self.pos[2] ist die Absprunghöhe

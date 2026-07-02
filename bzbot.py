@@ -893,8 +893,13 @@ class BZBot(BZBotAI):
         # Normalsprung. Der WG/LG-Vorteil wird zur Laufzeit über die _effective_jump_*()-Helfer
         # in den Combat-/Z-Attack-/NAV_JUMP-Checks genutzt (ein wings-bewusster A*-Graph bräuchte
         # Rebuild-on-Flag → bewusst out of scope).
-        max_jump_h = self._jump_velocity ** 2 / (2.0 * abs(self._gravity))
-        self._nav_graph = get_nav_graph(world_map, max_jump_h=max_jump_h)
+        # Sprungphysik aus den globalen Server-Variablen (_jumpVelocity/_gravity). set_physics()
+        # gleicht einen ggf. schon von einem anderen Bot mit Defaults gebauten Cache-Graph an
+        # (No-Op bei gleichen Werten) → korrekt auch wenn MsgSetVar erst nach dem Weltladen kam.
+        _v0 = self._jump_velocity
+        _g  = abs(self._gravity)
+        self._nav_graph = get_nav_graph(world_map, v0=_v0, g=_g)
+        self._nav_graph.set_physics(_v0, _g)
         self._nav_graph._debug_path = self._debug_log_path
         logger.info("[%s] NavGraph bereit (id=%d)", self.callsign, id(self._nav_graph))
         if self._debug_log_tele:
@@ -906,6 +911,14 @@ class BZBot(BZBotAI):
                 logger.debug("[%s] Tele:   Kante z=%.0f → z=%.0f (cost=%.1f)%s",
                              self.callsign, ez, xz, cost,
                              " [cross-floor]" if abs(xz - ez) > 1.5 else "")
+
+    def _sync_nav_physics(self) -> None:
+        """Reicht die globalen Server-Variablen _jumpVelocity/_gravity in den (ggf. schon gebauten)
+        NavGraph durch — für MsgSetVar, die erst nach dem Weltladen eintreffen. No-Op wenn noch kein
+        Graph existiert (dann greift der Build-Aufruf) oder Werte unverändert."""
+        nav = getattr(self, "_nav_graph", None)
+        if nav is not None:
+            nav.set_physics(self._jump_velocity, abs(self._gravity))
 
     def _is_bot_callsign(self, callsign: str) -> bool:
         """True, wenn der Callsign zu einem Bot gehört: eigener Name, in der vom
@@ -1736,6 +1749,7 @@ class BZBot(BZBotAI):
                         v = float(val)
                         if v > 0:
                             self._jump_velocity = v
+                            self._sync_nav_physics()
                             logger.debug("[%s] _jumpVelocity=%.1f", self.callsign, v)
                     except ValueError: pass
                 elif name == "_updateThrottleRate":
@@ -1751,6 +1765,7 @@ class BZBot(BZBotAI):
                         v = float(val)
                         if v != 0:
                             self._gravity = v
+                            self._sync_nav_physics()
                             logger.debug("[%s] _gravity=%.2f", self.callsign, v)
                     except ValueError: pass
                 elif name == "_wingsGravity":

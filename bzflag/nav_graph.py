@@ -76,11 +76,13 @@ _INF = float("inf")
 _nav_cache: Dict[str, "NavGraph"] = {}
 
 
-def get_nav_graph(world_map: WorldMap, max_jump_h: float = 18.4) -> "NavGraph":
-    """Gibt einen gecachten NavGraph für diese WorldMap zurück."""
+def get_nav_graph(world_map: WorldMap, max_jump_h: Optional[float] = None,
+                  v0: float = 19.0, g: float = 9.8) -> "NavGraph":
+    """Gibt einen gecachten NavGraph für diese WorldMap zurück. ``v0``/``g`` sind die (globalen)
+    Server-Variablen _jumpVelocity/_gravity; ``max_jump_h=None`` → aus v0/g abgeleitet."""
     key = world_map.world_hash or str(id(world_map))
     if key not in _nav_cache:
-        _nav_cache[key] = NavGraph(world_map, max_jump_h)
+        _nav_cache[key] = NavGraph(world_map, max_jump_h, v0, g)
     return _nav_cache[key]
 
 
@@ -266,7 +268,8 @@ _EMPTY_BOXES: List[BoxObstacle] = []
 class NavGraph:
     """3D-Navigationsgraph (Boden + Dächer + Sprung-/Fall-Kanten)."""
 
-    def __init__(self, world_map: WorldMap, max_jump_h: float = 18.4) -> None:
+    def __init__(self, world_map: WorldMap, max_jump_h: Optional[float] = None,
+                 v0: float = 19.0, g: float = 9.8) -> None:
         # Nur Hindernisse die tatsächlich blockieren (nicht "drive_through" wie Teleporter-Felder).
         # P3-NAV-02: Teleporter-Posts + Crossbar sind solide Fahr-/Sprung-Kollision → in _obs
         # (Layer-Block, get_floor_z, _undersides), aber NICHT in _los_obs (Schuss-/LoS-Logik
@@ -290,11 +293,13 @@ class NavGraph:
         for _o in self._obs:
             self._undersides.setdefault(round(_o.bottom_z, 1), []).append(_o)
         self._world_half = world_map.world_half
-        self._max_jump_h = max_jump_h
-        # BZFlag-Physik-Defaults (aus bzbot_ai.py)
-        self._v0         = 19.0   # Sprung-Anfangsgeschwindigkeit in u/s
-        self._g          = 9.8    # Schwerkraft in u/s²
-        self._tank_speed = 25.0   # horizontale Fahrgeschwindigkeit für Sprung-Kanten
+        # Sprungphysik aus den (globalen) Server-Variablen _jumpVelocity/_gravity. Das Höhen-Gate
+        # _max_jump_h und das Bogen-Timing (_v0/_g in _compute_vertical_edges) stammen aus DERSELBEN
+        # Quelle → konsistent. max_jump_h=None → aus v0/g ableiten. Späte MsgSetVar: set_physics().
+        self._v0         = v0     # Sprung-Anfangsgeschwindigkeit in u/s
+        self._g          = g      # Schwerkraft in u/s² (positiver Betrag)
+        self._max_jump_h = max_jump_h if max_jump_h is not None else v0 * v0 / (2.0 * g)
+        self._tank_speed = 25.0   # horizontale Fahrgeschwindigkeit für Sprung-Kanten (Basis; per-Flag-Boost via plan_path-Param)
         # gecooldownte Sprung-Ziele (NAV-14) werden NICHT mehr auf self gehalten, sondern pro
         # plan_path() als Parameter durch _astar/_vertical_neighbors gereicht → reentrant (P4-INF-01).
         self._debug_path: bool = False
@@ -789,6 +794,20 @@ class NavGraph:
         konstant); nur für Tests, die nachträglich ``_jump_up_cands``/``_fall_cands`` mutieren (diese
         stecken nicht im Cache-Key)."""
         self._vn_cache.clear()
+
+    def set_physics(self, v0: float, g: float) -> None:
+        """Aktualisiert die Sprungphysik (globale Server-Variablen _jumpVelocity/_gravity), falls ein
+        ``MsgSetVar`` erst NACH dem Graph-Bau eintrifft (Reihenfolge in BZFlag 2.4 nicht garantiert,
+        vgl. ``invalidate_nav_cache``). No-Op bei unveränderten Werten → über den geteilten Cache
+        idempotent. Baut Kandidaten (``_max_jump_h``-abhängig) neu und leert den Sprungkanten-Cache.
+        Nur zur Join-Zeit gedacht (kein paralleles Async-Planning aktiv)."""
+        if v0 == self._v0 and g == self._g:
+            return
+        self._v0 = v0
+        self._g = g
+        self._max_jump_h = v0 * v0 / (2.0 * g)
+        self._build_vertical_adjacency()
+        self._reset_vertical_cache()
 
     def _compute_vertical_edges(
         self, lid: int, ix: int, iy: int, wx: float, wy: float, layer: FloorLayer,

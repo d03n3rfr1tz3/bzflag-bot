@@ -11,6 +11,7 @@ import collections
 import math
 import time
 import pytest
+from unittest.mock import patch
 from conftest import make_player
 
 
@@ -1941,6 +1942,65 @@ class TestEffectiveJumpHelpers:
         bot._plan_path = lambda gx, gy, goal_z=None, **_kw: setattr(bot, "_nav_path", [])
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
         assert bot._unreach_target is None
+
+
+# ── _jump_launch_vz (doJump-Faithful: WG additiv beim Fallen) ────────────────────
+
+class TestJumpLaunchVz:
+    """_jump_launch_vz(): eine Quelle der Wahrheit für jede Sprung-Velocity-Zuweisung, faithful zu
+    LocalPlayer.cxx doJump() — WG additiv beim Fallen / höhere Steig-Velocity behalten, sonst fest."""
+
+    def test_normal_jump_is_fixed(self, bot):
+        from bzbot_ai import JUMP_VELOCITY
+        bot.own_flag = ""
+        # Normalsprung ignoriert die aktuelle Velocity → fester Wert (auch im Fallen).
+        assert bot._jump_launch_vz(0.0) == pytest.approx(JUMP_VELOCITY)
+        assert bot._jump_launch_vz(-10.0) == pytest.approx(JUMP_VELOCITY)
+        assert bot._jump_launch_vz(5.0) == pytest.approx(JUMP_VELOCITY)
+
+    def test_wings_falling_is_additive(self, bot):
+        from bzbot_ai import JUMP_VELOCITY
+        bot.own_flag = "WG"
+        # fallend (vz=-10) → nur abgebremst: 19 + (-10) = 9, KEIN voller neuer Bogen.
+        assert bot._jump_launch_vz(-10.0) == pytest.approx(JUMP_VELOCITY - 10.0)
+
+    def test_wings_near_apex_nearly_full(self, bot):
+        from bzbot_ai import JUMP_VELOCITY
+        bot.own_flag = "WG"
+        assert bot._jump_launch_vz(-0.5) == pytest.approx(JUMP_VELOCITY - 0.5)
+
+    def test_wings_rising_slower_gets_full(self, bot):
+        from bzbot_ai import JUMP_VELOCITY
+        bot.own_flag = "WG"
+        assert bot._jump_launch_vz(5.0) == pytest.approx(JUMP_VELOCITY)
+
+    def test_wings_rising_faster_is_kept(self, bot):
+        bot.own_flag = "WG"
+        # steigt schneller als der Sprung → höhere Velocity behalten (nicht auf 19 kappen).
+        assert bot._jump_launch_vz(25.0) == pytest.approx(25.0)
+
+    def test_wings_respects_server_override(self, bot):
+        bot.own_flag = "WG"
+        bot._wings_jump_velocity = 25.0
+        assert bot._jump_launch_vz(-10.0) == pytest.approx(15.0)  # 25 + (-10)
+
+    def test_tick_jumping_wg_airflap_additive(self, bot):
+        """Integration: WG-Luftsprung im Fallen setzt vel[2] additiv (kein voller neuer Bogen)."""
+        bot.own_flag = "WG"
+        bot._wings_jump_count = 2
+        bot._wings_jumps_used = 0
+        bot.pos = [0.0, 0.0, 50.0]
+        bot.vel = [0.0, 0.0, -10.0]
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 0.0
+        bot._jumping = True
+        with patch.object(bot, "_can_jump", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False), \
+             patch.object(bot, "_can_drive_through_obstacles", return_value=True):
+            bot._tick_jumping(0.01, now=1000.0)
+        # gravity-Schritt (-10 - 9.8·0.01) + Flap (19 + …) ≈ 8.9 — NICHT 19.
+        assert bot.vel[2] == pytest.approx(19.0 + (-10.0 - 9.8 * 0.01))
+        assert bot._wings_jumps_used == 1
 
 
 # ── _steep_wall_ahead (proaktive Wand-Vorausschau) ───────────────────────────

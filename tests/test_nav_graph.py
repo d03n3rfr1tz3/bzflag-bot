@@ -1856,3 +1856,56 @@ class TestNavHixThinWall:
                 f"Laufsteg ({l.cx:.0f},{l.cy:.0f}) komplett blockiert — "
                 f"THIN_WALL_MARGIN zu groß?"
             )
+
+
+# ---------------------------------------------------------------------------
+# Server-Variablen-Physik (_jumpVelocity/_gravity → _v0/_g/_max_jump_h)
+# ---------------------------------------------------------------------------
+
+class TestServerVarPhysics:
+    """v0/g fließen aus den globalen Server-Variablen in Höhen-Gate UND Bogen-Timing; set_physics()
+    reicht spät eintreffende MsgSetVar nach. Kein per-Flag-WG/LG-Verhalten (bewusst out of scope)."""
+
+    def test_max_jump_h_derived_from_v0_g(self):
+        wm = _make_world()
+        ng = NavGraph(wm, v0=25.0, g=9.8)
+        assert ng._v0 == pytest.approx(25.0)
+        assert ng._g == pytest.approx(9.8)
+        assert ng._max_jump_h == pytest.approx(25.0 ** 2 / (2.0 * 9.8))
+
+    def test_explicit_max_jump_h_backward_compatible(self):
+        # Bestehende Tests pinnen max_jump_h=18.4 mit Default-v0/g → bleibt erhalten.
+        wm = _make_world()
+        ng = NavGraph(wm, max_jump_h=18.4)
+        assert ng._max_jump_h == pytest.approx(18.4)
+        assert ng._v0 == pytest.approx(19.0)
+
+    def test_v0_extends_jump_up_candidates(self):
+        # Dach bei z=25 liegt zwischen max_jump_h(v0=19)≈18.4 und max_jump_h(v0=25)≈31.9.
+        box = _make_box(0.0, 0.0, 0.0, 15.0, 15.0, 25.0)
+        wm = _make_world(boxes=[box])
+        ng_low = NavGraph(wm)                     # v0=19 → Dach unerreichbar
+        ng_high = NavGraph(wm, v0=25.0, g=9.8)    # v0=25 → Dach erreichbar
+        roof_lid = next(i for i, l in enumerate(ng_low.layers) if abs(l.z - 25.0) < 0.5)
+        assert roof_lid not in ng_low._jump_up_cands.get(0, [])
+        assert roof_lid in ng_high._jump_up_cands.get(0, [])
+
+    def test_set_physics_updates_candidates_and_clears_cache(self):
+        box = _make_box(0.0, 0.0, 0.0, 15.0, 15.0, 25.0)
+        wm = _make_world(boxes=[box])
+        ng = NavGraph(wm)                          # v0=19
+        roof_lid = next(i for i, l in enumerate(ng.layers) if abs(l.z - 25.0) < 0.5)
+        assert roof_lid not in ng._jump_up_cands.get(0, [])
+        ng._vn_cache[(0, 0, 0, 25.0)] = ["dummy"]  # Cache befüllen
+        ng.set_physics(25.0, 9.8)
+        assert ng._v0 == pytest.approx(25.0)
+        assert ng._max_jump_h == pytest.approx(25.0 ** 2 / (2.0 * 9.8))
+        assert roof_lid in ng._jump_up_cands.get(0, [])   # Kandidaten neu gebaut
+        assert ng._vn_cache == {}                          # Sprungkanten-Cache geleert
+
+    def test_set_physics_noop_when_unchanged(self):
+        wm = _make_world()
+        ng = NavGraph(wm)                          # v0=19, g=9.8
+        ng._vn_cache[(0, 0, 0, 25.0)] = ["dummy"]
+        ng.set_physics(19.0, 9.8)                  # unverändert → No-Op
+        assert ng._vn_cache == {(0, 0, 0, 25.0): ["dummy"]}
