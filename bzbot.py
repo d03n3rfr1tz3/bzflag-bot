@@ -725,7 +725,10 @@ class BZBot(BZBotAI):
 
     def _check_steamroller(self, now: float) -> None:
         """Tötet Bot via GotRunOver wenn ein SR-Spieler in Kill-Radius-Nähe ist."""
-        for pid, info in self.players.items():
+        # list()-Snapshot: players wird im Recv-Thread mutiert (Join/Leave),
+        # diese Iteration läuft im Game-Loop → ohne Kopie droht
+        # "RuntimeError: dictionary changed size during iteration".
+        for pid, info in list(self.players.items()):
             if not info.alive: continue
             if info.flag != "SR" and self.own_flag != "BU": continue
             if now - info.last_seen > 1.0: continue
@@ -937,7 +940,7 @@ class BZBot(BZBotAI):
         for info in list(self.players.values()):
             if info.is_human and self._is_bot_callsign(info.callsign):
                 info.is_human = False
-        self.human_count = sum(1 for p in self.players.values() if p.is_human)
+        self.human_count = sum(1 for p in list(self.players.values()) if p.is_human)
         self._notify_count()
 
     def _emit_status(self) -> None:

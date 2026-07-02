@@ -463,7 +463,10 @@ class BZBotAI:
     def _genocide_multikill_possible(self) -> bool:
         """True wenn min. ein Feind-Team > 1 lebenden Spieler hat (G-Flagge lohnt sich)."""
         team_alive: dict = {}
-        for pid, info in self.players.items():
+        # list()-Snapshot: players/flags werden im Recv-Thread mutiert (Join/Leave,
+        # Flag-Updates), die KI läuft im Game-Loop-Thread → Iterationen über diese
+        # Dicts hier und im Rest der Datei immer über eine Kopie (Konvention s. DEVELOPER.md).
+        for pid, info in list(self.players.items()):
             if pid == self.player_id or not info.alive:
                 continue
             if not self._is_foe(info, True):
@@ -607,7 +610,7 @@ class BZBotAI:
         ist ein Mensch — egal ob aktiver Mitspieler oder reiner Zuschauer (Observer). Eigene
         Bots (Peer-Tanks, der Manager-Fallback-Observer) zählen NICHT als Anwesenheit; nur
         menschliche Anwesenheit lässt die Tanks aus dem IDLE-Modus wechseln."""
-        return any(not self._is_bot_callsign(p.callsign) for p in self.players.values())
+        return any(not self._is_bot_callsign(p.callsign) for p in list(self.players.values()))
 
     def _can_drive_through_obstacles(self) -> bool:
         """True wenn Bot mit aktueller Flagge durch Hindernisse fahren darf (OO u.a.)."""
@@ -2244,7 +2247,7 @@ class BZBotAI:
         best_id = None
         best_score = float("inf")
         _now = time.monotonic()
-        for pid, info in self.players.items():
+        for pid, info in list(self.players.items()):
             if pid == self.player_id or not info.alive:
                 continue
             if info.paused:                             # pausiert = unverwundbar → kein Neu-Lock
@@ -2299,7 +2302,7 @@ class BZBotAI:
         if dist2 < 1.0:
             return []
         result: list[tuple[float, float, float]] = []
-        for fi in self.flags.values():
+        for fi in list(self.flags.values()):
             if fi.status != 1:
                 continue
             fx, fy = fi.pos[0], fi.pos[1]
@@ -2326,7 +2329,7 @@ class BZBotAI:
             best_pos = None
             _dropped = getattr(self, '_dropped_neutrals', ())
             _recent  = getattr(self, '_recent_flag_targets', ())
-            for fi in self.flags.values():
+            for fi in list(self.flags.values()):
                 if fi.status != 1:
                     continue
                 if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
@@ -2382,7 +2385,7 @@ class BZBotAI:
             _recent = getattr(self, '_recent_flag_targets', ())
             best_d_good: float = float("inf")
             best_pos_good = None
-            for fi in self.flags.values():
+            for fi in list(self.flags.values()):
                 if fi.status != 1:
                     continue
                 d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
@@ -2415,7 +2418,7 @@ class BZBotAI:
                              self.callsign, IDENTIFY_RANGE, len(self.flags), len(_recent))
             best_d = float("inf")
             best_pos = None
-            for fi in self.flags.values():
+            for fi in list(self.flags.values()):
                 if fi.status != 1:
                     continue
                 if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
@@ -3185,7 +3188,7 @@ class BZBotAI:
         """Sendet MsgGrabFlag wenn Bot nah an einer onGround-Flag ist."""
         if self.own_flag or self.player_id is None: return
         if now - self._last_grab_attempt < 0.5: return
-        for fi in self.flags.values():
+        for fi in list(self.flags.values()):
             if fi.status != 1: continue
             if abs(fi.pos[2] - self.pos[2]) > 0.5: continue
             d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
