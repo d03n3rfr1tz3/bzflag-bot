@@ -469,3 +469,54 @@ class TestShieldFlagHit:
                   pos=(1.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))
         bot._resolve_incoming_shots(now, 0.1)
         assert bot.alive is False
+
+
+# ── Cleanup abgelaufener Schüsse (F3: _ricochet_paths-Leak) ──────────────
+
+class TestCleanupShots:
+    """_cleanup_shots muss abgelaufene Schüsse aus BEIDEN Dicts entfernen.
+
+    _resolve_incoming_shots räumt nur solange self.alive — läuft der Schuss
+    während Tod/Respawn ab, ist _cleanup_shots die einzige Aufräumstelle.
+    Ohne den _ricochet_paths-Pop wachsen Speicher und
+    _find_incoming_shot-Scan mit der Uptime (Server-CPU-Degradation).
+    """
+
+    def test_expired_shot_removed_from_both_dicts(self, bot):
+        now = time.monotonic()
+        s = make_shot(bot, shooter_id=2, shot_id=7,
+                      pos=(200.0, 0.0, 1.0), vel=(-100.0, 0.0, 0.0),
+                      lifetime=3.5, fire_time=now - 10.0)
+        key = (2, 7)
+        bot._ricochet_paths[key] = [((200.0, 0.0, 1.0), (0.0, 0.0, 1.0),
+                                     s.fire_time, s.fire_time + 2.0)]
+        assert s.is_expired(now)
+        bot._cleanup_shots(now)
+        assert key not in bot._shots
+        assert key not in bot._ricochet_paths
+
+    def test_active_shot_untouched(self, bot):
+        now = time.monotonic()
+        make_shot(bot, shooter_id=2, shot_id=8,
+                  pos=(200.0, 0.0, 1.0), vel=(-100.0, 0.0, 0.0),
+                  lifetime=3.5, fire_time=now)
+        key = (2, 8)
+        bot._ricochet_paths[key] = [((200.0, 0.0, 1.0), (0.0, 0.0, 1.0),
+                                     now, now + 2.0)]
+        bot._cleanup_shots(now)
+        assert key in bot._shots
+        assert key in bot._ricochet_paths
+
+    def test_cleanup_while_dead(self, bot):
+        """Kernszenario des Leaks: Bot ist tot, Schuss läuft ab."""
+        bot.alive = False
+        now = time.monotonic()
+        make_shot(bot, shooter_id=3, shot_id=9,
+                  pos=(200.0, 0.0, 1.0), vel=(-100.0, 0.0, 0.0),
+                  lifetime=3.5, fire_time=now - 10.0)
+        key = (3, 9)
+        bot._ricochet_paths[key] = [((200.0, 0.0, 1.0), (0.0, 0.0, 1.0),
+                                     now - 10.0, now - 8.0)]
+        bot._cleanup_shots(now)
+        assert key not in bot._shots
+        assert key not in bot._ricochet_paths

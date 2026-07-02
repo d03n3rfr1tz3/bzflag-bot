@@ -2043,10 +2043,17 @@ class BZBot(BZBotAI):
         """Leerer Handler für bekannte, nicht ausgewertete Message-Typen."""
 
     def _cleanup_shots(self, now: float) -> None:
-        """Entfernt abgelaufene Schüsse aus _shots."""
+        """Entfernt abgelaufene Schüsse aus _shots UND _ricochet_paths.
+
+        _resolve_incoming_shots räumt beide Dicts nur solange self.alive —
+        während Tod/Respawn ablaufende Schüsse würden ihre Pfad-Segmente
+        sonst dauerhaft in _ricochet_paths hinterlassen (Leak, wächst mit
+        der Uptime und verteuert jeden _find_incoming_shot-Scan).
+        """
         with self._shots_lock:
             for k in [k for k, s in self._shots.items() if s.is_expired(now)]:
                 del self._shots[k]
+                self._ricochet_paths.pop(k, None)
 
     def _notify_count(self) -> None:
         """Ruft on_player_count_changed-Callback auf und meldet den Stand an den Manager."""
