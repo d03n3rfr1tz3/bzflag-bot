@@ -314,6 +314,12 @@ class NavGraph:
         # prüft dann nur diese wenigen statt aller Layer — exakte Geometrie/Feasibility bleibt pro-Knoten.
         self._jump_up_cands: Dict[int, List[int]] = {}
         self._fall_cands: Dict[int, List[int]] = {}
+        # Ergebnis-Cache der Sprungkanten-Planung: (lid, ix, iy, tank_speed) → Liste
+        # (neighbor, cost, block_key). Die Topologie ist nach dem Welt-Laden statisch (walkable wird
+        # nur in __init__ mutiert), tank_speed steckt im Key (Flaggen-Boost selbst-invalidierend). Der
+        # laufzeit-dynamische NAV-14-Filter (blocked_jump_wps) wird über block_key erst beim Lesen
+        # angewandt. Von beiden Threads geteilt — Writes idempotent (deterministisch), kein Lock nötig.
+        self._vn_cache: Dict[Tuple[int, int, int, float], List] = {}
         self._build_ground_layer()
         self._build_roof_layers()
         self._build_same_z_adjacency()
@@ -494,15 +500,19 @@ class NavGraph:
         blocked_jump_wps=None, goal_z: float | None = None,
         max_expansions: int | None = None, max_ms: float | None = None,
         cancel=None, label: str = "A*", partial_level: int = logging.WARNING,
+        tank_speed: float | None = None,
     ) -> List[Tuple[float, float, float]]:
         """
         A*-Pfadsuche von (sx,sy,sz) nach (gx,gy).
         Rückgabe: Liste von (wx, wy, layer_z)-Wegpunkten oder [].
 
-        Reentrant: ``blocked_jump_wps``, ``max_expansions``, ``max_ms`` und ``cancel`` werden
-        als lokale Parameter durch ``_astar`` gereicht — kein geteilter Mutable-Zustand auf
-        ``self``. So können Haupt- und Hintergrund-Thread denselben gecachten Graph parallel
-        beplanen (P4-INF-01). ``cancel`` ist ein Objekt mit ``.is_set()`` (z.B. threading.Event).
+        Reentrant: ``blocked_jump_wps``, ``max_expansions``, ``max_ms``, ``cancel`` und
+        ``tank_speed`` werden als lokale Parameter durch ``_astar`` gereicht — kein geteilter
+        Mutable-Zustand auf ``self``. So können Haupt- und Hintergrund-Thread denselben gecachten
+        Graph parallel beplanen (P4-INF-01). ``cancel`` ist ein Objekt mit ``.is_set()`` (z.B.
+        threading.Event). ``tank_speed`` (None → Basis ``self._tank_speed`` 25.0) ist die
+        horizontale Sprung-Reisegeschwindigkeit; höher (Velocity/Thief) ⇒ weitere Sprünge machbar,
+        deckungsgleich zum reaktiven Executor (bzbot_ai._travel_tank_speed).
         """
         bjw = blocked_jump_wps or frozenset()
         # Start-Knoten
@@ -559,7 +569,8 @@ class NavGraph:
         path_nodes = self._astar(start, goal_set, gx, gy, goal_z=goal_z,
                                  blocked_jump_wps=bjw, max_expansions=max_expansions,
                                  max_ms=max_ms, cancel=cancel,
-                                 label=label, partial_level=partial_level)
+                                 label=label, partial_level=partial_level,
+                                 tank_speed=tank_speed)
         if not path_nodes:
             if self._debug_path:
                 logger.debug(
@@ -612,6 +623,7 @@ class NavGraph:
         goal_z: float | None = None, blocked_jump_wps=frozenset(),
         max_expansions: int | None = None, max_ms: float | None = None,
         cancel=None, label: str = "A*", partial_level: int = logging.WARNING,
+        tank_speed: float | None = None,
     ) -> List[Tuple]:
         if start in goal_set:
             return [start]
@@ -713,7 +725,7 @@ class NavGraph:
 
             # ── Vertikale Nachbarn (on-the-fly) ───────────────────────────
             for neighbor, cost in self._vertical_neighbors(lid, ix, iy, wx, wy, layer,
-                                                           blocked_jump_wps):
+                                                           blocked_jump_wps, tank_speed):
                 new_g = cur_g + cost
                 if new_g < g_score.get(neighbor, _INF):
                     g_score[neighbor]   = new_g
@@ -751,12 +763,43 @@ class NavGraph:
 
     def _vertical_neighbors(
         self, lid: int, ix: int, iy: int, wx: float, wy: float, layer: FloorLayer,
-        blocked_jump_wps=frozenset()
+        blocked_jump_wps=frozenset(), tank_speed: float | None = None,
     ) -> List[Tuple[Tuple, float]]:
-        """Berechnet Sprung-rauf und Fall-runter Kanten für einen Knoten.
+        """Sprung-rauf/Fall-runter Kanten eines Knotens (gecacht).
 
-        ``blocked_jump_wps`` (gecooldownte Sprung-Ziele, NAV-14) wird als Parameter gereicht
-        statt von ``self`` gelesen → reentrant (P4-INF-01)."""
+        Ergebnis-Cache keyed auf ``(lid, ix, iy, ts)`` — die Kanten-Topologie ist nach dem Welt-Laden
+        statisch, ``ts`` (horizontale Sprung-Reisegeschwindigkeit; None → Basis ``self._tank_speed``)
+        steckt im Key und ist damit selbst-invalidierend (Flaggen-Boost). ``blocked_jump_wps``
+        (gecooldownte Sprung-Ziele, NAV-14) wird als Parameter gereicht statt von ``self`` gelesen →
+        reentrant (P4-INF-01) und erst beim Lesen über den gespeicherten ``block_key`` als Filter
+        angewandt, damit der Cache laufzeit-stabil bleibt."""
+        ts = self._tank_speed if tank_speed is None else tank_speed
+        key = (lid, ix, iy, ts)
+        edges = self._vn_cache.get(key)
+        if edges is None:
+            edges = self._compute_vertical_edges(lid, ix, iy, wx, wy, layer, ts)
+            self._vn_cache[key] = edges
+        if not blocked_jump_wps:
+            return [(nb, c) for nb, c, _bk in edges]
+        return [(nb, c) for nb, c, bk in edges
+                if bk is None or bk not in blocked_jump_wps]
+
+    def _reset_vertical_cache(self) -> None:
+        """Leert den Sprungkanten-Cache. In Produktion nie nötig (Geometrie/Physik nach ``__init__``
+        konstant); nur für Tests, die nachträglich ``_jump_up_cands``/``_fall_cands`` mutieren (diese
+        stecken nicht im Cache-Key)."""
+        self._vn_cache.clear()
+
+    def _compute_vertical_edges(
+        self, lid: int, ix: int, iy: int, wx: float, wy: float, layer: FloorLayer,
+        ts: float,
+    ) -> List[Tuple[Tuple, float, object]]:
+        """Berechnet Sprung-rauf und Fall-runter Kanten für einen Knoten (ungefiltert, gecacht).
+
+        Rückgabe je Kante ``(neighbor, cost, block_key)``: ``block_key = (round(dst_wx),
+        round(dst_wy), dst.z)`` für Sprung-hoch-Kanten (NAV-14-Filter wird erst beim Lesen in
+        ``_vertical_neighbors`` angewandt), ``None`` für Fall-Kanten. ``ts`` ist die horizontale
+        Sprung-Reisegeschwindigkeit (Basis oder Flaggen-erhöht)."""
         result = []
 
         # ── Sprung-rauf ────────────────────────────────────────────────────
@@ -862,7 +905,7 @@ class NavGraph:
                 wall_dist_min = 0.0
             else:
                 t_min = (self._v0 - math.sqrt(disc_cl)) / self._g
-                wall_dist_min = max(0.0, self._tank_speed * t_min)
+                wall_dist_min = max(0.0, ts * t_min)
             # Absprung-Überhang nutzen, aber so deckeln, dass der Clearance-Mindestabstand
             # erhalten bleibt: der Bot rollt nur so weit zur Kante vor, wie er noch über den
             # Zielrand kommt (Trade-off gap-Verkürzung ↔ Steig-Runway).
@@ -872,12 +915,12 @@ class NavGraph:
             # minus Front-Catch (der Tank landet, sobald seine Front die Kante erreicht —
             # Pixel-on). 10% Sicherheitspuffer — theoretisches Maximum selten erreichbar.
             eff_gap = max(0.0, gap - overhang - JUMP_EDGE_TOL)
-            if eff_gap > self._tank_speed * t_desc * 0.9:
+            if eff_gap > ts * t_desc * 0.9:
                 continue
             # Clearance-Prüfung (durch die Überhang-Deckelung i.d.R. erfüllt; zur Sicherheit):
             wall_dist = max(0.0, gap - overhang)
             if wall_dist > 0.01:
-                t_wall = wall_dist / self._tank_speed
+                t_wall = wall_dist / ts
                 z_at_wall = self._v0 * t_wall - 0.5 * self._g * t_wall ** 2
                 if z_at_wall < dz - 0.5:
                     continue
@@ -889,9 +932,9 @@ class NavGraph:
             # NAV-19: Sprungbogen gegen dazwischenliegende Überhänge prüfen (Kopfstoß vermeiden).
             # Richtung + hspeed deckungsgleich zu _initiate_nav_jump (zum Landepunkt, needed_hspeed).
             if hdist > 0.1:
-                hspeed = self._tank_speed
+                hspeed = ts
                 calc = (hdist + 2.5) / max(t_desc, 0.01)
-                if 1.0 < calc <= self._tank_speed:
+                if 1.0 < calc <= ts:
                     hspeed = calc
                 adir_x = (dst_wx - wx) / hdist
                 adir_y = (dst_wy - wy) / hdist
@@ -906,9 +949,10 @@ class NavGraph:
             # Verbot — nur-per-Sprung erreichbare Orte bleiben erreichbar).
             if self._teleporters:
                 cost += NAV_JUMP_UP_PENALTY
-            if (round(dst_wx), round(dst_wy), dst.z) in blocked_jump_wps:
-                continue
-            result.append(((dst_lid, d_ix, d_iy), cost))
+            # NAV-14-Block wird NICHT hier gefiltert (Cache-Stabilität) — der block_key wird
+            # gespeichert und erst in _vertical_neighbors gegen blocked_jump_wps geprüft.
+            block_key = (round(dst_wx), round(dst_wy), dst.z)
+            result.append(((dst_lid, d_ix, d_iy), cost, block_key))
 
         # ── Fall-runter ────────────────────────────────────────────────────
         # Fallen ist nur von Dächern möglich (layer.source_obstacle != None = Dach-Ebene)
@@ -935,7 +979,7 @@ class NavGraph:
                     # Fall-Kosten: Höhe und Drift summieren; +5.0 Grundstrafe damit Springen
                     # bevorzugt wird wenn beide Optionen möglich sind
                     cost  = (layer.z - dst.z) * 0.5 + hdist * 1.5 + 5.0
-                    result.append(((dst_lid, d_ix, d_iy), cost))
+                    result.append(((dst_lid, d_ix, d_iy), cost, None))
 
         return result
 

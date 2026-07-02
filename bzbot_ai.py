@@ -73,7 +73,7 @@ WP_TIMEOUT_SCALE      = 0.3             # s pro Einheit Distanz (≈3.3 u/s effe
 WP_TIMEOUT_JUMP_BONUS = 2.0             # Aufschlag für NAV_JUMP-Anfahrt-WPs
 NAV_JUMP_Z_TOL        = 2.5             # max. Z-Abweichung bei NAV_JUMP-Landung
 NAV_TELE_TIMEOUT      = 2.0             # max. Sekunden Direktanflug in die Tor-Mitte vor Abbruch
-NAV_TELE_ENGAGE_DIST  = NAV_CELL_SIZE * 5.0  # nur engagen, wenn Tor-Mitte so nah ist (~12u)
+NAV_TELE_ENGAGE_DIST  = NAV_CELL_SIZE * 5.0  # nur engagen, wenn Tor-Mitte so nah ist (~20u)
 NAV_TELE_COOLDOWN     = 8.0             # Sperre eines Tors nach fehlgeschlagener Querung
 NAV_TELE_OVERSHOOT    = 4.0             # u über die Mitte hinaus anzielen → Tor-Ebene sicher queren
 # P4-INF-01: Asynchrone Pfadplanung. Der Haupt-Thread plant schnell (Defaults 5k/125ms, ggf.
@@ -83,7 +83,7 @@ NAV_TELE_OVERSHOOT    = 4.0             # u über die Mitte hinaus anzielen → 
 NAV_ASYNC_TRIGGER_MS     = 50.0    # Haupt-Thread-Plan teurer als das → Zweit-Thread-Vollsuche starten
 NAV_ASYNC_MAX_EXPANSIONS = 50000   # Expansionslimit der Hintergrund-Vollsuche
 NAV_ASYNC_MAX_MS         = 5000.0  # Wall-Clock-Limit der Hintergrund-Vollsuche
-NAV_ASYNC_RESYNC_TOL     = 12.0    # Max. Abstand Bot ↔ Route, um das Async-Ergebnis noch zu übernehmen
+NAV_ASYNC_RESYNC_TOL     = NAV_CELL_SIZE * 4.0  # Max. Abstand Bot ↔ Route, um das Async-Ergebnis noch zu übernehmen
 
 # Proaktive Wand-Vorausschau im COMBAT-Direktmodus: trifft die Fahrtrichtung eine solide Wand in
 # steilem Winkel (Einfallswinkel zur Oberfläche > NAV_WALL_STEEP_DEG), fährt der Bot nicht stur
@@ -512,6 +512,19 @@ class BZBotAI:
             return self._tank_speed * self._agility_ad_vel
         if self.own_flag == "BU" and self.pos[2] < 0.0:  # Malus nur eingegraben (am Boden), nicht auf Dächern
             return self._tank_speed * self._burrow_speed_ad
+        return self._tank_speed
+
+    def _travel_tank_speed(self) -> float:
+        """Nachhaltige Vorwärts-Reisegeschwindigkeit für Sprung-Planung UND -Ausführung.
+
+        Nur dauerhaft während der Fahrt wirkende Flaggen (V/TH); A (nur Stillstand) und BU (nur
+        eingegraben) werden bewusst ignoriert — beim Sprung-Anlauf fährt der Tank (vel>1) am Boden
+        (z≥0), dort liefern sie ohnehin Basisgeschwindigkeit. Stabil (keine transienten Sprünge im
+        Wert) → Planer (nav.plan_path(tank_speed=…)) und reaktiver Executor (needed_hspeed,
+        _nav_jump_feasible/_geometry_ok) rechnen deckungsgleich: der Bot plant keinen Sprung, den er
+        dann zu langsam ausführt. Siehe _effective_tank_speed für den (transienten) Live-Wert."""
+        if self.own_flag == "V":  return self._tank_speed * self._velocity_ad
+        if self.own_flag == "TH": return self._tank_speed * self._thief_vel_ad
         return self._tank_speed
 
     def _effective_turn_rate(self) -> float:
@@ -1656,7 +1669,7 @@ class BZBotAI:
             return False
         t_desc = (v0 + math.sqrt(disc)) / g_abs
         eff = max(0.0, math.hypot(dx, dy) - JUMP_EDGE_TOL)
-        return eff <= self._tank_speed * t_desc * 1.1
+        return eff <= self._travel_tank_speed() * t_desc * 1.1
 
     def _nav_jump_feasible(self, target_wp) -> bool:
         """True wenn Bot Ziel-WP beim Abstieg physikalisch erreichen kann
@@ -1671,7 +1684,7 @@ class BZBotAI:
         if disc < 0:
             return False
         t_desc = (v0 + math.sqrt(disc)) / g_abs
-        if max(0.0, hdist - JUMP_EDGE_TOL) > self._tank_speed * t_desc * 1.1:
+        if max(0.0, hdist - JUMP_EDGE_TOL) > self._travel_tank_speed() * t_desc * 1.1:
             return False
         # Azimuth-Check — Bot muss präzise in Sprungrichtung zeigen (±5°)
         az_to_target = math.atan2(dy, dx)
@@ -2462,10 +2475,14 @@ class BZBotAI:
             return
         blocked = {k for k, v in self._nav_jump_cooldowns.items() if v > time.monotonic()}
         sx, sy, sz = self.pos[0], self.pos[1], self.pos[2]
+        # Reisegeschwindigkeit einmal snapshotten (Flaggen-Boost → weitere Sprünge planbar,
+        # deckungsgleich zum reaktiven Executor). Plain-Value → reentrant an Sync- und Async-Plan.
+        ts = self._travel_tank_speed()
         t0 = time.perf_counter()
         path = nav.plan_path(sx, sy, sz, goal_x, goal_y,
                              blocked_jump_wps=blocked, goal_z=goal_z,
-                             label="Schnellplan", partial_level=logging.DEBUG)
+                             label="Schnellplan", partial_level=logging.DEBUG,
+                             tank_speed=ts)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         if getattr(self, '_debug_log_path', False):
             logger.debug("[%s] Pfad: %d WPs von (%.0f,%.0f) → (%.0f,%.0f) [%.0fms]%s",
@@ -2476,7 +2493,7 @@ class BZBotAI:
         # nachschieben — sie übernimmt später, falls sie eine bessere Route findet (P4-INF-01).
         if elapsed_ms > NAV_ASYNC_TRIGGER_MS:
             self._submit_async_plan(sx, sy, sz, goal_x, goal_y, goal_z,
-                                    blocked, cap_wps, self._plan_gen)
+                                    blocked, cap_wps, self._plan_gen, tank_speed=ts)
 
     def _apply_planned_path(self, path, goal_x: float, goal_y: float,
                             cap_wps: int | None = None) -> None:
@@ -2509,7 +2526,8 @@ class BZBotAI:
 
     def _submit_async_plan(self, sx: float, sy: float, sz: float,
                            goal_x: float, goal_y: float, goal_z: float | None,
-                           blocked: set, cap_wps: int | None, gen: int) -> None:
+                           blocked: set, cap_wps: int | None, gen: int,
+                           tank_speed: float | None = None) -> None:
         """Startet (höchstens einen) Hintergrund-Thread mit großen A*-Limits (P4-INF-01).
 
         Der NavGraph ist reentrant; der Worker bekommt nur Plain-Value-Snapshots und liest nie
@@ -2533,7 +2551,8 @@ class BZBotAI:
                                   blocked_jump_wps=blocked, goal_z=goal_z,
                                   max_expansions=NAV_ASYNC_MAX_EXPANSIONS,
                                   max_ms=NAV_ASYNC_MAX_MS, cancel=cancel,
-                                  label="Vollsuche", partial_level=logging.INFO)
+                                  label="Vollsuche", partial_level=logging.INFO,
+                                  tank_speed=tank_speed)
             except Exception:
                 logger.exception("[%s] Async-Pfadplanung fehlgeschlagen", self.callsign)
                 p = None
@@ -2729,13 +2748,14 @@ class BZBotAI:
         hdist    = math.hypot(wp[0] - self.pos[0], wp[1] - self.pos[1])
         az_to_wp = math.atan2(wp[1] - self.pos[1], wp[0] - self.pos[0])
         disc     = v0 * v0 - 2.0 * g_abs * dz
-        needed_hspeed = self._tank_speed
+        _ts      = self._travel_tank_speed()   # deckungsgleich zur Sprungkanten-Planung (Flaggen-Boost)
+        needed_hspeed = _ts
         if disc >= 0 and hdist > 0.5:
             t_desc    = (v0 + math.sqrt(disc)) / g_abs
             # 4d+4b: hdist + 2.5u Überschuss kompensiert Versatz vom Absprung-WP
             hdist_aim = hdist + 2.5
             calc      = hdist_aim / max(t_desc, 0.01)
-            if 1.0 < calc <= self._tank_speed:
+            if 1.0 < calc <= _ts:
                 needed_hspeed = calc
         # Velocity in Blickrichtung (self.azimuth) — NAV_JUMP_ALIGN hat Ausrichtung sichergestellt
         self.vel[0]       = math.cos(self.azimuth) * needed_hspeed

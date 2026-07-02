@@ -511,6 +511,25 @@ class TestNAV03JumpPhysics:
         assert len(edges_19) == 0, \
             "Mit tank_speed=19 darf keine Sprungkante existieren (NAV-03)"
 
+    def test_jump_reach_scales_with_tank_speed_param(self):
+        """Der ``tank_speed``-Parameter (flaggenbedingte Reisegeschwindigkeit) hebt die
+        Sprungreichweite: derselbe Absprung ist bei Basis 25 NICHT, bei 40 (Velocity) DOCH eine
+        Sprungkante. Bot bei wx=-115 → aabb_dist=85u < JUMP_RANGE (Kandidat überlebt den Cull),
+        aber jenseits der 25er-Reichweite (~73u)."""
+        box = _make_box(0.0, 0.0, 0.0, 30.0, 15.0, 10.0)   # Dach z=10, x∈[-30,30]
+        wm  = _make_world(boxes=[box], world_half=117.5)     # erste Zellmitte bei -115
+        ng  = NavGraph(wm, max_jump_h=18.4)
+        g = ng.layers[0]
+        ix, iy = g.clamp_cell(*g.world_to_cell(-115.0, 0.0))
+        wx, wy = g.cell_to_world(ix, iy)
+
+        def up(ts):
+            return [n for n, c in ng._vertical_neighbors(0, ix, iy, wx, wy, g, tank_speed=ts)
+                    if ng.layers[n[0]].z > g.z]
+
+        assert not up(25.0), "Bei Basis 25 darf der weite Sprung NICHT machbar sein"
+        assert up(40.0),     "Bei 40 (Velocity) muss der Sprung machbar werden"
+
     def test_nav_jump_up_penalty_only_on_teleporter_maps(self):
         """Sicherheits-Strafe: Sprung-hoch-Kanten kosten auf Teleporter-Karten NAV_JUMP_UP_PENALTY
         mehr (Bot soll lieber das sichere Tor nehmen). Ohne Teleporter unverändert (keine Regression)."""
@@ -525,6 +544,7 @@ class TestNAV03JumpPhysics:
         c0 = up()
         assert c0, "Test-Setup: Sprungkante erwartet"
         ng._teleporters = [object()]              # Karte „hat jetzt Teleporter"
+        ng._reset_vertical_cache()                # _teleporters nicht im Cache-Key → neu berechnen
         c1 = up()
         assert c1[0] - c0[0] == pytest.approx(NAV_JUMP_UP_PENALTY)
 
@@ -979,10 +999,14 @@ class TestVerticalAdjacencyPrecompute:
         try:
             ng._jump_up_cands = {lid: list(range(n)) for lid in range(n)}
             ng._fall_cands = {lid: list(range(n)) for lid in range(n)}
+            # Kandidatenlisten stecken NICHT im Cache-Key → Cache leeren, sonst liefert der
+            # Full-Scan die gecachten real-Kanten und das Sicherheitsnetz wäre trivial-grün.
+            ng._reset_vertical_cache()
             full = {(l, i, j): ng._vertical_neighbors(l, i, j, wx, wy, L)
                     for (l, i, j, wx, wy, L) in nodes}
         finally:
             ng._jump_up_cands, ng._fall_cands = saved_up, saved_down
+            ng._reset_vertical_cache()   # Full-Scan-Einträge nicht zurücklassen
         return real, full
 
     @staticmethod
@@ -1016,6 +1040,63 @@ class TestVerticalAdjacencyPrecompute:
         mism = [k for k in real if real[k] != full[k]]
         assert not mism, (f"{len(mism)} Knoten mit abweichenden Kanten — Kandidaten-Cull verliert/"
                           f"erfindet Kanten, z.B. {mism[0]}: {real[mism[0]]} != {full[mism[0]]}")
+
+
+class TestVerticalNeighborCache:
+    """Der Sprungkanten-Ergebnis-Cache (_vn_cache) verändert das Resultat nicht: Cache-Hit ==
+    Cache-Miss == frischer NavGraph; der laufzeit-dynamische NAV-14-Filter (blocked_jump_wps) wird
+    korrekt beim Lesen angewandt (auch auf Cache-Hits)."""
+
+    @staticmethod
+    def _mk():
+        boxes = [
+            _make_box(0, 0, 0, 10, 10, 15.0),
+            _make_box(26, 0, 0, 10, 10, 6.0),
+            _make_box(-26, 0, 0, 8, 8, 30.0),
+            _make_box(0, 30, 0, 6, 18, 15.0, angle=math.radians(45)),
+            _make_box(0, -30, 0, 14, 4, 14.0),
+        ]
+        return NavGraph(_make_world(boxes=boxes, world_half=80.0), max_jump_h=18.4)
+
+    def test_hit_equals_miss_equals_fresh(self):
+        """Zweiter Aufruf (Hit) == erster Aufruf (Miss) == frischer, nie gecachter Graph."""
+        ng = self._mk()
+        fresh = self._mk()
+        nodes = TestVerticalAdjacencyPrecompute._all_nodes(ng)
+        assert nodes, "Test-Setup: Knoten erwartet"
+        total = 0
+        for (l, i, j, wx, wy, L) in nodes:
+            miss = ng._vertical_neighbors(l, i, j, wx, wy, L)          # populiert Cache
+            hit  = ng._vertical_neighbors(l, i, j, wx, wy, L)          # Cache-Hit
+            ref  = fresh._vertical_neighbors(l, i, j, wx, wy, L)       # anderer Graph, frisch
+            assert miss == hit == ref, f"Cache weicht ab bei Knoten ({l},{i},{j})"
+            total += len(miss)
+        assert total > 0, "Test-Welt erzeugt keine vertikalen Kanten"
+
+    def test_blocked_filter_applies_on_cache_hit(self):
+        """blocked_jump_wps entfernt genau die Zielkante — auch wenn der Cache schon warm ist."""
+        ng = self._mk()
+        # Einen Knoten mit Sprung-hoch-Kante finden.
+        node = target = None
+        for (l, i, j, wx, wy, L) in TestVerticalAdjacencyPrecompute._all_nodes(ng):
+            ups = [n for n, _ in ng._vertical_neighbors(l, i, j, wx, wy, L)
+                   if ng.layers[n[0]].z > L.z]
+            if ups:
+                node = (l, i, j, wx, wy, L); target = ups[0]; break
+        assert node is not None, "Test-Setup: Knoten mit Sprung-hoch-Kante erwartet"
+
+        l, i, j, wx, wy, L = node
+        base = ng._vertical_neighbors(l, i, j, wx, wy, L)              # Cache jetzt warm
+        dst = ng.layers[target[0]]
+        dwx, dwy = dst.cell_to_world(target[1], target[2])
+        blk = frozenset({(round(dwx), round(dwy), dst.z)})
+
+        filtered = ng._vertical_neighbors(l, i, j, wx, wy, L, blocked_jump_wps=blk)  # Hit + Filter
+        assert target not in [n for n, _ in filtered], "geblocktes Sprungziel muss fehlen"
+        removed = [e for e in base if e[0] == target]
+        assert set(filtered) == set(base) - set(removed), "nur die geblockte Kante darf entfallen"
+        # Ohne Filter erneut (Hit) → wieder vollständig (Filter mutiert den Cache nicht).
+        assert ng._vertical_neighbors(l, i, j, wx, wy, L) == base
 
 
 # ---------------------------------------------------------------------------

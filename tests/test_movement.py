@@ -475,6 +475,55 @@ class TestNavJumpFeasible:
         assert bot._nav_jump_feasible(target_wp) is True
 
 
+class TestNavJumpTravelSpeedCongruence:
+    """Executor-Sprung-Machbarkeit nutzt _travel_tank_speed() (deckungsgleich zur Planung):
+    Velocity (V) hebt die Horizontalreichweite → weitere Sprünge machbar. A (nur Stillstand) und
+    BU (nur eingegraben) werden bewusst ignoriert (transient, kein nachhaltiger Reise-Boost)."""
+
+    def _t_desc(self, dz):
+        disc = 19.0**2 - 2.0 * 9.8 * dz
+        return (19.0 + math.sqrt(disc)) / 9.8
+
+    def test_velocity_flag_extends_jump_reach(self, bot):
+        """Abstand jenseits der Basis-Reichweite (25), innerhalb der V-Reichweite (40):
+        ohne Flagge infeasible, mit V feasible — für geometry_ok UND feasible."""
+        dz = 10.0
+        t_desc = self._t_desc(dz)
+        bot.pos = [0.0, 0.0, 0.0]
+        bot.azimuth = 0.0
+        bot._tank_speed = 25.0
+        bot._velocity_ad = 1.6                      # V → 40 u/s
+        hdist = 25.0 * t_desc * 1.1 * 1.2           # 20 % über Basis-Schwelle, < 40er-Reichweite
+        target_wp = (hdist, 0.0, dz)
+
+        bot.own_flag = ""
+        assert bot._nav_jump_geometry_ok(target_wp) is False
+        assert bot._nav_jump_feasible(target_wp) is False
+
+        bot.own_flag = "V"
+        assert bot._nav_jump_geometry_ok(target_wp) is True
+        assert bot._nav_jump_feasible(target_wp) is True
+
+    def test_travel_speed_ignores_agility_boost(self, bot):
+        """A-Boost gilt nur im Stillstand → fließt NICHT in _travel_tank_speed (Sprung-Anlauf fährt),
+        obwohl _effective_tank_speed im Stillstand boostet."""
+        bot._tank_speed = 25.0
+        bot._agility_ad_vel = 2.0
+        bot.own_flag = "A"
+        bot.vel = [0.0, 0.0, 0.0]                   # Stillstand → _effective boostet
+        assert bot._effective_tank_speed() == pytest.approx(50.0)
+        assert bot._travel_tank_speed() == pytest.approx(25.0)
+
+    def test_travel_speed_ignores_burrow_malus(self, bot):
+        """BU-Malus gilt nur eingegraben → _travel_tank_speed bleibt Basis (Sprung vom Boden)."""
+        bot._tank_speed = 25.0
+        bot._burrow_speed_ad = 0.5
+        bot.own_flag = "BU"
+        bot.pos = [0.0, 0.0, -1.0]                  # eingegraben → _effective mit Malus
+        assert bot._effective_tank_speed() == pytest.approx(12.5)
+        assert bot._travel_tank_speed() == pytest.approx(25.0)
+
+
 class TestAdvancePathNavJump:
     """_advance_path() NAV_JUMP: nur aufwärts, Machbarkeitscheck, Anfahrt-WP."""
 
