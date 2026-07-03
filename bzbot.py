@@ -1364,6 +1364,7 @@ class BZBot(BZBotAI):
                     teleporters=self._world_map.teleporters,
                     link_map=self._link_map,
                     tele_log=_tlog,
+                    solid_obs=self._world_map.solid_obstacles(),
                 )
                 if self._debug_log_tele:
                     if _tlog:

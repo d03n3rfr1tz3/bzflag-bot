@@ -343,6 +343,22 @@ def test_r_flag_no_obstacles_straight():
     assert _approx(segs[0].ex, 100.0)
 
 
+def test_solid_obs_prefiltered_equivalent():
+    """P2: vorgefilterte solid_obs-Liste liefert exakt dieselben Segmente wie
+    der interne shoot_through-Filter (inkl. ignorierter Glas-Box)."""
+    glass = _box(cx=20.0, cy=0.0, hw=5.0, hd=100.0, height=10.0, shoot_through=True)
+    wall  = _box(cx=50.0, cy=0.0, hw=5.0, hd=100.0, height=10.0)
+    obs = [glass, wall]
+    a = simulate_shot_path((0.0, 0.0, 1.0), (100.0, 0.0, 0.0), 0.0, 2.0,
+                           b"R\x00", obs, 200.0, False)
+    b = simulate_shot_path((0.0, 0.0, 1.0), (100.0, 0.0, 0.0), 0.0, 2.0,
+                           b"R\x00", obs, 200.0, False,
+                           solid_obs=[o for o in obs if not o.shoot_through])
+    assert a == b
+    assert len(a) >= 2                     # Wand reflektiert …
+    assert _approx(a[0].ex, 45.0, tol=0.1)  # … Glas-Box nicht
+
+
 def test_bounce_off_axis_aligned_box():
     """R-Flag-Schuss prallt an einer Wand ab → mindestens 2 Segmente."""
     # Box-Wand bei x=50 (von 45 bis 55)

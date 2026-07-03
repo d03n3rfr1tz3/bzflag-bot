@@ -3483,6 +3483,7 @@ class BZBotAI:
                 teleporters=wmap.teleporters,
                 link_map=getattr(self, "_link_map", None),
                 tele_log=_tl,
+                solid_obs=wmap.solid_obstacles(),
             )
             if len(segs) <= 1:
                 continue

@@ -627,7 +627,8 @@ def simulate_shot_path(pos: Tuple[float, float, float],
                         wall_height: float = 6.15,
                         teleporters: Optional[List[TeleporterObstacle]] = None,
                         link_map: Optional[dict] = None,
-                        tele_log: Optional[list] = None) -> List[Segment]:
+                        tele_log: Optional[list] = None,
+                        solid_obs: Optional[List[BoxObstacle]] = None) -> List[Segment]:
     """
     Port von SegmentedShotStrategy::makeSegments() + Teleporter-Querung.
     Simuliert den vollständigen Schuss-Pfad inkl. Abpraller und Teleporter.
@@ -660,8 +661,11 @@ def simulate_shot_path(pos: Tuple[float, float, float],
                         pos[2] + vel[2] * lifetime,
                         fire_time, fire_time + lifetime)]
 
-    # Alle Obstacles die Schüsse ablenken können (shoot_through → transparent)
-    test_obs = [o for o in obstacles if not o.shoot_through]
+    # Alle Obstacles die Schüsse ablenken können (shoot_through → transparent).
+    # solid_obs = vorgefilterte Liste (WorldMap.solid_obstacles()) — erspart den
+    # Filter über alle Obstacles pro Aufruf; ohne solid_obs unverändertes Verhalten.
+    test_obs = solid_obs if solid_obs is not None else \
+        [o for o in obstacles if not o.shoot_through]
 
     ox, oy, oz = pos[0], pos[1], pos[2]
     # Geschwindigkeitsvektor als Richtung — t aus Intersection-Tests ist in Sekunden
