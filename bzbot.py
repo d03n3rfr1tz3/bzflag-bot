@@ -417,6 +417,11 @@ class BZBot(BZBotAI):
         self._next_server_update: float = 0.0
         self._server_update_interval: float = 1.0 / SERVER_UPDATE_RATE_HZ
         self._tick_count: int = 0
+        # P4a: Per-Tick-Memo für teure, mehrfach pro Tick identisch aufgerufene
+        # Wahrnehmungs-Queries (_get_floor_z/_has_los_to_enemy/_muzzle_clear).
+        # Keys enthalten alle Eingaben (Position etc.) → reiner Funktions-Memo;
+        # wird am Anfang jedes Game-Loop-Ticks geleert. Nur Main-Thread.
+        self._tick_memo: Dict = {}
 
         self._running          = False
         self._stop_event       = threading.Event()
@@ -519,6 +524,7 @@ class BZBot(BZBotAI):
             if not self.client.udp_active:
                 self.client.retry_udp_link()
             self._tick_count += 1
+            self._tick_memo.clear()   # P4a: Wahrnehmungs-Memo gilt genau einen Tick
             ai_tick = (self._tick_count % (UPDATE_RATE_HZ // AI_RATE_HZ) == 0)
             if self.alive:
                 self._resolve_incoming_shots(now, dt_r)
