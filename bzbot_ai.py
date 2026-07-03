@@ -493,6 +493,12 @@ class BZBotAI:
             return self._reload_time / max(self._rfire_ad_rate, 1.0)
         return self._reload_time
 
+    def _own_flag_bytes(self) -> bytes:
+        """2-Byte-Wire-Encoding der eigenen Flagge (Protokoll-FlagAbbr mit
+        Null-Padding; keine Flagge → b'\\x00\\x00'). F9: einzige Quelle —
+        vorher 6× inline dupliziert."""
+        return (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+
     def _effective_shot_speed(self) -> float:
         """Schussgeschwindigkeit (u/s) der aktiven Flagge (BZFlag: vel *= AdVel)."""
         f = self.own_flag
@@ -682,6 +688,20 @@ class BZBotAI:
         self._dispatch_movement(dt, now, ai_tick)
         self._check_teleport_crossing(old, now)
 
+    def _turn_toward(self, target_az: float, dt: float) -> float:
+        """Dreht azimuth mit _tank_turn_rate Richtung target_az und setzt ang_vel
+        konsistent (geklemmt, damit das gesendete PlayerUpdate zur realen Drehung
+        passt). Gibt den Winkelabstand VOR der Drehung zurück (Aufrufer nutzen
+        ihn für Speed-/Erreicht-Entscheidungen). F9: einzige Quelle für das
+        vorher 5× duplizierte Dreh-Snippet; Varianten mit effektiver Drehrate
+        (_eff_turn) oder Winkel-Cap (_compute_dodge_dir) bleiben bewusst eigen."""
+        diff = _angle_diff(target_az, self.azimuth)
+        self.ang_vel = math.copysign(
+            min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
+        self.azimuth = _wrap(
+            self.azimuth + math.copysign(min(abs(diff), self._tank_turn_rate * dt), diff))
+        return diff
+
     def _dispatch_movement(self, dt: float, now: float, ai_tick: bool = True) -> None:
         """Physik (60 Hz) + KI (10 Hz): State-Machine-Dispatch."""
         half = self.world_half
@@ -740,13 +760,8 @@ class BZBotAI:
                 self.vel[1] = 0.0
                 if self._landing_aim_pos is not None:
                     ax, ay = self._landing_aim_pos
-                    target_az = math.atan2(ay - self.pos[1], ax - self.pos[0])
-                    max_turn = self._tank_turn_rate * dt
-                    diff = _angle_diff(target_az, self.azimuth)
-                    self.ang_vel = math.copysign(
-                        min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-                    self.azimuth = _wrap(
-                        self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+                    self._turn_toward(
+                        math.atan2(ay - self.pos[1], ax - self.pos[0]), dt)
                 else:
                     self.ang_vel = 0.0
             return
@@ -883,11 +898,7 @@ class BZBotAI:
             self._transition_to(ret)
             return
         az_to_wp = math.atan2(wp[1] - self.pos[1], wp[0] - self.pos[0])
-        diff = _angle_diff(az_to_wp, self.azimuth)
-        max_turn = self._tank_turn_rate * dt
-        self.ang_vel = math.copysign(
-            min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-        self.azimuth = _wrap(self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+        diff = self._turn_toward(az_to_wp, dt)
         self.vel[0] = 0.0
         self.vel[1] = 0.0
         if abs(diff) <= math.pi / 36:
@@ -929,11 +940,7 @@ class BZBotAI:
         aim_x = cx + (ddx / d) * NAV_TELE_OVERSHOOT
         aim_y = cy + (ddy / d) * NAV_TELE_OVERSHOOT
         target_az = math.atan2(aim_y - self.pos[1], aim_x - self.pos[0])
-        diff = _angle_diff(target_az, self.azimuth)
-        max_turn = self._tank_turn_rate * dt
-        self.ang_vel = math.copysign(
-            min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-        self.azimuth = _wrap(self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+        diff = self._turn_toward(target_az, dt)
         speed = self._effective_tank_speed() if abs(diff) < math.pi / 2 else 0.0
         self.vel[0] = math.cos(self.azimuth) * speed
         self.vel[1] = math.sin(self.azimuth) * speed
@@ -1074,12 +1081,7 @@ class BZBotAI:
                 self.ang_vel = 0.0
                 speed = self._tank_speed
             else:
-                diff = _angle_diff(self._dodge_dir, self.azimuth)
-                max_turn = self._tank_turn_rate * dt
-                self.ang_vel = math.copysign(
-                    min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-                self.azimuth = _wrap(
-                    self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+                self._turn_toward(self._dodge_dir, dt)
                 speed = self._tank_speed
             self.vel[0] = math.cos(self.azimuth) * speed
             self.vel[1] = math.sin(self.azimuth) * speed
@@ -1545,12 +1547,7 @@ class BZBotAI:
             _tan = self._steep_wall_ahead(target_az, min(dist, NAV_WALL_PROBE_DIST))
             if _tan is not None:
                 target_az = _tan
-        max_turn  = self._tank_turn_rate * dt
-        diff = _angle_diff(target_az, self.azimuth)
-        self.ang_vel = math.copysign(
-            min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-        self.azimuth = _wrap(
-            self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+        self._turn_toward(target_az, dt)
         if dist < _opt:
             speed = -self._tank_speed * 0.5
             _nav = getattr(self, "_nav_graph", None)
@@ -3428,7 +3425,7 @@ class BZBotAI:
         Nutzt denselben 2s-Cache wie `_find_ricochet_aim_angle` (kein zusätzlicher Sweep)."""
         if target_pid is None:
             return False
-        _fb = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+        _fb = self._own_flag_bytes()
         if not (self._has_teleporters()
                 or can_ricochet(_fb, self.own_flag == "GM", self.own_flag == "SW",
                                 self._server_ricochet)):
@@ -3469,7 +3466,7 @@ class BZBotAI:
         hlen = self._tank_length / 2 + self._shot_radius
         hh   = self._tank_height / 2 + self._shot_radius
 
-        flag_bytes = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+        flag_bytes = self._own_flag_bytes()
         direct_az  = math.atan2(enemy.pos[1] - by, enemy.pos[0] - bx)
 
         eff_speed      = self._effective_shot_speed()
@@ -3614,7 +3611,7 @@ class BZBotAI:
         aim_angle = math.atan2(ep[1] - self.pos[1], ep[0] - self.pos[0])
         _indirect = False
         if not self._has_los_to_enemy(self.target_player) or self._cross_floor_indirect(info):
-            _fb = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+            _fb = self._own_flag_bytes()
             if can_ricochet(_fb, False, False, self._server_ricochet) or self._has_teleporters():
                 _rico_az = self._find_ricochet_aim_angle(
                     self.target_player, (ep[0], ep[1])
@@ -3645,7 +3642,7 @@ class BZBotAI:
         aim_angle = math.atan2(ep[1] - self.pos[1], ep[0] - self.pos[0])
         _indirect = False
         if not self._has_los_to_enemy(self.target_player) or self._cross_floor_indirect(info):
-            _fb = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+            _fb = self._own_flag_bytes()
             if can_ricochet(_fb, False, False, self._server_ricochet) or self._has_teleporters():
                 _rico_az = self._find_ricochet_aim_angle(self.target_player, None)
                 if _rico_az is not None:
@@ -3709,7 +3706,7 @@ class BZBotAI:
         _indirect = False
         _no_los = not self._has_los_to_enemy(self.target_player)
         if _no_los or self._cross_floor_indirect(info):
-            _fb = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+            _fb = self._own_flag_bytes()
             _can_rico = can_ricochet(_fb, self.own_flag == "GM",
                                       self.own_flag == "SW", self._server_ricochet)
             # Teleporter routen auch normale Schüsse → Aim-Sweep auch ohne Ricochet versuchen.
@@ -3843,7 +3840,7 @@ class BZBotAI:
             + struct.pack(">fff", vx, vy, 0.0)
             + struct.pack(">f",  0.0)
             + struct.pack(">h",  team_id)
-            + (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+            + self._own_flag_bytes()
             + struct.pack(">f",  self._shot_lifetime)
         )
         assert len(payload) == 43
