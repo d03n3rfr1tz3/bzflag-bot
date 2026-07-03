@@ -468,3 +468,78 @@ def test_empty_for_zero_speed():
         b"R\x00", [], 200.0, True,
     )
     assert segs == []
+
+
+# ---------------------------------------------------------------------------
+# P1: Broad-Phase-Grid-Äquivalenz (obs_grid == linearer Scan, exakt)
+# ---------------------------------------------------------------------------
+
+import random
+
+from conftest import load_map_fixture
+from bzflag.obstacle_grid import ObstacleGrid, LOS_GRID_PAD
+from bzflag.shot_physics import build_link_map
+
+
+class TestShotPathGridEquivalence:
+    """Das Grid ist nur eine Broad-Phase-Übermenge entlang des Strahls — die
+    Segmentlisten müssen EXAKT identisch sein (0 Mismatch), auch bei rotierten
+    Boxen, Pyramiden und Schüssen mit Z-Komponente."""
+
+    def _obs(self):
+        return [
+            _box(cx=30.0, cy=0.0, hw=5.0, hd=20.0, height=10.0),
+            _box(cx=-40.0, cy=25.0, hw=8.0, hd=3.0, height=12.0,
+                 angle=math.radians(30.0)),
+            _box(cx=10.0, cy=-45.0, hw=6.0, hd=6.0, height=9.0, is_pyr=True),
+            _box(cx=-20.0, cy=-20.0, hw=4.0, hd=4.0, height=14.0, is_pyr=True,
+                 angle=math.radians(45.0)),
+            _box(cx=60.0, cy=60.0, hw=5.0, hd=5.0, height=8.0),
+            _box(cx=0.0, cy=40.0, hw=12.0, hd=2.0, height=6.0, shoot_through=True),
+        ]
+
+    def test_random_shots_identical(self):
+        rng = random.Random(42)
+        obs = self._obs()
+        solid = [o for o in obs if not o.shoot_through]
+        grid = ObstacleGrid(solid, pad=LOS_GRID_PAD)
+        for i in range(400):
+            pos = (rng.uniform(-90.0, 90.0), rng.uniform(-90.0, 90.0),
+                   rng.uniform(0.5, 8.0))
+            az = rng.uniform(-math.pi, math.pi)
+            speed = rng.choice([50.0, 100.0, 200.0])
+            vel = (math.cos(az) * speed, math.sin(az) * speed,
+                   rng.choice([0.0, 0.0, 10.0, -5.0]))
+            life = rng.uniform(0.5, 3.5)
+            a = simulate_shot_path(pos, vel, 0.0, life, b"R\x00",
+                                   obs, 100.0, True)
+            b = simulate_shot_path(pos, vel, 0.0, life, b"R\x00",
+                                   obs, 100.0, True,
+                                   solid_obs=solid, obs_grid=grid)
+            assert a == b, (i, pos, vel, life)
+
+    def test_hix_real_map_identical(self):
+        """Echte Karte (HIX: hunderte Obstacles, Pyramiden, Teleporter):
+        randomisierte Rico-Schüsse, Segmentlisten exakt gleich."""
+        wm = load_map_fixture("hix")
+        if wm is None:
+            pytest.skip("hix-Fixture fehlt (tests/fixtures/hix.bin)")
+        lmap = build_link_map(wm.links)
+        solid = wm.solid_obstacles()
+        grid = ObstacleGrid(solid, pad=LOS_GRID_PAD)
+        rng = random.Random(1337)
+        half = wm.world_half
+        for i in range(200):
+            pos = (rng.uniform(-half * 0.95, half * 0.95),
+                   rng.uniform(-half * 0.95, half * 0.95),
+                   rng.uniform(0.5, 25.0))
+            az = rng.uniform(-math.pi, math.pi)
+            vel = (math.cos(az) * 100.0, math.sin(az) * 100.0, 0.0)
+            a = simulate_shot_path(pos, vel, 0.0, 3.5, b"\x00\x00",
+                                   wm.boxes, half, True,
+                                   teleporters=wm.teleporters, link_map=lmap)
+            b = simulate_shot_path(pos, vel, 0.0, 3.5, b"\x00\x00",
+                                   wm.boxes, half, True,
+                                   teleporters=wm.teleporters, link_map=lmap,
+                                   solid_obs=solid, obs_grid=grid)
+            assert a == b, (i, pos, vel)

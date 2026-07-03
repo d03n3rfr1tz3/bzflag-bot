@@ -15,6 +15,7 @@ from bzflag.shot_physics import (simulate_shot_path,
                                   build_link_map,
                                   _segment_hits_obb_3d)
 from bzflag.world_map import teleporter_solid_boxes
+from bzflag.obstacle_grid import ObstacleGrid, LOS_GRID_PAD
 from bzflag.protocol import (
     DEFAULT_PORT, PLAYER_TYPE_TANK, PLAYER_TYPE_COMPUTER,
     TEAM_AUTOMATIC, TEAM_OBSERVER,
@@ -295,6 +296,7 @@ class BZBot(BZBotAI):
         self.human_count    = 0
         self.observer_count = 0
         self._world_map = None   # Optional[WorldMap] — gesetzt nach Welt-Download
+        self._shot_grid = None   # Optional[ObstacleGrid] — Broad-Phase für simulate_shot_path (P1)
         self._link_map = {}      # face-Index → Ziel-face-Index (Teleporter), aus _world_map.links
         self._tele_solid_boxes: list = []  # Teleporter-Posts+Crossbar als BoxObstacle (Kollision)
         self._teleporting_until = 0.0      # P3-NAV-02: PS_TELEPORTING-Ende + Re-Trigger-Sperre
@@ -885,10 +887,16 @@ class BZBot(BZBotAI):
     def _on_world_ready(self, world_map) -> None:
         """Callback nach Welt-Download: speichert WorldMap und baut NavGraph."""
         self._world_map = world_map
+        self._shot_grid = None   # nie stale zur alten Welt (Rebuild unten)
         if world_map is None:
             logger.warning("[%s] Karten-Wissen nicht verfügbar (Parse-Fehler)", self.callsign)
             return
         self._link_map = build_link_map(world_map.links)
+        # P1: Broad-Phase-Grid für simulate_shot_path — einmalig pro Weltladen aus
+        # den soliden Obstacles. Kleines Pad genügt: die Ray-Narrow-Phase
+        # (ray_box_hit/ray_pyramid_hit) hat Margin 0, das Pad dient nur der
+        # Float-Robustheit an Zellgrenzen (wie beim LoS-Grid).
+        self._shot_grid = ObstacleGrid(world_map.solid_obstacles(), pad=LOS_GRID_PAD)
         # P3-NAV-02: solide Teleporter-Teile (Posts + Crossbar) für die reaktive Kollision cachen.
         self._tele_solid_boxes = [box for t in world_map.teleporters
                                   for box in teleporter_solid_boxes(t)]
@@ -1375,6 +1383,7 @@ class BZBot(BZBotAI):
                 link_map=self._link_map,
                 tele_log=_tlog,
                 solid_obs=self._world_map.solid_obstacles(),
+                obs_grid=self._shot_grid,
             )
         with self._shots_lock:
             self._shots[(shooter, shot_id)] = shot

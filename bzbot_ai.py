@@ -3520,6 +3520,7 @@ class BZBotAI:
                 link_map=getattr(self, "_link_map", None),
                 tele_log=_tl,
                 solid_obs=wmap.solid_obstacles(),
+                obs_grid=getattr(self, "_shot_grid", None),
             )
             if len(segs) <= 1:
                 continue
