@@ -400,3 +400,25 @@ class TestShotRangeServerVar:
         assert bot._find_target_player() is None       # 450u > 350u und > Radar
         bot._shot_range = 600.0
         assert bot._find_target_player() == 2          # im erweiterten Sichtfenster
+
+
+# ── F6: Radar-Reichweite = halbe Weltgröße, folgt _worldSize ─────────────────
+
+class TestRadarRangeWorldHalf:
+    """F6: Radar bewusst auf die HALBE Weltgröße begrenzt (Fairness-Limit,
+    s. _effective_radar_range-Docstring) — aber via self.world_half an
+    _worldSize-Änderungen gekoppelt statt fix 400u."""
+
+    def test_radar_follows_world_half(self, bot):
+        bot.world_half = 800.0                        # 1600u-Welt
+        assert bot._effective_radar_range() == pytest.approx(800.0)
+        make_player(bot, 2, pos=(0.0, 600.0, 0.0))    # 90° seitlich → kein FOV-Fenster
+        assert bot._find_target_player() == 2         # 600u < 800u Radar
+        bot.players[2].pos[1] = 900.0
+        assert bot._find_target_player() is None      # 900u > 800u Radar
+
+    def test_burrow_quarter_scales_with_world_half(self, bot):
+        bot.world_half = 800.0
+        bot.own_flag = "BU"
+        bot.pos = [0.0, 0.0, -1.0]
+        assert bot._effective_radar_range() == pytest.approx(200.0)

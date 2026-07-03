@@ -2261,10 +2261,18 @@ class BZBotAI:
         return best, best_t
 
     def _effective_radar_range(self) -> float:
-        """Liefert effektive Radar-Reichweite (25% wenn BU + pos[2] < 0)."""
+        """Liefert effektive Radar-Reichweite (25% wenn BU + pos[2] < 0).
+
+        F6, bewusste Design-Entscheidung: Reichweite = HALBE Weltgröße
+        (self.world_half, via _worldSize nachgeführt), NICHT die volle. Das
+        echte Client-Radar hat Zoomstufen und dreht mit der Blickrichtung —
+        ein Mensch sieht nie permanent die ganze Karte. Da der Bot über
+        FoV+LoS bereits kartenweit schauen darf, wäre ein Voll-Radar
+        Allwissenheit; das Halbe-Welt-Limit hält ihn fair. Nicht „fixen"!"""
+        base = getattr(self, "world_half", RADAR_RANGE)
         if self.own_flag == "BU" and self.pos[2] < 0.0:
-            return RADAR_RANGE * 0.25
-        return RADAR_RANGE
+            return base * 0.25
+        return base
 
     def _find_target_player(self):
         """Wählt das nächste Ziel; None im Passivmodus."""
