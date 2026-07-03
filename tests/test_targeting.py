@@ -372,3 +372,31 @@ class TestShotRevealsShooter:
         bot._on_shot_begin(0, payload)
         assert sh.pos[0] == 90.0 and sh.pos[1] == 5.0          # auf Schuss-Ursprung gesprungen
         assert sh.radar_blind_until == 0.0                     # Cooldown freigegeben
+
+
+# ── F5: Sicht-/Zielfenster nutzen Server-Wert _shotRange statt Konstante ──────
+
+class TestShotRangeServerVar:
+    """F5: Die Sicht-Fenster in _validate_and_find_target und _find_target_player
+    folgen dem Server-Wert self._shot_range (MsgSetVar _shotRange), nicht der
+    Konstante 350 — auf Standard-Servern identisch, auf Custom-Servern korrekt."""
+
+    def test_target_kept_within_custom_shot_range(self, bot):
+        make_player(bot, 2, pos=(450.0, 0.0, 0.0))
+        bot.azimuth = 0.0
+        # Standard (350u): 450u weder im Radar (400u) noch im Sichtfenster → Ziel weg
+        bot.target_player = 2
+        bot._validate_and_find_target()
+        assert bot.target_player is None
+        # Custom-Server _shotRange=600 → Sichtfenster hält das Ziel
+        bot.target_player = 2
+        bot._shot_range = 600.0
+        bot._validate_and_find_target()
+        assert bot.target_player == 2
+
+    def test_find_target_respects_custom_shot_range(self, bot):
+        make_player(bot, 2, pos=(450.0, 0.0, 0.0))
+        bot.azimuth = 0.0
+        assert bot._find_target_player() is None       # 450u > 350u und > Radar
+        bot._shot_range = 600.0
+        assert bot._find_target_player() == 2          # im erweiterten Sichtfenster

@@ -1309,7 +1309,12 @@ class BZBotAI:
                 _d = math.hypot(_tx - self.pos[0], _ty - self.pos[1])
                 _in_r = _d < self._effective_radar_range()
                 _in_s = False
-                if _d < SHOT_RANGE:
+                # F5: Server-Basiswert (_shotRange) statt Konstante. Bewusst OHNE eigene
+                # Flaggen-Multiplikatoren (_effective_shot_range): das ist ein Sicht-/
+                # Halte-Fenster, kein Waffenwert — Laser (AdVel×1000) würde es sonst
+                # auf die ganze Karte ausdehnen. Deckungsgleich zum Zielwahl-Fenster
+                # in _find_target_player.
+                if _d < self._shot_range:
                     _ang = math.atan2(_ty - self.pos[1], _tx - self.pos[0])
                     _in_s = abs(_angle_diff(_ang, self.azimuth)) < self._effective_fov()
                 if not _in_r and not _in_s:
@@ -1475,7 +1480,9 @@ class BZBotAI:
         _opt = self._effective_optimal_range()
         _enemy_z = info.pos[2] if info is not None else self.pos[2]
         _los_clear   = self._has_los_to_enemy(self.target_player)
-        _dist_thresh = SHOT_RANGE if _los_clear else _opt * 1.1
+        # F5: Server-Basiswert (_shotRange) statt Konstante; ohne Flaggen-Multiplikatoren,
+        # sonst würde z.B. Laser den Direktmodus kartenweit aktivieren (nie mehr A*-Nav).
+        _dist_thresh = self._shot_range if _los_clear else _opt * 1.1
         _check1      = self.pos[2] + TANK_HEIGHT > _enemy_z
         # C: Bot unter erhöhtem Gegner mit verfügbarem Indirekt-Schuss → stehen & aufs Tor zielen
         # statt hochzuklettern, zeitlich gedeckelt (kein ewiges Festkleben). sobald die
@@ -2279,7 +2286,9 @@ class BZBotAI:
             d = math.hypot(info.pos[0] - self.pos[0], info.pos[1] - self.pos[1])
             in_radar = d < self._effective_radar_range() and self._enemy_visible_radar(info)
             in_sight = False
-            if d < SHOT_RANGE and self._enemy_visible_window(info):
+            # F5: Server-Basiswert (_shotRange) statt Konstante — Sicht-Zielfenster,
+            # bewusst ohne Flaggen-Multiplikatoren (s. _validate_and_find_target).
+            if d < self._shot_range and self._enemy_visible_window(info):
                 angle_to = math.atan2(
                     info.pos[1] - self.pos[1], info.pos[0] - self.pos[0])
                 in_sight = (abs(_angle_diff(angle_to, self.azimuth)) < self._effective_fov()
