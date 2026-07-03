@@ -651,6 +651,10 @@ class BZBot(BZBotAI):
                 else:
                     if shot.is_gm:
                         if shot.shooter_id == self.player_id:
+                            # Bewusste Vereinfachung (F8): Im echten BZFlag kann die
+                            # eigene Rakete einen treffen — praktisch aber nur mit
+                            # stark veränderten Server-Variablen oder extrem
+                            # ungünstigen Teleporter-Schüssen erreichbar → ignoriert.
                             continue
                         prev_x, prev_y, prev_z = shot.pos[0], shot.pos[1], shot.pos[2]
                         gm_tx = gm_ty = gm_tz = None

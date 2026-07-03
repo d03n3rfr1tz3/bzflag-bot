@@ -2139,8 +2139,12 @@ class BZBotAI:
     def _should_update_player(self, info, px: float, py: float, pz: float, now: float) -> bool:
         """Übernimmt der Bot diese Gegnerposition jetzt?
         - Direkter Sichtkontakt (Fenster: FoV+LoS) → immer aktuell (man schaut ihn an).
-        - Nur Radar → Radar-Aufmerksamkeit: pro Tick mit (1-skip) hinschauen; bei Fehlschlag für
-          einen Cooldown ganz wegschauen (CL stärker). Weder Fenster noch Radar (ST/eigenes JM) → nie."""
+        - Nur Radar → Radar-Aufmerksamkeit: pro EINGEHENDEM MsgPlayerUpdate mit (1-skip)
+          hinschauen; bei Fehlschlag für einen Cooldown ganz wegschauen (CL stärker).
+          Achtung (F8, dokumentiert): der Würfelwurf hängt damit an der Server-Update-Rate
+          (Standard 30 Hz × Spieler) — bei abweichender Rate verschiebt sich die effektive
+          Aufmerksamkeit; der Cooldown (zeitbasiert) dämpft das. Bewusst so belassen.
+        - Weder Fenster noch Radar (ST/eigenes JM) → nie."""
         if self._sees_in_window(info, px, py, pz):
             return True
         if not self._enemy_visible_radar(info):
@@ -3663,6 +3667,16 @@ class BZBotAI:
         self._send_shot(now, self.azimuth)
         self._set_next_shoot_after_fire(now)
 
+    def _fire_gate_rad(self, dist: float) -> float:
+        """Maximal erlaubte Abweichung zwischen Ziel- und Blickwinkel beim Feuern,
+        distanzabhängig (F8): linear von 25° (Zieldistanz ≤10u) auf 5° (≥100u)
+        verengt — max_dev_deg = 25 − 20 · clamp((dist − 10) / 90, 0, 1).
+        Im Nahkampf ist Streuung okay (Ziel füllt den Winkel), auf Distanz ist
+        ein 20°-Fehlschuss praktisch garantiert (Slot-Verschwendung). Gilt
+        einheitlich für Direkt- wie Indirekt-Schüsse."""
+        f = max(0.0, min(1.0, (dist - 10.0) / 90.0))
+        return math.radians(25.0 - 20.0 * f)
+
     def _maybe_shoot_sb(
         self, now: float, ep, info, dx: float, dy: float, dist: float
     ) -> None:
@@ -3671,7 +3685,7 @@ class BZBotAI:
         if aim_xy is None:
             return
         aim_angle = math.atan2(aim_xy[1] - self.pos[1], aim_xy[0] - self.pos[0])
-        if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(25):
+        if abs(_angle_diff(aim_angle, self.azimuth)) > self._fire_gate_rad(dist):
             return
         _warning = False
         if self._ai_state != AIState.LANDING_SHOT and info is not None:
@@ -3732,7 +3746,7 @@ class BZBotAI:
                 _warning = True
             else:
                 return   # Cross-Floor, aber kein indirekter Schuss gefunden → Feuer halten
-        if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(25):
+        if abs(_angle_diff(aim_angle, self.azimuth)) > self._fire_gate_rad(dist):
             return
         # SS1: Z-Achsen-Block — GM und LANDING_SHOT ausgenommen; indirekte (Teleporter-/Abpraller-)
         # Schüsse überbrücken die Etage (Simulation hat den Treffer bestätigt) → ausgenommen.
