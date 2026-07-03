@@ -1333,8 +1333,14 @@ class BZBot(BZBotAI):
             # vor — die wandbewusste Simulation würde ihren Pfad fälschlich an Wänden stoppen;
             # ihr alter Pfad (kein Cache → gerade Linie) ist für sie korrekt.
             _phases_walls = _is_pz or shot.flag_abbr == b"SB"
+            # GM bekommt KEINEN Pfad-Cache: die Rakete lenkt, ein vorberechneter
+            # gerader Pfad wäre falsch — und _find_incoming_shot würde den GM wegen
+            # des Cache-Eintrags im Direkt-Zweig überspringen und stattdessen den
+            # falschen Pfad bewerten. Die live nachgeführte shot.pos (Integration
+            # in _resolve_incoming_shots + MsgGMUpdate) ist für GM die Wahrheit.
             _tele_route = (self._world_map is not None
-                           and bool(self._world_map.teleporters) and not _phases_walls)
+                           and bool(self._world_map.teleporters)
+                           and not _phases_walls and not shot.is_gm)
             if (self._world_map is not None
                     and (_tele_route
                          or _can_ricochet_shot(shot.flag_abbr, shot.is_gm, shot.is_sw,

@@ -1343,8 +1343,10 @@ class BZBotAI:
             _react = DODGE_REACT_DELAY * CS_REACT_MULTIPLIER
         if now - self._threat_detected_at < _react:
             return False
-        # Fix J1a: verbleibende Zeit = Zeit_ab_Abschuss − bereits_vergangene_Zeit
-        _elapsed = max(0.0, now - threat.fire_time)
+        # Fix J1a: verbleibende Zeit = Zeit_ab_Abschuss − bereits_vergangene_Zeit.
+        # Gilt nur für Schüsse mit pos=Abschussort — GM-pos ist bereits die aktuelle
+        # Raketenposition, time_to_closest rechnet dort schon ab jetzt → nichts abziehen.
+        _elapsed = 0.0 if threat.is_gm else max(0.0, now - threat.fire_time)
         time_to_impact = max(0.0, threat.time_to_closest(self.pos[0], self.pos[1]) - _elapsed)
         # Für Ricochet-Schüsse: Segment-basierte Zeit statt linearer Anfangsgeschwindigkeit
         if threat_key in self._ricochet_paths:
@@ -1409,7 +1411,8 @@ class BZBotAI:
     def _compute_dodge_dir(self, threat, now: float):
         """Berechnet optimale Ausweich-Richtung mit 60°-Cap vom aktuellen Azimuth.
         Gibt (capped_dir, orig_diff) zurück: orig_diff für vorwärts/rückwärts-Entscheidung."""
-        sx, sy, _ = threat.position_at(now)
+        # GM: pos ist bereits die aktuelle Raketenposition (s. _find_incoming_shot)
+        sx, sy, _ = threat.pos if threat.is_gm else threat.position_at(now)
         shot_dir = math.atan2(threat.vel[1], threat.vel[0])
         perp_r = _wrap(shot_dir + math.pi / 2)
         perp_l = _wrap(shot_dir - math.pi / 2)
@@ -2151,7 +2154,15 @@ class BZBotAI:
                 # Ricochet-Schüsse: Richtung nach Bounce unklar → nur Segment-Cache prüfen
                 if (shot.shooter_id, shot.shot_id) in self._ricochet_paths:
                     continue
-                sx, sy, sz = shot.position_at(now)
+                if shot.is_gm:
+                    # GM: shot.pos wird laufend nachgeführt (Integration in
+                    # _resolve_incoming_shots + MsgGMUpdate) — position_at() würde
+                    # die bisherige Flugzeit ein ZWEITES Mal aufaddieren und die
+                    # Rakete weit vor ihrer echten Position sehen (Phantom-Position,
+                    # meist „entfernt sich" → GM wurde beim Ausweichen ignoriert).
+                    sx, sy, sz = shot.pos
+                else:
+                    sx, sy, sz = shot.position_at(now)
                 if shot.is_sw:
                     _sw_dist = math.hypot(sx - self.pos[0], sy - self.pos[1])
                     if self._shock_in_radius < _sw_dist < self._shock_out_radius:
