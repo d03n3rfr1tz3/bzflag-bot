@@ -611,7 +611,7 @@ class BZBot(BZBotAI):
                                 _p = self.players.get(shot.gm_target_pid)
                                 if _p is not None:
                                     gm_tx = _p.pos[0]; gm_ty = _p.pos[1]
-                                    gm_tz = _p.pos[2] + TANK_HEIGHT / 2
+                                    gm_tz = _p.pos[2] + self._tank_height / 2
                         if gm_tx is not None:
                             _dx = gm_tx - prev_x; _dy = gm_ty - prev_y; _dz = gm_tz - prev_z
                             _dist = math.sqrt(_dx*_dx + _dy*_dy + _dz*_dz)
@@ -1442,7 +1442,7 @@ class BZBot(BZBotAI):
                 if speed_xyz > 0:
                     dnx, dny, dnz = vx / speed_xyz, vy / speed_xyz, vz / speed_xyz
                     laser_range = speed_xyz * shot.lifetime
-                    cx = self.pos[0]; cy = self.pos[1]; cz = self.pos[2] + TANK_HEIGHT / 2
+                    cx = self.pos[0]; cy = self.pos[1]; cz = self.pos[2] + self._tank_height / 2
                     dx, dy, dz = cx - px, cy - py, cz - pz
                     t_proj = dx * dnx + dy * dny + dz * dnz
                     if 0.0 <= t_proj <= laser_range:
@@ -1482,7 +1482,7 @@ class BZBot(BZBotAI):
                 if speed_xyz > 0:
                     dnx, dny, dnz = vx / speed_xyz, vy / speed_xyz, vz / speed_xyz
                     thief_range = speed_xyz * shot.lifetime
-                    cx = self.pos[0]; cy = self.pos[1]; cz = self.pos[2] + TANK_HEIGHT / 2
+                    cx = self.pos[0]; cy = self.pos[1]; cz = self.pos[2] + self._tank_height / 2
                     dx, dy, dz = cx - px, cy - py, cz - pz
                     t_proj = dx * dnx + dy * dny + dz * dnz
                     if 0.0 <= t_proj <= thief_range:
@@ -1500,7 +1500,7 @@ class BZBot(BZBotAI):
                                     logger.debug("[%s] Schuss: TH-Treffer von %d – keine eigene Flagge vorhanden",
                                                  self.callsign, shooter)
         if shot.is_sw and self.alive and self.player_id is not None:
-            tank_cz_sw = self.pos[2] + TANK_HEIGHT / 2
+            tank_cz_sw = self.pos[2] + self._tank_height / 2
             _sw_dist = math.sqrt(
                 (px - self.pos[0])**2 +
                 (py - self.pos[1])**2 +
@@ -1553,7 +1553,7 @@ class BZBot(BZBotAI):
                 s.pos = [px, py, pz]; s.vel = [vx, vy, vz]
                 s.last_gm_update = time.monotonic()
                 s.gm_target_pid  = target
-        tank_cz = self.pos[2] + TANK_HEIGHT / 2
+        tank_cz = self.pos[2] + self._tank_height / 2
         dist3d  = math.sqrt((px-self.pos[0])**2 + (py-self.pos[1])**2 + (pz-tank_cz)**2)
         if self.alive and self.player_id is not None and dist3d < HIT_RADIUS:
             shot_obj = None

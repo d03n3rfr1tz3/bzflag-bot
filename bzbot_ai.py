@@ -1483,7 +1483,7 @@ class BZBotAI:
         # F5: Server-Basiswert (_shotRange) statt Konstante; ohne Flaggen-Multiplikatoren,
         # sonst würde z.B. Laser den Direktmodus kartenweit aktivieren (nie mehr A*-Nav).
         _dist_thresh = self._shot_range if _los_clear else _opt * 1.1
-        _check1      = self.pos[2] + TANK_HEIGHT > _enemy_z
+        _check1      = self.pos[2] + self._tank_height > _enemy_z
         # C: Bot unter erhöhtem Gegner mit verfügbarem Indirekt-Schuss → stehen & aufs Tor zielen
         # statt hochzuklettern, zeitlich gedeckelt (kein ewiges Festkleben). sobald die
         # Navigation durch Tore routet, wird genau diese Bedingung zur traverse-vs-shoot-Entscheidung.
@@ -1499,12 +1499,12 @@ class BZBotAI:
             _skip_nav = False
         replan_xy  = (nav_goal is None or math.hypot(ep[0] - nav_goal[0],
                                                      ep[1] - nav_goal[1]) > 20.0)
-        replan_z   = abs(enemy_z - nav_goal_z) > TANK_HEIGHT * 2
+        replan_z   = abs(enemy_z - nav_goal_z) > self._tank_height * 2
         # Während einer Stuck-Episode verwaltet _combat_escalate das Planen allein (sonst würde
         # replan_xy den Reposition-Pfad überschreiben). Im Direktmodus wird kein Pfad gefahren →
         # gar nicht erst planen (spart A* und vermeidet ungenutzte Wegpunkt-Logs).
         if (replan_xy or replan_z) and not _stuck_active and not _skip_nav:
-            if enemy_z > TANK_HEIGHT:
+            if enemy_z > self._tank_height:
                 # Z_ATTACK möglich → 50% NAV_JUMP hoch; sonst (auch _too_high) → immer hoch
                 _goal_z = enemy_z if (_too_high or not self._z_attack_feasible(now)
                                       or random.random() < 0.5) else None
@@ -2121,7 +2121,7 @@ class BZBotAI:
         """Voller Fenster-Sichtkontakt: Flagge erlaubt Fenster-Sicht UND im FoV UND unverdeckt (LoS)."""
         return (self._enemy_visible_window(info)
                 and self._in_fov(x, y)
-                and self._has_los_to_point(x, y, z + TANK_HEIGHT * 0.5))
+                and self._has_los_to_point(x, y, z + self._tank_height * 0.5))
 
     # Schuss-Sichtbarkeit = Spiegelbild der Tank-Sichtbarkeit (SE betrifft nur Tanks, nicht Schüsse).
     def _shot_visible_radar(self, shooter) -> bool:
@@ -2301,7 +2301,7 @@ class BZBotAI:
                     info.pos[1] - self.pos[1], info.pos[0] - self.pos[0])
                 in_sight = (abs(_angle_diff(angle_to, self.azimuth)) < self._effective_fov()
                             and self._has_los_to_point(info.pos[0], info.pos[1],
-                                                       info.pos[2] + TANK_HEIGHT * 0.5))
+                                                       info.pos[2] + self._tank_height * 0.5))
             if not in_radar and not in_sight:
                 continue
             if not self._is_foe(info, in_sight):
@@ -3025,7 +3025,7 @@ class BZBotAI:
         nav = getattr(self, "_nav_graph", None)
         if nav is None or max_dist <= 0.0:
             return None
-        ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + TANK_HEIGHT * 0.5
+        ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + self._tank_height * 0.5
         dx = math.cos(az) * max_dist; dy = math.sin(az) * max_dist
         best_t = 2.0; best_axis = -1; best_box = None
         # Broad-Phase: nur Boxen entlang des Strahls (DDA); Fallback auf linearen Scan ohne _los_grid.
@@ -3078,7 +3078,7 @@ class BZBotAI:
     def _has_los_to_point(self, ex: float, ey: float, ez: float) -> bool:
         """Reine Sicht-LoS: True, wenn keine solide Box zwischen Bot-Auge und (ex,ey,ez) liegt.
         Teleporter blockieren KEINE Sicht (das ist nur Schuss-LoS, s. _has_los_to_enemy)."""
-        return self._segment_clear(self.pos[0], self.pos[1], self.pos[2] + TANK_HEIGHT * 0.5,
+        return self._segment_clear(self.pos[0], self.pos[1], self.pos[2] + self._tank_height * 0.5,
                                    ex, ey, ez)
 
     def _muzzle_clear(self, az: float) -> bool:
@@ -3107,7 +3107,7 @@ class BZBotAI:
         info = self.players.get(target_pid) if target_pid else None
         if info is None or not info.alive:
             return True
-        ex = info.pos[0]; ey = info.pos[1]; ez = info.pos[2] + TANK_HEIGHT * 0.5
+        ex = info.pos[0]; ey = info.pos[1]; ez = info.pos[2] + self._tank_height * 0.5
         # P4a: Per-Tick-Memo — bis zu 3× pro Tick identisch aufgerufen
         # (_execute_combat_move 2×, _maybe_shoot_standard 1×). Key enthält
         # beide Positionen → bewegt sich der Gegner mittendrin (Recv-Thread),
@@ -3126,7 +3126,7 @@ class BZBotAI:
             # also kein sauberer Direktschuss (der indirekte Aim-Sweep übernimmt dann, s. A4).
             wm = getattr(self, "_world_map", None)
             if wm and wm.teleporters:
-                ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + TANK_HEIGHT * 0.5
+                ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + self._tank_height * 0.5
                 dx = ex - ox; dy = ey - oy; dz = ez - oz
                 lmap = getattr(self, "_link_map", {})
                 for ti, tele in enumerate(wm.teleporters):
@@ -3463,7 +3463,7 @@ class BZBotAI:
         bx, by, bz = self.pos[0], self.pos[1], self.pos[2]
         ecx = predicted_pos[0] if predicted_pos else enemy.pos[0]
         ecy = predicted_pos[1] if predicted_pos else enemy.pos[1]
-        ecz = enemy.pos[2] + TANK_HEIGHT * 0.5
+        ecz = enemy.pos[2] + self._tank_height * 0.5
 
         hw   = self._tank_width  / 2 + self._shot_radius
         hlen = self._tank_length / 2 + self._shot_radius
@@ -3598,7 +3598,7 @@ class BZBotAI:
             mz = self.pos[2] + self._muzzle_height
             ax = mx + math.cos(az) * self._gm_min_range
             ay = my + math.sin(az) * self._gm_min_range
-            ez = (info.pos[2] if info is not None else self.pos[2]) + TANK_HEIGHT * 0.5
+            ez = (info.pos[2] if info is not None else self.pos[2]) + self._tank_height * 0.5
             if not (self._segment_clear(mx, my, mz, ax, ay, mz)
                     and self._segment_clear(ax, ay, mz, ep[0], ep[1], ez)):
                 return
@@ -3632,7 +3632,7 @@ class BZBotAI:
         if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(5):
             return
         if (not _indirect and info is not None
-                and abs(info.pos[2] - self.pos[2]) > TANK_HEIGHT * 0.7):
+                and abs(info.pos[2] - self.pos[2]) > self._tank_height * 0.7):
             return
         self._send_shot(now, self.azimuth)
         self._set_next_shoot_after_fire(now)
@@ -3661,7 +3661,7 @@ class BZBotAI:
         if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(10):
             return
         if (not _indirect and info is not None
-                and abs(info.pos[2] - self.pos[2]) > TANK_HEIGHT * 0.7):
+                and abs(info.pos[2] - self.pos[2]) > self._tank_height * 0.7):
             return
         self._send_shot(now, self.azimuth)
         self._set_next_shoot_after_fire(now)
