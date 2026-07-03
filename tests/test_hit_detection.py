@@ -471,6 +471,27 @@ class TestShieldFlagHit:
         assert bot.alive is False
 
 
+# ── Stall-Segmente (F4: kein Geister-Durchflug) ──────────────────────────
+
+class TestStallSegmentCrossing:
+    """F4: Ein Segment, das den Tank innerhalb eines (langen) Ticks DURCHquert,
+    muss treffen — der Wegbewegen-Skip darf nur greifen, wenn sich schon der
+    Segment-ANFANG entfernt (sonst Geister-Durchflug bei Stalls)."""
+
+    def test_segment_crossing_tank_hits(self, bot):
+        bot.pos = [0.0, 0.0, 0.0]
+        bot.own_flag = ""
+        now = time.monotonic()
+        # Vor 0,15s bei x=10 abgefeuert, jetzt bei x=-5: hat den Tank durchquert,
+        # der Endpunkt entfernt sich bereits → der alte Endpunkt-Skip verwarf
+        # das Segment und der Schuss traf nie.
+        make_shot(bot, shooter_id=2, shot_id=1,
+                  pos=(10.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0),
+                  fire_time=now - 0.15)
+        bot._resolve_incoming_shots(now, 0.5)
+        assert bot.alive is False
+
+
 # ── Cleanup abgelaufener Schüsse (F3: _ricochet_paths-Leak) ──────────────
 
 class TestCleanupShots:

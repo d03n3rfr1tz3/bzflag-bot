@@ -97,6 +97,9 @@ ai_tick = (self._tick_count % (UPDATE_RATE_HZ // AI_RATE_HZ) == 0)   # 60/10 →
 
 `dt` ist die echte vergangene Zeit, nicht der ideale Tick-Abstand. Bei Systemlast kann
 dt deutlich größer als 20ms sein. Alle Physik-Berechnungen benutzen `dt`, keine fixen Werte.
+`dt_r` ist zentral auf **0,1s geklemmt** (F4): bei Stalls (GC, Container-Scheduling,
+Netz-Hänger) läuft die Simulation kurz verlangsamt weiter, statt in einem Riesenschritt
+durch Wände zu tunneln oder das GM-Steering zu überdrehen.
 
 ### Server-Zeitstempel
 

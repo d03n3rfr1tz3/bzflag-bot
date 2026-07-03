@@ -504,7 +504,12 @@ class BZBot(BZBotAI):
             self._spawn()
         while self._running and not self._stop_event.is_set():
             now  = time.monotonic()
-            dt_r = now - last_tick
+            # Stall-Clamp (GC, Netz-Hänger, Container-Scheduling): ein ungebremster
+            # Einzelschritt tunnelt per Zielpunkt-Kollision durch dünne Wände,
+            # überdreht das GM-Steering (max_turn = _gm_turn_angle * dt) und lässt
+            # die Hit-Detection lange Segmente überspringen. 0,1s = 6 Nominal-Ticks;
+            # jenseits davon läuft die Simulation lieber kurz „zeitlupig" weiter.
+            dt_r = min(now - last_tick, 0.1)
             last_tick = now
             if not self.client.connected:
                 logger.warning("[%s] Verbindung verloren", self.callsign)
@@ -673,8 +678,13 @@ class BZBot(BZBotAI):
                             bx, by, bz = shot.position_at(now)
                             # Skip wenn Schuss sich vom Bot wegbewegt (past closest approach).
                             # Schuss bleibt in _shots — könnte bei Ricochet zurückkommen.
-                            _rel_x = bx - tank_cx; _rel_y = by - tank_cy
-                            if shot.vel[0] * _rel_x + shot.vel[1] * _rel_y > 0:
+                            # BEIDE Segment-Enden prüfen: entfernt sich nur der Endpunkt,
+                            # kann das Segment den Tank in diesem Tick DURCHquert haben —
+                            # dann muss der OBB-Test entscheiden (kein Geister-Durchflug).
+                            _rel_bx = bx - tank_cx; _rel_by = by - tank_cy
+                            _rel_ax = ax - tank_cx; _rel_ay = ay - tank_cy
+                            if (shot.vel[0] * _rel_bx + shot.vel[1] * _rel_by > 0
+                                    and shot.vel[0] * _rel_ax + shot.vel[1] * _rel_ay > 0):
                                 continue
                             hit = _segment_hits_obb_3d(ax, ay, az, bx, by, bz,
                                                         tank_cx, tank_cy, tank_cz, self.azimuth,
