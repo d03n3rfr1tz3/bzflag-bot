@@ -71,7 +71,7 @@ class TestSetVarPhysics:
         assert bot._gravity == pytest.approx(-20.0)
 
     def test_defaults_unchanged_without_setvar(self, bot):
-        from bzbot import SHOT_SPEED_DEFAULT, TANK_SPEED, TANK_TURN_RATE, JUMP_VELOCITY, GRAVITY
+        from bot.constants import SHOT_SPEED_DEFAULT, TANK_SPEED, TANK_TURN_RATE, JUMP_VELOCITY, GRAVITY
         assert bot._shot_speed    == pytest.approx(SHOT_SPEED_DEFAULT)
         assert bot._tank_speed    == pytest.approx(TANK_SPEED)
         assert bot._tank_turn_rate == pytest.approx(TANK_TURN_RATE)
@@ -238,24 +238,24 @@ class TestBurrowFlag:
     def test_radar_full_when_no_burrow(self, bot):
         bot.own_flag = ""
         bot.pos = [0.0, 0.0, 0.0]
-        from bzbot import RADAR_RANGE
+        from bot.constants import RADAR_RANGE
         assert bot._effective_radar_range() == pytest.approx(RADAR_RANGE)
 
     def test_radar_full_when_burrow_above_ground(self, bot):
         bot.own_flag = "BU"
         bot.pos = [0.0, 0.0, 0.0]  # nicht unterirdisch
-        from bzbot import RADAR_RANGE
+        from bot.constants import RADAR_RANGE
         assert bot._effective_radar_range() == pytest.approx(RADAR_RANGE)
 
     def test_radar_reduced_when_burrowed(self, bot):
         bot.own_flag = "BU"
         bot.pos = [0.0, 0.0, -1.0]  # unterirdisch
-        from bzbot import RADAR_RANGE
+        from bot.constants import RADAR_RANGE
         assert bot._effective_radar_range() == pytest.approx(RADAR_RANGE * 0.25)
 
     def test_bu_sinks_to_burrow_depth(self, bot):
         """BU-Flagge: Tank sinkt durch Schwerkraft auf BURROW_DEPTH."""
-        from bzbot_ai import BURROW_DEPTH
+        from bot.constants import BURROW_DEPTH
         bot.own_flag = "BU"
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
@@ -269,7 +269,7 @@ class TestBurrowFlag:
     def test_bu_drop_resets_z(self, bot):
         """_on_drop_flag bei BU: pos[2] wird auf 0 zurückgesetzt."""
         from bzflag.protocol import MsgDropFlag
-        from bzbot_ai import BURROW_DEPTH
+        from bot.constants import BURROW_DEPTH
         bot.own_flag = "BU"
         bot.pos = [0.0, 0.0, BURROW_DEPTH]
         bot.vel = [0.0, 0.0, 0.0]
@@ -286,13 +286,13 @@ class TestBurrowFlag:
 
 def test_tank_turn_rate_default_is_pi_over_4(bot):
     """TANK_TURN_RATE Default ist π/4 ≈ 0.785 (aus BZFlag global.cxx)."""
-    from bzbot import TANK_TURN_RATE
+    from bot.constants import TANK_TURN_RATE
     assert TANK_TURN_RATE == pytest.approx(0.785398, rel=1e-4)
 
 
 def test_max_shots_default_is_1(bot):
     """MAX_SHOTS_DEFAULT ist 1 (aus BZFlag CmdLineOptions.h)."""
-    from bzbot import MAX_SHOTS_DEFAULT
+    from bot.constants import MAX_SHOTS_DEFAULT
     assert MAX_SHOTS_DEFAULT == 1
 
 
@@ -642,7 +642,7 @@ class TestGenocideVictim:
         """Teamkamerad durch G-Flagge getötet → Bot stirbt mit, sendet MsgKilled(GenocideEffect)."""
         from conftest import make_player
         from bzflag.protocol import MsgKilled as MsgKilledCode
-        from bzbot_ai import AIState
+        from bot.models import AIState
         # Bot in Team 2
         bot.team = 2
         bot.alive = True
@@ -820,7 +820,7 @@ def _build_near_flag_payload(x, y, z, flag_name):
 
 def test_on_near_flag_updates_abbr(bot):
     """_on_near_flag: Flagge bei (10,20) mit abbr='' → abbr wird auf 'GM' gesetzt."""
-    from bzbot import FlagInfo
+    from bot.models import FlagInfo
     from bzflag.protocol import MsgNearFlag
     bot.own_flag = "ID"
     bot.flags[3] = FlagInfo(flag_id=3, abbr="", status=1, pos=[10.0, 20.0, 0.0])
@@ -831,7 +831,7 @@ def test_on_near_flag_updates_abbr(bot):
 
 def test_on_near_flag_good_flag_drops_id(bot):
     """_on_near_flag: gute Flagge identifiziert → _try_drop_flag aufgerufen (MsgDropFlag)."""
-    from bzbot import FlagInfo
+    from bot.models import FlagInfo
     from bzflag.protocol import MsgNearFlag, MsgDropFlag
     bot.own_flag = "ID"
     bot.good_flags = {"GM"}
@@ -845,7 +845,7 @@ def test_on_near_flag_good_flag_drops_id(bot):
 
 def test_on_near_flag_ignored_without_id(bot):
     """_on_near_flag: Bot hält kein ID → kein abbr-Update, kein Send."""
-    from bzbot import FlagInfo
+    from bot.models import FlagInfo
     from bzflag.protocol import MsgNearFlag
     bot.own_flag = "GM"
     bot.flags[3] = FlagInfo(flag_id=3, abbr="", status=1, pos=[10.0, 20.0, 0.0])

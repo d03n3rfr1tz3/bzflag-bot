@@ -241,7 +241,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._recent_flag_targets: collections.deque = collections.deque(maxlen=10)  # (round_x, round_y)
         self._wp_start_time: Optional[float] = None  # Zeit seit aktuellem WP-Ziel
         self._wp_fail_count: int = 0                 # aufeinanderfolgende WP-Timeouts
-        self._wp_timeout: float = 3.0                # per-WP Timeout (berechnet in bzbot_ai.py)
+        self._wp_timeout: float = 3.0                # per-WP Timeout (berechnet in bot/ai/navigation.py)
 
     def _init_shots(self):
         """Shot-Tracking (Recv-Thread schreibt, Game-Loop liest)."""

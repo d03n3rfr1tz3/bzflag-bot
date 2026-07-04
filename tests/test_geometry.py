@@ -4,7 +4,8 @@ import pytest
 
 
 def import_symbols():
-    from bzbot import _angle_diff, _wrap, _segment_point_dist3d, Shot
+    from bot.models import Shot
+    from bot.util import _angle_diff, _wrap, _segment_point_dist3d
     return _angle_diff, _wrap, _segment_point_dist3d, Shot
 
 

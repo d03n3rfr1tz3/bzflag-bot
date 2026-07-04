@@ -162,7 +162,7 @@ class NavGraph:
         self._los_obs    = [b for b in world_map.boxes if not b.shoot_through]
         # Broad-Phase-Grid über die soliden Boxen (statisch) für die 60-Hz-Punkt-Queries:
         # get_floor_z sowie die reaktive Physik (Wall-Slide/Decken-Kollision, Box-Innen-Check in
-        # bzbot_ai, die denselben Kandidatensatz world_map.boxes+tele_solid − drive_through nutzen).
+        # bot/ai, die denselben Kandidatensatz world_map.boxes+tele_solid − drive_through nutzen).
         self._solid_grid = ObstacleGrid(self._obs)
         # Eigenes Ray-Grid über die LoS-Boxen (not shoot_through) für _segment_clear/_steep_wall_ahead
         # (query_ray). Anderer Kandidatensatz als _obs → separates Grid.
@@ -398,7 +398,7 @@ class NavGraph:
         Graph parallel beplanen (P4-INF-01). ``cancel`` ist ein Objekt mit ``.is_set()`` (z.B.
         threading.Event). ``tank_speed`` (None → Basis ``self._tank_speed`` 25.0) ist die
         horizontale Sprung-Reisegeschwindigkeit; höher (Velocity/Thief) ⇒ weitere Sprünge machbar,
-        deckungsgleich zum reaktiven Executor (bzbot_ai._travel_tank_speed).
+        deckungsgleich zum reaktiven Executor (bot/ai/capabilities._travel_tank_speed).
         """
         bjw = blocked_jump_wps or frozenset()
         # Start-Knoten
@@ -982,7 +982,7 @@ class NavGraph:
         Pro distinkter Unterkante (self._undersides) wird die Steig-Zeit, in der der Kopf
         (z+TANK_HEIGHT) sie kreuzt, GESCHLOSSEN gelöst — kein Sampling, kein durchrutschender
         dünner Überhang. Horizontal-Prädikat deckungsgleich zur reaktiven Decken-Kollision in
-        bzbot_ai._apply_obstacle_bounds (rotierte Box + halbe Tankbreite)."""
+        bot/ai/physics._apply_obstacle_bounds (rotierte Box + halbe Tankbreite)."""
         v0, g, z0 = self._v0, self._g, src_layer.z
         apex = v0 * v0 / (2.0 * g)                                   # max. Steighöhe ≈ 18.4u
         skip = {id(getattr(src_layer, "source_obstacle", None)),
@@ -1031,7 +1031,7 @@ class NavGraph:
         entry_node → (exit_node, cost). Entry liegt knapp außerhalb des Feld-Strips auf der
         Eintrittsseite, der Exit-Knoten via teleport_through (= reale Austrittsposition) etwas
         in Austrittsrichtung herausgeschoben. Deckungsgleich zur reaktiven Querung in
-        bzbot_ai._check_teleport_crossing."""
+        bot/ai/navigation._check_teleport_crossing."""
         self._tele_cross_centers = {}
         teles = world_map.teleporters
         if not teles:

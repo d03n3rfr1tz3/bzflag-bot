@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-import bzbot_ai
+from bot.constants import NAV_ASYNC_MAX_EXPANSIONS, NAV_ASYNC_MAX_MS
 
 
 class _FakeNav:
@@ -45,8 +45,8 @@ def test_async_spawns_when_sync_exceeds_trigger(bot, monkeypatch):
     th.join(timeout=2.0)
     assert not th.is_alive()
     # Worker rief plan_path mit den großen Hintergrund-Limits auf (letzter Call).
-    assert nav.calls[-1]["max_expansions"] == bzbot_ai.NAV_ASYNC_MAX_EXPANSIONS
-    assert nav.calls[-1]["max_ms"] == bzbot_ai.NAV_ASYNC_MAX_MS
+    assert nav.calls[-1]["max_expansions"] == NAV_ASYNC_MAX_EXPANSIONS
+    assert nav.calls[-1]["max_ms"] == NAV_ASYNC_MAX_MS
     assert bot._async_plan_result is not None
     assert bot._async_plan_result[0] == bot._plan_gen          # gen passend getaggt
 

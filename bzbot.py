@@ -1,90 +1,25 @@
 #!/usr/bin/env python3
-"""BZFlag-2.4-Bot: Entry-Point (CLI, main, Managed-stdin-Reader, Debug-Dump).
+"""BZFlag-2.4-Bot: Entry-Point (CLI, main, Managed-stdin-Reader, Karten-Dump).
 
-Die Bot-Logik lebt im Paket bot/ (Track 4/W5): core.py (BZBot, Game-Loop),
+Die Bot-Logik lebt im Paket bot/ (Track 4): core.py (BZBot, Game-Loop),
 handlers.py (_on_*-Message-Handler), hit_detection.py, ai/ (BZBotAI-Mixins),
-constants.py, models.py, util.py. Die Import-Blöcke unten sind Kompat-
-Re-Exports für bestehende Test-Imports und entfallen mit W12.
+constants.py, models.py, util.py. Engine-Schicht (Protokoll/Welt/Physik/Nav):
+bzflag/. Gestartet wird weiterhin `python bzbot.py …` — auch vom Bot-Manager.
 """
 
-import argparse, collections, json, logging, math, random, re, struct, sys, time, threading
-from typing import Dict, List, Optional, Tuple
+import argparse
+import json
+import logging
+import sys
+import threading
+import time
 
-from bzflag.client       import BZFlagClient
-from bzflag.shot_physics import (simulate_shot_path,
-                                  can_ricochet as _can_ricochet_shot,
-                                  build_link_map,
-                                  _segment_hits_obb_3d, _extend_segment)
-from bzflag.world_map import teleporter_solid_boxes
-from bzflag.obstacle_grid import ObstacleGrid, LOS_GRID_PAD
-from bzflag.protocol import (
-    DEFAULT_PORT, PLAYER_TYPE_TANK, PLAYER_TYPE_COMPUTER,
-    TEAM_AUTOMATIC, TEAM_OBSERVER,
-    MsgAlive, MsgKilled, MsgAddPlayer, MsgRemovePlayer,
-    MsgPlayerUpdate, MsgPlayerUpdateSmall,
-    MsgShotBegin, MsgShotEnd, MsgSetVar,
-    MsgPlayerInfo, MsgTeamUpdate, MsgFlagUpdate,
-    MsgTimeUpdate, MsgScore, MsgMessage, MsgGameTime,
-    MsgHandicap, MsgLagState, MsgGMUpdate, MsgNearFlag,
-    MsgGrabFlag, MsgDropFlag, MsgCaptureFlag, MsgTransferFlag,
-    MsgSuperKill, MsgScoreOver, MsgTeleport, MsgPause,
-    MSG_INTERNAL_DISCONNECT, MGR_STATUS_PREFIX, BOT_EXIT_REJECTED,
-    BOT_EXIT_ROUND_OVER, ROUND_RESTART_GAP_S,
-    PS_ALIVE, PS_FALLING, PS_EXPLODING, PS_FLAG_ACTIVE, PS_TELEPORTING,
-    build_player_update,
-    unpack_uint8, unpack_uint16, unpack_int16, unpack_uint32,
-    unpack_vec3, unpack_float, unpack_string,
-    CallSignLen,
-)
-
-from bzbot_ai import (
-    BZBotAI, AIState,
-    _angle_diff, _wrap,
-    # Konstanten (re-exportiert damit bestehende Tests/Imports weiter funktionieren)
-    TANK_LENGTH, TANK_RADIUS, TANK_SPEED, TANK_TURN_RATE, FLAG_GRAB_RADIUS,
-    SHOT_SPEED_DEFAULT, SHOT_RANGE, SHOT_LIFETIME, MAX_SHOTS_DEFAULT,
-    JUMP_VELOCITY, GRAVITY, MUZZLE_FRONT, MUZZLE_HEIGHT,
-    SHOCK_IN_RADIUS, SHOCK_OUT_RADIUS, SHOCK_AD_LIFE, SW_EXPAND_SPEED, OPTIMAL_RANGE, JUMP_COOLDOWN,
-    TANK_HALF_LENGTH, GM_TURN_RATE, GM_ACTIVATION_TIME, GM_AD_LIFE, GM_LOCK_ON_ANGLE,
-    FLAG_RADIUS, VELOCITY_AD, AGILITY_AD_VEL, LG_GRAVITY, BURROW_DEPTH, BURROW_SPEED_AD, BURROW_ANG_AD,
-    ANGULAR_AD, SHIELD_FLIGHT, IDENTIFY_RANGE,
-    MGUN_AD_RATE, MGUN_AD_LIFE, MGUN_AD_VEL,
-    RFIRE_AD_RATE, RFIRE_AD_VEL, RFIRE_AD_LIFE,
-    LASER_AD_VEL, LASER_AD_RATE, LASER_AD_LIFE,
-    UPDATE_RATE_HZ, SERVER_UPDATE_RATE_HZ, AI_RATE_HZ,
-    SHOOT_INTERVAL_RANDOM_MAX, RELOAD_TIME_DEFAULT, RESPAWN_DELAY, EXPLODE_TIME, ROUND_END_LINGER,
-    STUCK_WINDOW, STUCK_MIN_DIST, WORLD_HALF_DEFAULT,
-    SMALL_SCALE, SMALL_MAX_DIST, SMALL_MAX_VEL, SMALL_MAX_ANGV,
-    DODGE_DIST, TANK_HEIGHT, WALL_HEIGHT_DEFAULT, SR_RADIUS_MULT,
-    KILL_REASON_SHOT, KILL_REASON_RUNOVER, KILL_REASON_GENOCIDED,
-    OBESITY_FACTOR, AHEAD_HALF_ANGLE,
-    SHOT_RADIUS, HIT_RADIUS, DODGE_REACT_DELAY, IB_REACT_MULTIPLIER,
-    RADAR_RANGE, TARGET_FOV, WIDE_ANGLE_ANG,
-    GOOD_FLAGS_DEFAULT, BAD_FLAGS_DEFAULT,
-    FLAG_NAME_TO_ABBR,
-    TANK_WIDTH, _TINY_FACTOR, THIEF_TINY_FACTOR, THIEF_VEL_AD, _NARROW_HW,
-    THIEF_AD_SHOT_VEL, THIEF_AD_LIFE,
-)
+from bzflag.protocol import (DEFAULT_PORT, BOT_EXIT_REJECTED,
+                             BOT_EXIT_ROUND_OVER, ROUND_RESTART_GAP_S)
+from bot.constants import WORLD_HALF_DEFAULT
+from bot.core import BZBot
 
 logger = logging.getLogger("bzbot")
-
-
-# Daten-Klassen (Shot/PlayerInfo/FlagInfo) → bot/models.py, Geometrie-Helfer →
-# bot/util.py (Track 4/W2); Re-Import hält den bzbot-Namespace stabil.
-from bot.models import Shot, PlayerInfo, FlagInfo  # noqa: F401
-from bot.util import _segment_point_dist3d  # noqa: F401
-from bot.handlers import HandlersMixin
-from bot.hit_detection import HitDetectionMixin
-
-
-# ── Bot ───────────────────────────────────────────────────────────────────
-
-# BZBot-Klasse → bot/core.py (Track 4/W5); Re-Import hält bzbot.BZBot stabil.
-from bot.core import BZBot, STATUS_HEARTBEAT_S  # noqa: F401
-
-
-
-
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────

@@ -33,7 +33,7 @@ class TestTacticalJump:
 
     def test_wind_up_triggered(self, bot, monkeypatch):
         self._setup(bot)
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)  # bypasse 25%-Sperre
+        monkeypatch.setattr("random.random", lambda: 0.0)  # bypasse 25%-Sperre
         result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._dodging is True
@@ -42,29 +42,29 @@ class TestTacticalJump:
     def test_no_trigger_when_jumping(self, bot, monkeypatch):
         self._setup(bot)
         bot._jumping = True
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         assert bot._check_tactical_jump(time.monotonic()) is False
 
     def test_no_trigger_with_nj_flag(self, bot, monkeypatch):
         self._setup(bot)
         bot.own_flag = "NJ"
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         assert bot._check_tactical_jump(time.monotonic()) is False
 
     def test_no_trigger_with_bu_flag(self, bot, monkeypatch):
         self._setup(bot)
         bot.own_flag = "BU"
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         assert bot._check_tactical_jump(time.monotonic()) is False
 
     def test_no_trigger_dist_too_small(self, bot, monkeypatch):
         self._setup(bot, dist=3.0)  # < 5.0
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         assert bot._check_tactical_jump(time.monotonic()) is False
 
     def test_random_throttle_blocks(self, bot, monkeypatch):
         self._setup(bot)
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.8)  # >= 0.7 → blockiert (30% Sperre)
+        monkeypatch.setattr("random.random", lambda: 0.8)  # >= 0.7 → blockiert (30% Sperre)
         assert bot._check_tactical_jump(time.monotonic()) is False
 
     def test_no_jump_overextended_on_closing(self, bot, monkeypatch):
@@ -72,26 +72,26 @@ class TestTacticalJump:
         Annäherung zählt nur über die Reaktionszeit (0.5s → 7.5u), nicht über die volle Flugzeit
         → Reichweite ~97u reicht für 1.5×(90−7.5)=124u nicht → kein Sprung (sonst Landung davor)."""
         self._setup(bot, dist=90.0, enemy_vel=(-15.0, 0.0, 0.0))  # nähert sich mit 15 u/s
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         assert bot._check_tactical_jump(time.monotonic()) is False
 
     def test_no_jump_retreating_enemy(self, bot, monkeypatch):
         """Klärungs-Check: zurückweichender Gegner (dist=50, vel weg vom Bot) wird über die volle
         Flugzeit projiziert → nötige Strecke wächst auf ~89u, 1.5× davon > Reichweite → kein Sprung."""
         self._setup(bot, dist=50.0, enemy_vel=(10.0, 0.0, 0.0))  # entfernt sich mit 10 u/s
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         assert bot._check_tactical_jump(time.monotonic()) is False
 
     def test_jump_near_closing_enemy_still_triggers(self, bot, monkeypatch):
         """Gegenprobe: naher, sich nähernder Gegner (dist=30) bleibt überspringbar
         (enemy_dist_at_land=22.5; 1.5×=33.75 < Reichweite ~97u)."""
         self._setup(bot, dist=30.0, enemy_vel=(-15.0, 0.0, 0.0))
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         assert bot._check_tactical_jump(time.monotonic()) is True
 
     def test_phase_two_executes_jump(self, bot):
         """Nach Wind-Up-Ende (JUMP_WINDUP-State, dodge expired) führt _tick_committed den Sprung aus."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot._jump_pending = True
         bot._dodging = False
@@ -132,14 +132,14 @@ class TestTacticalJumpReverseOverride:
         p = make_player(bot, 2, pos=(30.0, 0.0, 0.0))
         p.vel = [-15.0, 0.0, 0.0]
         p.azimuth = math.pi  # Gegner schaut auf Bot
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         t = time.monotonic()
         assert bot._check_tactical_jump(t) is True
         assert bot._tactical_jump_until >= t + 0.45  # ~0.5s Fenster
 
     def test_phase_two_sets_forward_velocity(self, bot):
         """Phase 2 (JUMP_WINDUP → JUMPING) setzt vel[0]/vel[1] auf volle Vorwärts-Geschwindigkeit."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0  # blickt nach +X
         bot.vel = [-10.0, 0.0, 0.0]  # fährt rückwärts
@@ -163,12 +163,12 @@ class TestTacticalJumpReverseOverride:
         p = make_player(bot, 2, pos=(30.0, 0.0, 0.0))
         p.vel = [-15.0, 0.0, 0.0]
         p.azimuth = math.pi  # Gegner schaut auf Bot
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.1)
+        monkeypatch.setattr("random.random", lambda: 0.1)
         assert bot._check_tactical_jump(time.monotonic()) is True
         # Gegenseite: random=0.6 (>= Schwelle 0.5) → kein Sprung
         bot._dodging = False; bot._jump_pending = False
         bot._ai_state.__class__  # reset not needed, just test the gate
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.6)
+        monkeypatch.setattr("random.random", lambda: 0.6)
         assert bot._check_tactical_jump(time.monotonic()) is False
 
 
@@ -178,7 +178,7 @@ class TestWindUpInterruptible:
     def test_windup_committed_no_abort_on_threat(self, bot):
         """In JUMP_WINDUP-State: Schuss bricht Wind-Up nicht mehr ab (Entscheidung steht)."""
         from conftest import make_shot
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
         bot.alive = True
@@ -203,7 +203,7 @@ class TestWindUpAbortTiming:
 
     def test_windup_committed_continues_despite_threat(self, bot):
         """State Machine: JUMP_WINDUP-State läuft trotz ankommendem Schuss weiter."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.player_id = 1
@@ -222,7 +222,7 @@ class TestWindUpAbortTiming:
 
     def test_distant_shot_does_not_abort_wind_up(self, bot):
         """JUMP_WINDUP-State: auch 0.5s-Schuss unterbricht Wind-Up nicht (kein Abort mehr)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.player_id = 1
@@ -300,7 +300,7 @@ class TestJumpFacingCheck:
         # Bot at (0,0) az=0, enemy at (40,0) az=0 (faces right = away from bot)
         self._setup(bot, bot_az=0.0, enemy_az=0.0)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is False
         assert bot._jump_pending is False
@@ -312,7 +312,7 @@ class TestJumpFacingCheck:
         self._setup(bot, bot_az=math.pi, enemy_az=math.pi)
         # info.vel = [0,0,0] aus _setup → enemy_closing = 0 < 5 → kein Rückwärtssprung
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is False
         assert bot._jump_pending is False
@@ -322,7 +322,7 @@ class TestJumpFacingCheck:
         # Bot at (0,0) az=0 (faces right), enemy at (40,0) az=π (faces left = toward bot)
         self._setup(bot, bot_az=0.0, enemy_az=math.pi)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._jump_pending is True
@@ -349,7 +349,7 @@ class TestJumpCooldown:
         self._setup_jump_ready(bot)
         bot._last_jump_at = time.monotonic() - 1.0
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is False
 
@@ -358,7 +358,7 @@ class TestJumpCooldown:
         self._setup_jump_ready(bot)
         bot._last_jump_at = time.monotonic() - 5.0
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._jump_pending is True
@@ -393,7 +393,7 @@ class TestJumpDirectionSnap:
 
     def test_azimuth_snapped_to_enemy(self, bot):
         """Bot zeigt 90° am Gegner vorbei → nach Phase-2 (JUMP_WINDUP) zeigt vel direkt auf Gegner."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         info = make_player(bot, 99, pos=(40.0, 0.0, 0.0))
         info.vel = [0.0, 0.0, 0.0]
         info.azimuth = math.pi
@@ -437,7 +437,7 @@ class TestJumpTriggerRound4:
         Szenario 4 nicht (Zwischenzone 45°-135°), aber Szenario 5 greift: closing>10, dist<60, az>=45°."""
         self._setup_facing(bot, bot_az=math.radians(80), enemy_az=math.pi, dist=40.0)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._jump_pending is True
@@ -450,7 +450,7 @@ class TestJumpTriggerRound4:
         # Bot bei (0,0) az=0, Gegner bei (40,0) az=0 (Rohr weg), vel=0 (kein Closing)
         self._setup_facing(bot, bot_az=0.0, enemy_az=0.0, dist=40.0, enemy_closing=0.0)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is False
 
@@ -459,7 +459,7 @@ class TestJumpTriggerRound4:
         Szenario 4 nicht (nicht < 45° oder > 135°), aber closing=25>10, dist=40<60, az=90°>=45°."""
         self._setup_facing(bot, bot_az=math.pi / 2, enemy_az=math.pi, dist=40.0)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._escape_jump_ang_vel is not None  # Escape-Jump-Modus (Szenario 5)
@@ -488,7 +488,7 @@ class TestEscapeJump:
         Szenario 4 Rückwärts: angle_to_enemy=180°>135°, enemy_faces_bot=True, closing≥5 → Sprung."""
         self._setup_escape(bot, enemy_closing=15.0, dist=40.0)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._jump_pending is True
@@ -500,7 +500,7 @@ class TestEscapeJump:
         Szenario 4 Rückwärts: enemy_closing < 5 → return False. Szenario 5: closing < 10 → False."""
         self._setup_escape(bot, enemy_closing=3.0, dist=40.0)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is False
 
@@ -509,7 +509,7 @@ class TestEscapeJump:
         Bot landet automatisch mit Blick auf Gegner — kein Flip nötig."""
         self._setup_escape(bot, enemy_closing=15.0, dist=40.0)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._dodge_reverse is True
@@ -517,7 +517,7 @@ class TestEscapeJump:
 
     def test_escape_phase2_no_azimuth_snap(self, bot):
         """Phase 2 Escape-Jump (JUMP_WINDUP): Azimuth bleibt, _jump_ang_vel = escape_ang_vel."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.azimuth = math.pi
         bot._jump_pending = True
@@ -557,7 +557,7 @@ class TestReverseJump:
         """Bot Rücken zu Gegner der schaut + closing=10 ≥ 5 → Rückwärtssprung."""
         self._setup(bot, enemy_closing=10.0)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._dodge_reverse is True
@@ -567,7 +567,7 @@ class TestReverseJump:
         """closing=4 < 5 → kein Rückwärtssprung (Mindestgeschwindigkeit nicht erreicht)."""
         self._setup(bot, enemy_closing=4.0)
         from unittest.mock import patch
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is False
 
@@ -576,12 +576,12 @@ class TestStateMachineTransitions:
     """State Machine: Übergänge zwischen AIState-Werten."""
 
     def test_initial_state_is_idle(self, bot):
-        from bzbot_ai import AIState
+        from bot.models import AIState
         assert bot._ai_state == AIState.IDLE
 
     def test_spawn_transitions_to_seeking_with_humans(self, bot):
         """_on_alive mit menschlichem Spieler → State SEEKING (human_count aus players abgeleitet)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         make_player(bot, 2, pos=(50.0, 0.0, 0.0))   # ein Mensch in der Spielerliste
         payload = b'\x01' + b'\x00' * 12 + b'\x00' * 4  # pid=1, pos=0, az=0
         bot._on_alive(0, payload)
@@ -589,7 +589,7 @@ class TestStateMachineTransitions:
 
     def test_spawn_transitions_to_idle_without_humans(self, bot):
         """_on_alive ohne Menschen in der Liste → State IDLE."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.players.clear()
         payload = b'\x01' + b'\x00' * 12 + b'\x00' * 4
         bot._on_alive(0, payload)
@@ -597,7 +597,7 @@ class TestStateMachineTransitions:
 
     def test_death_transitions_to_dead(self, bot):
         """_report_killed setzt State auf DEAD."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         from conftest import make_shot
         shot = make_shot(bot, shooter_id=2, shot_id=1)
         bot._report_killed(shot)
@@ -605,21 +605,21 @@ class TestStateMachineTransitions:
 
     def test_tactical_jump_transitions_to_jump_windup(self, bot):
         """_check_tactical_jump setzt State auf JUMP_WINDUP."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         from unittest.mock import patch
         info = make_player(bot, 99, pos=(30.0, 0.0, 0.0))
         info.vel = [-15.0, 0.0, 0.0]
         info.azimuth = math.pi
         bot.target_player = 99
         bot.azimuth = 0.0
-        with patch("bzbot_ai.random.random", return_value=0.0):
+        with patch("random.random", return_value=0.0):
             result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._ai_state == AIState.JUMP_WINDUP
 
     def test_jump_windup_to_jumping_on_execute(self, bot):
         """_tick_committed nach Wind-Up: JUMP_WINDUP → JUMPING."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._jump_pending = True
         bot._dodging = False
         bot._jumping = False
@@ -631,7 +631,7 @@ class TestStateMachineTransitions:
 
     def test_jumping_to_combat_on_landing(self, bot):
         """Landing (pos[2]=0) aus JUMPING → COMBAT wenn target_player vorhanden."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         info = make_player(bot, 99, pos=(30.0, 0.0, 0.0))
         bot.target_player = 99
         bot.human_count = 1
@@ -646,7 +646,7 @@ class TestStateMachineTransitions:
 
     def test_combat_to_seeking_on_target_lost(self, bot):
         """Ziel verloren, aber Mensch noch anwesend → COMBAT → SEEKING (nicht IDLE)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._has_presence = lambda: True   # Mensch anwesend (Mitspieler ODER Zuschauer)
         bot._ai_state = AIState.COMBAT
         bot.target_player = 99  # Spieler existiert nicht im Dict
@@ -656,7 +656,7 @@ class TestStateMachineTransitions:
 
     def test_evading_to_combat_after_timer(self, bot):
         """Dodge-Timer abgelaufen → EVADING → COMBAT."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         info = make_player(bot, 99, pos=(50.0, 0.0, 0.0))
         bot.target_player = 99
         bot.human_count = 1
@@ -670,7 +670,7 @@ class TestStateMachineTransitions:
 
     def test_no_ai_during_jumping(self, bot):
         """In JUMPING: kein _tick_ai, target_player unverändert."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._ai_state = AIState.JUMPING
         bot._jumping = True
         bot.target_player = 99  # nicht validiert solange JUMPING
@@ -724,7 +724,7 @@ class TestLandingShotOscillation:
 
     def test_no_oscillation_landing_shot(self, bot):
         """Bot in LANDING_SHOT, mehrere _update_movement-Aufrufe → bleibt in LANDING_SHOT."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         from conftest import make_player
         info = make_player(bot, 99, pos=(50.0, 0.0, 5.0))
         info.vel = [0.0, 0.0, -3.0]
@@ -743,7 +743,7 @@ class TestLandingShotOscillation:
 
     def test_landing_shot_vel_zero(self, bot):
         """Im LANDING_SHOT-State: vel[0] = vel[1] = 0 (Position halten)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         from conftest import make_player
         info = make_player(bot, 99, pos=(50.0, 0.0, 5.0))
         info.vel = [0.0, 0.0, -3.0]
@@ -775,13 +775,13 @@ class TestLandingShotFeasibility:
         info.is_airborne = True
         bot.target_player = 99
         bot.human_count = 1
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._ai_state = AIState.COMBAT
         return info
 
     def test_entry_when_small_turn_needed(self, bot):
         """Gegner springt, Landepunkt nah vor Bot (az≈0) → LANDING_SHOT-Entry möglich."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         # Enemy at (50, 0), z=8, vz=-8: t_land ≈ 0.9s. Landepunkt ≈ (50,0).
         # Bot az=0, turn_needed≈0 → turn_time≈0. tof≈0.5s. 0+0.5 < 0.9-0.1=0.8 → feasible.
         self._setup_jumping_target(bot, z0=8.0, vz=-8.0, target_dist=50.0, bot_az=0.0)
@@ -790,7 +790,7 @@ class TestLandingShotFeasibility:
 
     def test_no_entry_when_large_turn_needed(self, bot):
         """Landepunkt ist 90° seitlich → Drehtzeit > verfügbare Zeit → kein LANDING_SHOT."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         # Enemy at (50, 0), z=8, vz=-8. Bot az=π/2 (90° weggedreht vom Landepunkt).
         # turn_needed=π/2, turn_time=π/2/0.785≈2.0s > t_land-0.1≈0.8s → nicht feasible.
         self._setup_jumping_target(bot, z0=8.0, vz=-8.0, target_dist=50.0, bot_az=math.pi / 2)
@@ -800,7 +800,7 @@ class TestLandingShotFeasibility:
 
     def test_no_entry_beyond_max_range(self, bot):
         """Landepunkt > OPTIMAL_RANGE*3=180m → kein LANDING_SHOT."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         # Enemy at (190, 0), z=15, vz=-5 → t_land≈2.3s. Landepunkt ≈ 190m.
         # 190 > 180 → not can_aim → normaler Schuss.
         self._setup_jumping_target(bot, z0=15.0, vz=-5.0, target_dist=190.0, bot_az=0.0)
@@ -814,7 +814,7 @@ class TestLandingShotZAwareness:
     getimt, in dem er die Mündungshöhe durchfällt (Interzeption beim Fallen, t_aim < t_land)."""
 
     def _setup(self, bot, z0, vz, dist, bot_z=0.0, bot_az=0.0):
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, bot_z]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = bot_az
@@ -834,7 +834,7 @@ class TestLandingShotZAwareness:
 
     def test_p4_tac_06_suppresses_higher_landing(self, bot):
         """Boden am Landepunkt > Bot-Z + HIT_RADIUS → kein LANDING_SHOT, normaler Vorhalt."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         # Gleicher Sprung wie der Entry-Test (z0=8, vz=-8, dist=50), der ohne Plattform in
         # LANDING_SHOT ginge. Boden=15u am Landepunkt (> 0 + ~5.62) → unterdrückt.
         info = self._setup(bot, z0=8.0, vz=-8.0, dist=50.0)
@@ -846,7 +846,7 @@ class TestLandingShotZAwareness:
 
     def test_p4_tac_06_entry_when_floor_level(self, bot):
         """Gegenprobe: Boden=0 am Landepunkt → LANDING_SHOT-Entry, _landing_hit_z = 0."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         info = self._setup(bot, z0=8.0, vz=-8.0, dist=50.0)
         bot._nav_graph = self._nav_floor(0.0)
         aim = bot._compute_aim_point(
@@ -858,7 +858,8 @@ class TestLandingShotZAwareness:
     def test_p4_tac_07_intercept_at_muzzle_height(self, bot):
         """Bot erhöht (z=15), Gegner landet tiefer (Boden=0): Interzeption beim Durchfallen der
         Mündungshöhe → _landing_hit_z = Bot-Z + Mündungshöhe (statt 0) → früher feuern."""
-        from bzbot_ai import AIState, MUZZLE_HEIGHT
+        from bot.constants import MUZZLE_HEIGHT
+        from bot.models import AIState
         info = self._setup(bot, z0=25.0, vz=-5.0, dist=50.0, bot_z=15.0)
         bot._nav_graph = self._nav_floor(0.0)
         aim = bot._compute_aim_point(
@@ -873,7 +874,7 @@ class TestLandingShotGMHoming:
     gegen ST bleibt der LANDING_SHOT erhalten (GM kann nicht zielsuchen)."""
 
     def _setup(self, bot, enemy_flag=""):
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -889,7 +890,7 @@ class TestLandingShotGMHoming:
 
     def test_gm_vs_non_st_no_landing_shot(self, bot):
         """GM-Bot, springender Nicht-ST-Gegner → kein LANDING_SHOT-Entry, Lead-Aim (≠ None)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         info = self._setup(bot, enemy_flag="")
         aim = bot._compute_aim_point(
             (info.pos[0], info.pos[1]), info, 50.0, 0.0, 50.0, time.monotonic())
@@ -898,7 +899,7 @@ class TestLandingShotGMHoming:
 
     def test_gm_vs_st_keeps_landing_shot(self, bot):
         """Gegenprobe: GM-Bot gegen ST-Gegner → LANDING_SHOT-Entry wie gehabt (GM homt nicht)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         info = self._setup(bot, enemy_flag="ST")
         aim = bot._compute_aim_point(
             (info.pos[0], info.pos[1]), info, 50.0, 0.0, 50.0, time.monotonic())
@@ -911,7 +912,7 @@ class TestLandingShotTickFires:
     Schuss-Flugzeit ist — der Z-Block in _maybe_shoot_* wird umgangen, kein verspäteter Schuss."""
 
     def _setup_landing_state(self, bot, enemy_z, enemy_vz):
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -930,7 +931,7 @@ class TestLandingShotTickFires:
 
     def test_holds_when_too_early(self, bot):
         """Restfallzeit ≫ tof+0.15 → noch kein Schuss, bleibt in LANDING_SHOT."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         # z=15, vz=-3 → t_rem ≈ 1.47s ≫ tof(0.5)+0.15 → außerhalb Fenster.
         self._setup_landing_state(bot, enemy_z=15.0, enemy_vz=-3.0)
         bot._update_movement(0.02, time.monotonic(), ai_tick=True)
@@ -940,7 +941,7 @@ class TestLandingShotTickFires:
     def test_fires_in_window_despite_z_block(self, bot):
         """Restfallzeit im Fenster (t_rem ≈ 0.61s ≤ tof+0.15) bei z_diff=8 > HIT_RADIUS:
         der Z-Block würde einen COMBAT-Schuss unterdrücken — der Tick feuert trotzdem."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         # z=8, vz=-10 → t_rem ≈ 0.614s; tof = 50/100 = 0.5s → im 0.15s-Fenster.
         self._setup_landing_state(bot, enemy_z=8.0, enemy_vz=-10.0)
         bot._update_movement(0.02, time.monotonic(), ai_tick=True)
@@ -993,15 +994,15 @@ class TestJumpEnemyFacesBot:
         """TACT-01: Gegner mit Rücken zum Bot (azimuth=0, weg vom Bot) und hohem
         Closing-Speed → kein TactJump (würde vor Gegner-Nase landen)."""
         self._setup(bot, enemy_az=0.0, enemy_closing=25.0)  # azimuth zeigt weg vom Bot
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         result = bot._check_tactical_jump(time.monotonic())
         assert result is False  # TACT-01: angle_enemy_to_bot=180° > 120° → geblockt
 
     def test_stationary_enemy_needs_correct_azimuth(self, bot, monkeypatch):
         """Stehender Gegner (closing=0): Fallback greift nicht; korrekte azimuth=π → Sprung."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         self._setup(bot, enemy_az=math.pi, enemy_closing=0.0)  # azimuth korrekt, kein Closing
-        monkeypatch.setattr("bzbot_ai.random.random", lambda: 0.0)
+        monkeypatch.setattr("random.random", lambda: 0.0)
         result = bot._check_tactical_jump(time.monotonic())
         assert result is True
         assert bot._jump_pending is True

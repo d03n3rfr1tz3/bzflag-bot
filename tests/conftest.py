@@ -49,7 +49,7 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def bot():
     with patch("bot.core.BZFlagClient"):
-        from bzbot import BZBot
+        from bot.core import BZBot
         b = BZBot(host="localhost", port=5154, callsign="TestBot")
     b.client = MagicMock()
     b.client.udp_active = True
@@ -64,7 +64,7 @@ def bot():
 
 
 def make_player(bot, pid, pos=(50.0, 0.0, 0.0), is_human=True, flag="", alive=True):
-    from bzbot import PlayerInfo
+    from bot.models import PlayerInfo
     info = PlayerInfo(callsign=f"Player{pid}", team=2, is_human=is_human)
     info.pos = list(pos)
     info.flag = flag
@@ -77,7 +77,7 @@ def make_player(bot, pid, pos=(50.0, 0.0, 0.0), is_human=True, flag="", alive=Tr
 def make_shot(bot, shooter_id=2, shot_id=1, pos=(200.0, 0.0, 0.0), vel=(-100.0, 0.0, 0.0),
               lifetime=3.5, flag_abbr=b"\x00\x00", is_sw=False, is_gm=False,
               is_laser=False, is_thief=False, gm_target_pid=None, fire_time=None):
-    from bzbot import Shot
+    from bot.models import Shot
     ft = fire_time if fire_time is not None else time.monotonic()
     if flag_abbr == b"TH" and not is_thief:
         is_thief = True

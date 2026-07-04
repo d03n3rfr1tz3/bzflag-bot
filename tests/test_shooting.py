@@ -39,7 +39,7 @@ class TestPredictiveAiming:
         player.vel = [0.0, 50.0, 0.0]
         bot.target_player = 2
 
-        from bzbot import _angle_diff
+        from bot.util import _angle_diff
         shot_speed = bot._shot_speed  # 100 u/s
         dist = 100.0
         tof = dist / shot_speed  # 1s
@@ -480,7 +480,7 @@ class TestLaserZAxis:
     def test_normal_flag_hard_blocked_above_jump_range(self, bot):
         """SS1: z_diff >= max_jump_h − HIT_RADIUS → harter Block, kein Schuss."""
         from conftest import make_player
-        from bzbot_ai import JUMP_VELOCITY, GRAVITY, HIT_RADIUS
+        from bot.constants import JUMP_VELOCITY, GRAVITY, HIT_RADIUS
         max_jump_h = JUMP_VELOCITY ** 2 / (2.0 * abs(GRAVITY))
         z = max_jump_h  # über max_jump_h − HIT_RADIUS → harter Block
         bot.own_flag = ""
@@ -576,7 +576,7 @@ def test_no_random_shot_without_enemies(bot):
 
 def test_random_shot_no_burst(bot):
     """Random-Schuss setzt _next_shoot auf zufälliges Intervall [reload_time, 10s], kein Burst."""
-    from bzbot_ai import SHOOT_INTERVAL_RANDOM_MAX
+    from bot.constants import SHOOT_INTERVAL_RANDOM_MAX
     bot.own_flag = ""
     bot.target_player = None
     bot._has_presence = lambda: True   # Mensch anwesend (Mitspieler ODER Zuschauer)
@@ -599,7 +599,7 @@ class TestShotQuality:
 
     def test_shot_quality_z_blocked(self, bot):
         """Z-Unterschied > HIT_RADIUS (≈5.62u) → 0.0 (Treffer geometrisch unmöglich)."""
-        from bzbot_ai import HIT_RADIUS
+        from bot.constants import HIT_RADIUS
         quality = bot._shot_quality(aim_diff=0.0, dist=30.0, z_diff=HIT_RADIUS + 1.0)
         assert quality == 0.0
 
@@ -649,7 +649,7 @@ class TestMultiShot:
 
     def test_second_shot_fires_after_burst_interval(self, bot):
         """maxShots=2: nach MIN_BURST_INTERVAL feuert Bot zweiten Schuss."""
-        from bzbot_ai import MIN_BURST_INTERVAL
+        from bot.constants import MIN_BURST_INTERVAL
         from conftest import make_player
         bot.own_flag = ""
         bot._reload_time = 3.5
@@ -674,7 +674,7 @@ class TestMultiShot:
 
     def test_no_third_shot_until_reload(self, bot):
         """maxShots=2: nach 2 Schüssen kein dritter bis Reload abgelaufen."""
-        from bzbot_ai import MIN_BURST_INTERVAL
+        from bot.constants import MIN_BURST_INTERVAL
         from conftest import make_player
         bot.own_flag = ""
         bot._reload_time = 3.5
@@ -788,7 +788,7 @@ class TestWarningShotNoBurst:
         """Z-Diff-Warnschuss in _maybe_shoot_standard setzt _next_shoot auf vollen Reload."""
         from conftest import make_player
         from unittest.mock import patch
-        from bzbot_ai import HIT_RADIUS
+        from bot.constants import HIT_RADIUS
         bot.own_flag = ""
         bot._reload_time = 3.5
         bot._max_shots = 2
@@ -815,7 +815,7 @@ class TestWarningShotNoBurst:
         """Z-Diff-Warnschuss in _maybe_shoot_sb setzt _next_shoot auf vollen Reload."""
         from conftest import make_player
         from unittest.mock import patch
-        from bzbot_ai import HIT_RADIUS
+        from bot.constants import HIT_RADIUS
         bot.own_flag = "SB"
         bot._reload_time = 3.5
         bot._max_shots = 2
@@ -841,7 +841,7 @@ class TestWarningShotNoBurst:
         """Echter LoS-Schuss mit zweitem freiem Slot nutzt weiterhin Burst-Modus (Regression)."""
         from conftest import make_player
         from unittest.mock import patch
-        from bzbot_ai import MIN_BURST_INTERVAL
+        from bot.constants import MIN_BURST_INTERVAL
         bot.own_flag = ""
         bot._reload_time = 3.5
         bot._max_shots = 2
@@ -941,7 +941,7 @@ class TestMuzzleOcclusionGate:
 
     def test_gate_blocks_standard_shot(self, bot):
         """Mündung hinter Wand → Dispatcher feuert nicht (Schütze gar nicht aufgerufen)."""
-        from bzbot import AIState
+        from bot.models import AIState
         self._nav(bot, [(2.0, 0.0, 0.5, 10.0)])
         bot.pos = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -957,7 +957,7 @@ class TestMuzzleOcclusionGate:
 
     def test_gate_allows_sb_through_wall(self, bot):
         """SB (durchschlägt Wände) ist vom Gate ausgenommen → Schütze wird aufgerufen."""
-        from bzbot import AIState
+        from bot.models import AIState
         self._nav(bot, [(2.0, 0.0, 0.5, 10.0)])
         bot.pos = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0

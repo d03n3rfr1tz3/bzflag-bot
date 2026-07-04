@@ -78,7 +78,7 @@ class TestFlagStrategy:
         """Bot mit eigener good_flags-Liste behält nur konfigurierte Flags."""
         from unittest.mock import MagicMock, patch
         with patch("bot.core.BZFlagClient"):
-            from bzbot import BZBot
+            from bot.core import BZBot
             b = BZBot(host="localhost", callsign="Test",
                       good_flags=["V"], bad_flags=["WG"])
         b.client = MagicMock()
@@ -143,7 +143,7 @@ class TestFlagUpdate:
     def test_flag_on_tank_removed(self, bot):
         from bzflag.protocol import MsgFlagUpdate
         # Erst auf Boden
-        bot.flags[1] = __import__('bzbot').FlagInfo(1, "GM", 1, [50, 30, 0])
+        bot.flags[1] = __import__('bot.models', fromlist=['FlagInfo']).FlagInfo(1, "GM", 1, [50, 30, 0])
         # Jetzt onTank
         payload = self._build_flag_update([(1, "GM", 2, 50.0, 30.0, 0.0)])
         bot._on_flag_update(MsgFlagUpdate, payload)
@@ -151,7 +151,7 @@ class TestFlagUpdate:
 
     def test_grab_flag_removes_from_flags(self, bot):
         from bzflag.protocol import MsgGrabFlag
-        bot.flags[5] = __import__('bzbot').FlagInfo(5, "SW", 1, [100, 0, 0])
+        bot.flags[5] = __import__('bot.models', fromlist=['FlagInfo']).FlagInfo(5, "SW", 1, [100, 0, 0])
         payload = struct.pack(">BH", bot.player_id, 5) + b"SW"
         bot._on_grab_flag(MsgGrabFlag, payload)
         assert 5 not in bot.flags
@@ -191,7 +191,7 @@ class TestFlagGrabFOV:
     """Schritt 4: Opportunistic Grab nur bei Flag im FOV."""
 
     def test_grab_when_in_fov(self, bot):
-        from bzbot import FlagInfo
+        from bot.models import FlagInfo
         bot.human_count = 1
         bot.azimuth = 0.0  # schaut nach +X
         bot.flags[3] = FlagInfo(3, "GM", 1, [6.0, 0.0, 0.0])  # vor Bot, in FOV, in Radius
@@ -201,7 +201,7 @@ class TestFlagGrabFOV:
         bot.client.send.assert_called()
 
     def test_no_grab_behind_bot(self, bot):
-        from bzbot import FlagInfo
+        from bot.models import FlagInfo
         bot.human_count = 1
         bot.azimuth = 0.0  # schaut nach +X
         bot.flags[3] = FlagInfo(3, "GM", 1, [-6.0, 0.0, 0.0])  # HINTER Bot
@@ -211,7 +211,7 @@ class TestFlagGrabFOV:
         bot.client.send.assert_not_called()
 
     def test_grab_directly_under_bot_no_fov_check(self, bot):
-        from bzbot import FlagInfo
+        from bot.models import FlagInfo
         bot.human_count = 1
         bot.azimuth = 0.0
         # Flag unter Bot (< TANK_RADIUS=4.32) → keine FOV-Prüfung
@@ -265,7 +265,7 @@ class TestNeutralFlagDrop:
 
 def test_opportunistic_grab_in_active_mode(bot):
     """Bot sendet MsgGrabFlag wenn er im Aktivmodus nah genug an einer Flagge ist."""
-    from bzbot import FlagInfo
+    from bot.models import FlagInfo
     from bzflag.protocol import MsgGrabFlag
     bot.human_count = 1
     bot.flags[3] = FlagInfo(3, "GM", 1, [5.0, 0.0, 0.0])  # nah genug
@@ -280,7 +280,7 @@ def test_opportunistic_grab_in_active_mode(bot):
 
 def test_no_grab_in_passive_mode(bot):
     """Bot sendet kein MsgGrabFlag im Passivmodus (human_count==0)."""
-    from bzbot import FlagInfo
+    from bot.models import FlagInfo
     bot.human_count = 0
     bot.flags[3] = FlagInfo(3, "GM", 1, [5.0, 0.0, 0.0])
     bot.pos = [0.0, 0.0, 0.0]
@@ -294,7 +294,7 @@ def test_no_grab_in_passive_mode(bot):
 
 def test_grab_throttled(bot):
     """Zweiter Grab-Versuch < 0.5s wird nicht gesendet."""
-    from bzbot import FlagInfo
+    from bot.models import FlagInfo
     bot.flags[3] = FlagInfo(3, "GM", 1, [5.0, 0.0, 0.0])
     bot.pos = [0.0, 0.0, 0.0]
     now = time.monotonic()
@@ -305,7 +305,7 @@ def test_grab_throttled(bot):
 
 def test_no_grab_when_holding_flag(bot):
     """Bot mit Flagge greift keine weitere Flagge."""
-    from bzbot import FlagInfo
+    from bot.models import FlagInfo
     bot.own_flag = "GM"
     bot.flags[3] = FlagInfo(3, "SW", 1, [5.0, 0.0, 0.0])
     bot.pos = [0.0, 0.0, 0.0]
@@ -323,7 +323,7 @@ class TestGenocideMultikill:
         """Erstellt N lebende Spieler in Team 2 (und optional Team 3)."""
         pid = 10
         for _ in range(team2_count):
-            from bzbot import PlayerInfo
+            from bot.models import PlayerInfo
             info = PlayerInfo(callsign=f"P{pid}", team=2, is_human=True)
             info.alive = True
             info.pos = [100.0, 0.0, 0.0]
@@ -331,7 +331,7 @@ class TestGenocideMultikill:
             bot.players[pid] = info
             pid += 1
         for _ in range(team3_count):
-            from bzbot import PlayerInfo
+            from bot.models import PlayerInfo
             info = PlayerInfo(callsign=f"P{pid}", team=3, is_human=True)
             info.alive = True
             info.pos = [100.0, 0.0, 0.0]

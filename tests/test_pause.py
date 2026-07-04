@@ -70,7 +70,8 @@ def test_paused_target_not_shot(bot, monkeypatch):
 
 def test_paused_target_dropped_after_wait(bot):
     """Pausiertes Ziel: kurz halten, nach PAUSE_WAIT_S aufgeben → SEEKING."""
-    from bzbot_ai import AIState, PAUSE_WAIT_S
+    from bot.constants import PAUSE_WAIT_S
+    from bot.models import AIState
     bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
     bot.human_count = 1
     bot._ai_state = AIState.COMBAT

@@ -1398,14 +1398,14 @@ class TestPixelOnFloor:
 
 def _executable_jump_margins(path, v0=19.0, g=9.8, tank_speed=25.0, edge_tol=JUMP_EDGE_TOL):
     """Laufzeit-Sprungmargen je Sprung-rauf-Übergang im Pfad — spiegelt das Feasibility-Gate des
-    Bots (bzbot_ai._nav_jump_geometry_ok) exakt nach:
+    Bots (bot/ai/navigation._nav_jump_geometry_ok) exakt nach:
 
         disc   = v0² - 2·g·dz                 (disc < 0 → Dach zu hoch → -inf)
         t_desc = (v0 + √disc) / g
         margin = tank_speed·t_desc·1.1 - max(0, hdist - edge_tol)
 
     margin <= 0 → der Bot würde den Sprung zur Laufzeit als nicht ausführbar VERWERFEN (auch wenn
-    der Pfad existiert). Konstanten = bzbot_ai-Defaults (JUMP_VELOCITY=19, GRAVITY=-9.8,
+    der Pfad existiert). Konstanten = bot/constants-Defaults (JUMP_VELOCITY=19, GRAVITY=-9.8,
     _tank_speed=25). Gibt eine Liste der Margen (eine je Sprung-rauf) zurück."""
     margins = []
     for i in range(1, len(path)):

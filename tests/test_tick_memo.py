@@ -9,7 +9,7 @@ Azimut, Gegnerposition) stecken im Key. Geprüft wird, dass
 """
 from conftest import make_player
 
-from bzbot_ai import TANK_HEIGHT
+from bot.constants import TANK_HEIGHT
 
 
 def test_floor_z_memo_hit_wins(bot):

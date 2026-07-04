@@ -1,5 +1,5 @@
 """
-Tests für die neuen Capability-Check-Hilfsfunktionen in bzbot_ai.py:
+Tests für die neuen Capability-Check-Hilfsfunktionen in bot/ai/capabilities.py:
 _has_presence, _can_drive_through_obstacles, _is_inside_obstacle,
 _apply_movement_caps, _can_shoot, _can_jump, _is_landed (NAV-04).
 """
@@ -29,7 +29,7 @@ def _make_box(cx, cy, hw, hd, height):
 # Fallback-Observer) zählen nicht.
 
 def _add_observer(bot, pid, callsign):
-    from bzbot import PlayerInfo
+    from bot.models import PlayerInfo
     from bzflag.protocol import TEAM_OBSERVER
     bot.players[pid] = PlayerInfo(callsign=callsign, team=TEAM_OBSERVER, is_human=False)
 
@@ -51,7 +51,7 @@ def test_has_presence_bot_observer_does_not_count(bot):
 
 
 def test_has_presence_only_peer_bots(bot):
-    from bzbot import PlayerInfo
+    from bot.models import PlayerInfo
     bot.players[7] = PlayerInfo(callsign="Bot_02", team=2, is_human=False)   # Peer-Bot
     bot.players[1] = PlayerInfo(callsign="TestBot", team=2, is_human=False)  # eigener Bot
     assert bot._has_presence() is False
@@ -70,7 +70,7 @@ def _spawn_payload(pid, x=0.0, y=0.0, z=0.0, az=0.0):
 
 def test_spawn_seeking_with_human_observer(bot, monkeypatch):
     """Spawnt der Bot, während nur ein menschlicher Zuschauer da ist, → SEEKING (nicht IDLE)."""
-    from bzbot import AIState
+    from bot.models import AIState
     monkeypatch.setattr(bot, "_new_target", lambda: None)
     _add_observer(bot, 5, "Zuschauer")          # Mensch im Beobachter-Modus
     bot.human_count = 0                          # kein aktiver Mitspieler
@@ -80,7 +80,7 @@ def test_spawn_seeking_with_human_observer(bot, monkeypatch):
 
 def test_spawn_idle_with_only_bot_observer(bot, monkeypatch):
     """Nur ein Bot-Observer (Manager-Fallback) → keine menschliche Anwesenheit → IDLE."""
-    from bzbot import AIState
+    from bot.models import AIState
     monkeypatch.setattr(bot, "_new_target", lambda: None)
     _add_observer(bot, 6, "Bot_99")             # eigener Bot als Observer
     bot.human_count = 0
@@ -142,7 +142,7 @@ def test_no_random_shot_with_only_peer_bots(bot):
 
 def test_tick_combat_stays_with_observer(bot, monkeypatch):
     """COMBAT bleibt bei Zuschauer-Anwesenheit + gültigem Ziel erhalten (kein Austritt bei human_count==0)."""
-    from bzbot import AIState
+    from bot.models import AIState
     _add_peer_bot_foe(bot, pid=2)
     _add_observer(bot, 5, "Zuschauer")
     bot.human_count = 0
@@ -159,7 +159,7 @@ def test_tick_combat_stays_with_observer(bot, monkeypatch):
 
 def test_tick_combat_exits_to_idle_without_human(bot):
     """Verlässt der letzte Mensch die Szene → COMBAT fällt auf IDLE (kein Ziel mehr nötig)."""
-    from bzbot import AIState
+    from bot.models import AIState
     _add_peer_bot_foe(bot, pid=2)
     bot.human_count = 0
     bot.target_player = 2
@@ -423,7 +423,7 @@ def test_oo_floor_is_ground(bot):
 def test_oo_no_rooftop_navjump(bot):
     """OO: Dach-Wegpunkt löst KEINEN NAV_JUMP/NAV_JUMP_ALIGN aus (kein Landen auf Dächern) —
     der Bot fährt den WP am Boden phasend an."""
-    from bzbot_ai import AIState
+    from bot.models import AIState
     bot.own_flag = "OO"
     bot.pos = [0.0, 0.0, 0.0]
     bot._ai_state = AIState.SEEKING
@@ -437,13 +437,13 @@ def test_oo_no_rooftop_navjump(bot):
 
 def test_effective_fov_default(bot):
     """Ohne WA = halber Target-FoV (±37.5°), EINZIGER Sicht-Kegel."""
-    from bzbot_ai import TARGET_FOV
+    from bot.constants import TARGET_FOV
     bot.own_flag = ""
     assert bot._effective_fov() == pytest.approx(TARGET_FOV / 2.0)
 
 def test_effective_fov_wide_angle(bot):
     """WA verbreitert den Sicht-FoV auf halben _wideAngleAng (~±50°)."""
-    from bzbot_ai import WIDE_ANGLE_ANG
+    from bot.constants import WIDE_ANGLE_ANG
     bot.own_flag = "WA"
     assert bot._effective_fov() == pytest.approx(WIDE_ANGLE_ANG / 2.0)
     assert bot._effective_fov() > 0.6545  # > 37.5° → tatsächlich breiter
@@ -468,7 +468,7 @@ def test_is_ahead_geometry(bot):
 
 def test_bad_flags_contains_all_official():
     """Alle 14 offiziellen bösen BZFlag-Flags sind in BAD_FLAGS_DEFAULT."""
-    from bzbot_ai import BAD_FLAGS_DEFAULT
+    from bot.constants import BAD_FLAGS_DEFAULT
     official_bad = {"B", "BY", "CB", "FO", "JM", "LT", "M",
                     "NJ", "O", "RC", "RO", "RT", "TR", "WA"}
     missing = official_bad - BAD_FLAGS_DEFAULT
@@ -477,6 +477,6 @@ def test_bad_flags_contains_all_official():
 
 def test_good_and_bad_flags_disjoint():
     """Kein Flag ist gleichzeitig in GOOD_FLAGS_DEFAULT und BAD_FLAGS_DEFAULT."""
-    from bzbot_ai import GOOD_FLAGS_DEFAULT, BAD_FLAGS_DEFAULT
+    from bot.constants import GOOD_FLAGS_DEFAULT, BAD_FLAGS_DEFAULT
     overlap = GOOD_FLAGS_DEFAULT & BAD_FLAGS_DEFAULT
     assert not overlap, f"Flags in beiden Listen: {overlap}"
