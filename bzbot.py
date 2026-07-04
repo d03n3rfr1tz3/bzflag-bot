@@ -582,7 +582,12 @@ class BZBot(BZBotAI):
             if self.managed and now - self._last_status_emit >= STATUS_HEARTBEAT_S:
                 self._emit_status()
             self._cleanup_shots(now)
-            self._stop_event.wait(timeout=max(0.0, dt - (time.monotonic() - now)))
+            # N3: time.sleep statt Event.wait — spart die Condition/Lock-
+            # Maschinerie des Events (Nachmessung tmp4: ≈7% der aktiven CPU
+            # plus ~230 Futex-Wakeups/s Kernel-Anteil, den cProfile nicht
+            # sieht). stop() greift über _running/_stop_event am nächsten
+            # Schleifenkopf — Latenz maximal eine Tick-Dauer (~16ms), akzeptiert.
+            time.sleep(max(0.0, dt - (time.monotonic() - now)))
 
     # ── Treffer-Erkennung ─────────────────────────────────────────────────
 
