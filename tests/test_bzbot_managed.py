@@ -17,7 +17,7 @@ from bzflag.protocol import MGR_STATUS_PREFIX
 
 
 def _make_bot(managed=True, prefix="[b0t] ", callsigns=None):
-    with patch("bzbot.BZFlagClient"):
+    with patch("bot.core.BZFlagClient"):
         from bzbot import BZBot
         return BZBot(host="localhost", port=5154, callsign="[b0t] Zwiebel",
                      bot_name_prefix=prefix, bot_callsigns=callsigns or [],

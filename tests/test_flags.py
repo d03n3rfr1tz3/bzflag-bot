@@ -77,7 +77,7 @@ class TestFlagStrategy:
     def test_custom_good_flags(self):
         """Bot mit eigener good_flags-Liste behält nur konfigurierte Flags."""
         from unittest.mock import MagicMock, patch
-        with patch("bzbot.BZFlagClient"):
+        with patch("bot.core.BZFlagClient"):
             from bzbot import BZBot
             b = BZBot(host="localhost", callsign="Test",
                       good_flags=["V"], bad_flags=["WG"])

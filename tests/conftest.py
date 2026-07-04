@@ -48,7 +48,7 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture
 def bot():
-    with patch("bzbot.BZFlagClient"):
+    with patch("bot.core.BZFlagClient"):
         from bzbot import BZBot
         b = BZBot(host="localhost", port=5154, callsign="TestBot")
     b.client = MagicMock()
