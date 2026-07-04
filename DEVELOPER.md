@@ -97,6 +97,9 @@ ai_tick = (self._tick_count % (UPDATE_RATE_HZ // AI_RATE_HZ) == 0)   # 60/10 →
 
 `dt` ist die echte vergangene Zeit, nicht der ideale Tick-Abstand. Bei Systemlast kann
 dt deutlich größer als 20ms sein. Alle Physik-Berechnungen benutzen `dt`, keine fixen Werte.
+`dt_r` ist zentral auf **0,1s geklemmt** (F4): bei Stalls (GC, Container-Scheduling,
+Netz-Hänger) läuft die Simulation kurz verlangsamt weiter, statt in einem Riesenschritt
+durch Wände zu tunneln oder das GM-Steering zu überdrehen.
 
 ### Server-Zeitstempel
 
@@ -107,6 +110,24 @@ dt deutlich größer als 20ms sein. Alle Physik-Berechnungen benutzen `dt`, kein
 self._server_time_offset = server_s - time.monotonic()
 # Nutzung: server_now = time.monotonic() + self._server_time_offset
 ```
+
+### Threading-Modell und Dict-Snapshot-Konvention
+
+Es gibt zwei dauerhafte Threads (plus im Managed-Modus einen stdin-Reader):
+
+- **Recv-Thread** (`BZFlagClient`): ruft alle `_on_*`-Message-Handler auf. NUR hier
+  werden `self.players` und `self.flags` strukturell mutiert (Keys hinzugefügt/entfernt).
+- **Game-Loop-Thread** (Main): Physik, KI, Hit-Detection — liest diese Dicts nur.
+
+**Invariante:** Wer `self.players` oder `self.flags` außerhalb des Recv-Threads
+iteriert, MUSS über einen Snapshot gehen: `for pid, info in list(self.players.items())`.
+Ohne Kopie crasht ein Join/Leave während der Iteration den Game-Loop mit
+`RuntimeError: dictionary changed size during iteration` (sporadisch, µs-Fenster —
+ein klassischer „läuft tagelang, stirbt einmal die Woche"-Bug). Innerhalb der
+`_on_*`-Handler ist direkte Iteration erlaubt (gleicher Thread wie die Mutationen).
+Die `list()`-Kopie ist dank GIL atomar genug; ein zusätzliches Lock ist nicht nötig.
+`self._shots`/`self._ricochet_paths` haben dagegen ein echtes Lock (`_shots_lock`),
+weil dort beide Threads schreiben.
 
 ---
 

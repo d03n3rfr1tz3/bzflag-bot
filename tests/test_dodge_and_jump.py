@@ -45,6 +45,84 @@ def test_find_incoming_ignores_safe_shot(bot):
     assert shot is None
 
 
+# ── GM-Bedrohung (F1: keine Doppel-Extrapolation) ────────────────────────────
+
+class TestGmThreatPosition:
+    """GM-pos wird laufend nachgeführt (Integration + MsgGMUpdate) — die
+    Bedrohungsanalyse darf die Flugzeit nicht via position_at() ein zweites
+    Mal aufaddieren, sonst sieht sie eine Phantom-Position weit vor der
+    echten Rakete und ignoriert den GM als „entfernt sich"."""
+
+    def test_gm_with_flight_time_detected(self, bot):
+        """GM bei 50u, fliegt auf Bot zu, seit 1s in der Luft (pos = aktuell).
+        position_at(now) sähe die Rakete bei x=−50 (hinter dem Bot) → alte
+        Logik ignorierte sie. Korrekt: Bedrohung mit ~0,5s bis Einschlag."""
+        bot.pos = [0.0, 0.0, 0.0]
+        now = time.monotonic()
+        make_shot(bot, shooter_id=2, shot_id=1,
+                  pos=(50.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0),
+                  is_gm=True, flag_abbr=b"GM", fire_time=now - 1.0)
+        shot, t = bot._find_incoming_shot(now)
+        assert shot is not None and shot.is_gm
+        assert 0.3 <= t <= 0.7
+
+    def test_normal_shot_extrapolation_unchanged(self, bot):
+        """Regression-Guard: normaler Schuss (pos = Abschussort) wird weiter
+        via position_at extrapoliert — nach 1s Flugzeit von x=150 ist er bei
+        x=50 und damit eine Bedrohung."""
+        bot.pos = [0.0, 0.0, 0.0]
+        now = time.monotonic()
+        make_shot(bot, shooter_id=2, shot_id=1,
+                  pos=(150.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0),
+                  fire_time=now - 1.0)
+        shot, t = bot._find_incoming_shot(now)
+        assert shot is not None
+        assert 0.3 <= t <= 0.7
+
+
+class TestGmNoPathCache:
+    """F1b: GM darf auf Teleporter-Karten keinen geraden Pfad-Cache bekommen —
+    sonst überspringt _find_incoming_shot den GM im Direkt-Zweig und bewertet
+    den falschen (nicht lenkenden) Pfad."""
+
+    @staticmethod
+    def _shot_payload(flag_bytes, shooter_id=2, shot_id=1):
+        import struct
+        return (
+            struct.pack(">f",  time.monotonic())
+            + struct.pack(">B", shooter_id)
+            + struct.pack(">H", shot_id)
+            + struct.pack(">fff", 50.0, 0.0, 1.0)
+            + struct.pack(">fff", -100.0, 0.0, 0.0)
+            + struct.pack(">f",  0.0)
+            + struct.pack(">h",  2)
+            + flag_bytes
+            + struct.pack(">f",  3.5)
+        )
+
+    def test_gm_gets_no_path_on_tele_map(self, bot):
+        from unittest.mock import MagicMock
+        wm = MagicMock()
+        wm.teleporters = [object()]   # Karte „hat" Teleporter
+        wm.boxes = []
+        bot._world_map = wm
+        bot._on_shot_begin(0, self._shot_payload(b"GM"))
+        assert (2, 1) in bot._shots
+        assert (2, 1) not in bot._ricochet_paths
+
+    def test_normal_shot_still_gets_path(self, bot):
+        """Regression-Guard: normaler Ricochet-Schuss bekommt weiterhin einen Pfad."""
+        from unittest.mock import MagicMock
+        wm = MagicMock()
+        wm.teleporters = []
+        wm.boxes = []
+        bot._world_map = wm
+        bot._server_ricochet = True
+        bot._on_shot_begin(0, self._shot_payload(b"\x00\x00", shot_id=2))
+        assert (2, 2) in bot._shots
+        assert (2, 2) in bot._ricochet_paths
+
+
 def test_find_incoming_ignores_expired_shot(bot):
     bot.pos = [0.0, 0.0, 0.0]
     ft = time.monotonic() - 10.0

@@ -504,7 +504,12 @@ class BZBot(BZBotAI):
             self._spawn()
         while self._running and not self._stop_event.is_set():
             now  = time.monotonic()
-            dt_r = now - last_tick
+            # Stall-Clamp (GC, Netz-Hänger, Container-Scheduling): ein ungebremster
+            # Einzelschritt tunnelt per Zielpunkt-Kollision durch dünne Wände,
+            # überdreht das GM-Steering (max_turn = _gm_turn_angle * dt) und lässt
+            # die Hit-Detection lange Segmente überspringen. 0,1s = 6 Nominal-Ticks;
+            # jenseits davon läuft die Simulation lieber kurz „zeitlupig" weiter.
+            dt_r = min(now - last_tick, 0.1)
             last_tick = now
             if not self.client.connected:
                 logger.warning("[%s] Verbindung verloren", self.callsign)
@@ -673,8 +678,13 @@ class BZBot(BZBotAI):
                             bx, by, bz = shot.position_at(now)
                             # Skip wenn Schuss sich vom Bot wegbewegt (past closest approach).
                             # Schuss bleibt in _shots — könnte bei Ricochet zurückkommen.
-                            _rel_x = bx - tank_cx; _rel_y = by - tank_cy
-                            if shot.vel[0] * _rel_x + shot.vel[1] * _rel_y > 0:
+                            # BEIDE Segment-Enden prüfen: entfernt sich nur der Endpunkt,
+                            # kann das Segment den Tank in diesem Tick DURCHquert haben —
+                            # dann muss der OBB-Test entscheiden (kein Geister-Durchflug).
+                            _rel_bx = bx - tank_cx; _rel_by = by - tank_cy
+                            _rel_ax = ax - tank_cx; _rel_ay = ay - tank_cy
+                            if (shot.vel[0] * _rel_bx + shot.vel[1] * _rel_by > 0
+                                    and shot.vel[0] * _rel_ax + shot.vel[1] * _rel_ay > 0):
                                 continue
                             hit = _segment_hits_obb_3d(ax, ay, az, bx, by, bz,
                                                         tank_cx, tank_cy, tank_cz, self.azimuth,
@@ -725,7 +735,10 @@ class BZBot(BZBotAI):
 
     def _check_steamroller(self, now: float) -> None:
         """Tötet Bot via GotRunOver wenn ein SR-Spieler in Kill-Radius-Nähe ist."""
-        for pid, info in self.players.items():
+        # list()-Snapshot: players wird im Recv-Thread mutiert (Join/Leave),
+        # diese Iteration läuft im Game-Loop → ohne Kopie droht
+        # "RuntimeError: dictionary changed size during iteration".
+        for pid, info in list(self.players.items()):
             if not info.alive: continue
             if info.flag != "SR" and self.own_flag != "BU": continue
             if now - info.last_seen > 1.0: continue
@@ -937,7 +950,7 @@ class BZBot(BZBotAI):
         for info in list(self.players.values()):
             if info.is_human and self._is_bot_callsign(info.callsign):
                 info.is_human = False
-        self.human_count = sum(1 for p in self.players.values() if p.is_human)
+        self.human_count = sum(1 for p in list(self.players.values()) if p.is_human)
         self._notify_count()
 
     def _emit_status(self) -> None:
@@ -1330,8 +1343,14 @@ class BZBot(BZBotAI):
             # vor — die wandbewusste Simulation würde ihren Pfad fälschlich an Wänden stoppen;
             # ihr alter Pfad (kein Cache → gerade Linie) ist für sie korrekt.
             _phases_walls = _is_pz or shot.flag_abbr == b"SB"
+            # GM bekommt KEINEN Pfad-Cache: die Rakete lenkt, ein vorberechneter
+            # gerader Pfad wäre falsch — und _find_incoming_shot würde den GM wegen
+            # des Cache-Eintrags im Direkt-Zweig überspringen und stattdessen den
+            # falschen Pfad bewerten. Die live nachgeführte shot.pos (Integration
+            # in _resolve_incoming_shots + MsgGMUpdate) ist für GM die Wahrheit.
             _tele_route = (self._world_map is not None
-                           and bool(self._world_map.teleporters) and not _phases_walls)
+                           and bool(self._world_map.teleporters)
+                           and not _phases_walls and not shot.is_gm)
             if (self._world_map is not None
                     and (_tele_route
                          or _can_ricochet_shot(shot.flag_abbr, shot.is_gm, shot.is_sw,
@@ -2043,10 +2062,17 @@ class BZBot(BZBotAI):
         """Leerer Handler für bekannte, nicht ausgewertete Message-Typen."""
 
     def _cleanup_shots(self, now: float) -> None:
-        """Entfernt abgelaufene Schüsse aus _shots."""
+        """Entfernt abgelaufene Schüsse aus _shots UND _ricochet_paths.
+
+        _resolve_incoming_shots räumt beide Dicts nur solange self.alive —
+        während Tod/Respawn ablaufende Schüsse würden ihre Pfad-Segmente
+        sonst dauerhaft in _ricochet_paths hinterlassen (Leak, wächst mit
+        der Uptime und verteuert jeden _find_incoming_shot-Scan).
+        """
         with self._shots_lock:
             for k in [k for k, s in self._shots.items() if s.is_expired(now)]:
                 del self._shots[k]
+                self._ricochet_paths.pop(k, None)
 
     def _notify_count(self) -> None:
         """Ruft on_player_count_changed-Callback auf und meldet den Stand an den Manager."""

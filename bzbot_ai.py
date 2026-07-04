@@ -463,7 +463,10 @@ class BZBotAI:
     def _genocide_multikill_possible(self) -> bool:
         """True wenn min. ein Feind-Team > 1 lebenden Spieler hat (G-Flagge lohnt sich)."""
         team_alive: dict = {}
-        for pid, info in self.players.items():
+        # list()-Snapshot: players/flags werden im Recv-Thread mutiert (Join/Leave,
+        # Flag-Updates), die KI läuft im Game-Loop-Thread → Iterationen über diese
+        # Dicts hier und im Rest der Datei immer über eine Kopie (Konvention s. DEVELOPER.md).
+        for pid, info in list(self.players.items()):
             if pid == self.player_id or not info.alive:
                 continue
             if not self._is_foe(info, True):
@@ -607,7 +610,7 @@ class BZBotAI:
         ist ein Mensch — egal ob aktiver Mitspieler oder reiner Zuschauer (Observer). Eigene
         Bots (Peer-Tanks, der Manager-Fallback-Observer) zählen NICHT als Anwesenheit; nur
         menschliche Anwesenheit lässt die Tanks aus dem IDLE-Modus wechseln."""
-        return any(not self._is_bot_callsign(p.callsign) for p in self.players.values())
+        return any(not self._is_bot_callsign(p.callsign) for p in list(self.players.values()))
 
     def _can_drive_through_obstacles(self) -> bool:
         """True wenn Bot mit aktueller Flagge durch Hindernisse fahren darf (OO u.a.)."""
@@ -1340,8 +1343,10 @@ class BZBotAI:
             _react = DODGE_REACT_DELAY * CS_REACT_MULTIPLIER
         if now - self._threat_detected_at < _react:
             return False
-        # Fix J1a: verbleibende Zeit = Zeit_ab_Abschuss − bereits_vergangene_Zeit
-        _elapsed = max(0.0, now - threat.fire_time)
+        # Fix J1a: verbleibende Zeit = Zeit_ab_Abschuss − bereits_vergangene_Zeit.
+        # Gilt nur für Schüsse mit pos=Abschussort — GM-pos ist bereits die aktuelle
+        # Raketenposition, time_to_closest rechnet dort schon ab jetzt → nichts abziehen.
+        _elapsed = 0.0 if threat.is_gm else max(0.0, now - threat.fire_time)
         time_to_impact = max(0.0, threat.time_to_closest(self.pos[0], self.pos[1]) - _elapsed)
         # Für Ricochet-Schüsse: Segment-basierte Zeit statt linearer Anfangsgeschwindigkeit
         if threat_key in self._ricochet_paths:
@@ -1406,7 +1411,8 @@ class BZBotAI:
     def _compute_dodge_dir(self, threat, now: float):
         """Berechnet optimale Ausweich-Richtung mit 60°-Cap vom aktuellen Azimuth.
         Gibt (capped_dir, orig_diff) zurück: orig_diff für vorwärts/rückwärts-Entscheidung."""
-        sx, sy, _ = threat.position_at(now)
+        # GM: pos ist bereits die aktuelle Raketenposition (s. _find_incoming_shot)
+        sx, sy, _ = threat.pos if threat.is_gm else threat.position_at(now)
         shot_dir = math.atan2(threat.vel[1], threat.vel[0])
         perp_r = _wrap(shot_dir + math.pi / 2)
         perp_l = _wrap(shot_dir - math.pi / 2)
@@ -2148,7 +2154,15 @@ class BZBotAI:
                 # Ricochet-Schüsse: Richtung nach Bounce unklar → nur Segment-Cache prüfen
                 if (shot.shooter_id, shot.shot_id) in self._ricochet_paths:
                     continue
-                sx, sy, sz = shot.position_at(now)
+                if shot.is_gm:
+                    # GM: shot.pos wird laufend nachgeführt (Integration in
+                    # _resolve_incoming_shots + MsgGMUpdate) — position_at() würde
+                    # die bisherige Flugzeit ein ZWEITES Mal aufaddieren und die
+                    # Rakete weit vor ihrer echten Position sehen (Phantom-Position,
+                    # meist „entfernt sich" → GM wurde beim Ausweichen ignoriert).
+                    sx, sy, sz = shot.pos
+                else:
+                    sx, sy, sz = shot.position_at(now)
                 if shot.is_sw:
                     _sw_dist = math.hypot(sx - self.pos[0], sy - self.pos[1])
                     if self._shock_in_radius < _sw_dist < self._shock_out_radius:
@@ -2244,7 +2258,7 @@ class BZBotAI:
         best_id = None
         best_score = float("inf")
         _now = time.monotonic()
-        for pid, info in self.players.items():
+        for pid, info in list(self.players.items()):
             if pid == self.player_id or not info.alive:
                 continue
             if info.paused:                             # pausiert = unverwundbar → kein Neu-Lock
@@ -2299,7 +2313,7 @@ class BZBotAI:
         if dist2 < 1.0:
             return []
         result: list[tuple[float, float, float]] = []
-        for fi in self.flags.values():
+        for fi in list(self.flags.values()):
             if fi.status != 1:
                 continue
             fx, fy = fi.pos[0], fi.pos[1]
@@ -2326,7 +2340,7 @@ class BZBotAI:
             best_pos = None
             _dropped = getattr(self, '_dropped_neutrals', ())
             _recent  = getattr(self, '_recent_flag_targets', ())
-            for fi in self.flags.values():
+            for fi in list(self.flags.values()):
                 if fi.status != 1:
                     continue
                 if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
@@ -2382,7 +2396,7 @@ class BZBotAI:
             _recent = getattr(self, '_recent_flag_targets', ())
             best_d_good: float = float("inf")
             best_pos_good = None
-            for fi in self.flags.values():
+            for fi in list(self.flags.values()):
                 if fi.status != 1:
                     continue
                 d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
@@ -2415,7 +2429,7 @@ class BZBotAI:
                              self.callsign, IDENTIFY_RANGE, len(self.flags), len(_recent))
             best_d = float("inf")
             best_pos = None
-            for fi in self.flags.values():
+            for fi in list(self.flags.values()):
                 if fi.status != 1:
                     continue
                 if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
@@ -3185,7 +3199,7 @@ class BZBotAI:
         """Sendet MsgGrabFlag wenn Bot nah an einer onGround-Flag ist."""
         if self.own_flag or self.player_id is None: return
         if now - self._last_grab_attempt < 0.5: return
-        for fi in self.flags.values():
+        for fi in list(self.flags.values()):
             if fi.status != 1: continue
             if abs(fi.pos[2] - self.pos[2]) > 0.5: continue
             d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
