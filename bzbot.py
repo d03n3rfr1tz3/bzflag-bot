@@ -582,7 +582,12 @@ class BZBot(BZBotAI):
             if self.managed and now - self._last_status_emit >= STATUS_HEARTBEAT_S:
                 self._emit_status()
             self._cleanup_shots(now)
-            self._stop_event.wait(timeout=max(0.0, dt - (time.monotonic() - now)))
+            # N3: time.sleep statt Event.wait — spart die Condition/Lock-
+            # Maschinerie des Events (Nachmessung tmp4: ≈7% der aktiven CPU
+            # plus ~230 Futex-Wakeups/s Kernel-Anteil, den cProfile nicht
+            # sieht). stop() greift über _running/_stop_event am nächsten
+            # Schleifenkopf — Latenz maximal eine Tick-Dauer (~16ms), akzeptiert.
+            time.sleep(max(0.0, dt - (time.monotonic() - now)))
 
     # ── Treffer-Erkennung ─────────────────────────────────────────────────
 
@@ -639,6 +644,13 @@ class BZBot(BZBotAI):
     def _resolve_incoming_shots(self, now: float, dt: float) -> None:
         """Prüft alle aktiven Schüsse auf Treffer; behandelt auch SH-Absorption
         (überlebt) und TH-Flaggendiebstahl (kein Kill). Siehe DEVELOPER.md §7."""
+        # N2: Leerlauf-Early-Out (läuft 60 Hz) — Truthiness-Check ist GIL-sicher
+        # ohne Lock. Die Check-Referenz muss weiterlaufen, damit Prüf-Fenster
+        # und Relativ-Sweep beim ersten Schuss genauso aufsetzen wie bisher.
+        if not self._shots:
+            self._last_hit_check_t   = now
+            self._last_hit_check_pos = (self.pos[0], self.pos[1], self.pos[2])
+            return
         tank_cx = self.pos[0]
         tank_cy = self.pos[1]
         tank_cz = self.pos[2] + self._tank_height / 2
@@ -2159,6 +2171,10 @@ class BZBot(BZBotAI):
         sonst dauerhaft in _ricochet_paths hinterlassen (Leak, wächst mit
         der Uptime und verteuert jeden _find_incoming_shot-Scan).
         """
+        # N2: Leerlauf-Early-Out (läuft 60 Hz) — die Rico-Pops hängen an den
+        # _shots-Keys, ohne Schüsse gibt es also nichts zu räumen.
+        if not self._shots:
+            return
         with self._shots_lock:
             for k in [k for k, s in self._shots.items() if s.is_expired(now)]:
                 del self._shots[k]
