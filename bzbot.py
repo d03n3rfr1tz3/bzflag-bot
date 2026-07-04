@@ -509,6 +509,12 @@ class BZBot(BZBotAI):
         self._stop_event.wait(timeout=0.5)
         if not self._game_over:        # nicht in eine laufende Rundenende-Phase spawnen
             self._spawn()
+        # Kadenz-Anker HIER setzen, nicht in __init__: der Init-Wert 0.0 läge um die
+        # komplette System-Uptime hinter time.monotonic() — der +=-Catch-up in
+        # _maybe_send_server_update holt so ein Defizit nur mit 1s/s auf, der Bot
+        # sendete also dauerhaft mit Tick-Rate (~60 Hz) statt 30 Hz (Server-Messung
+        # 2026-07-04: sendto = 46% der aktiven CPU; FABLE-PLAN.md Teil 1b, N1a).
+        self._next_server_update = time.monotonic()
         while self._running and not self._stop_event.is_set():
             now  = time.monotonic()
             # Stall-Clamp (GC, Netz-Hänger, Container-Scheduling): ein ungebremster
@@ -560,9 +566,7 @@ class BZBot(BZBotAI):
                     logger.warning("[%s] Keine Spawn-Antwort – wiederhole MsgAlive", self.callsign)
                     self._spawn()
             # Server-Update bei Kadenz – lebend: Position; Explosion: PS_EXPLODING (kein [nr]); sonst still
-            if now >= self._next_server_update:
-                self._send_update()
-                self._next_server_update += self._server_update_interval
+            self._maybe_send_server_update(now)
             # Rundenende: nach der Endstand-Linger-Phase die Schleife verlassen → Reconnect
             if self._round_over_until is not None and time.monotonic() >= self._round_over_until:
                 break
@@ -831,6 +835,20 @@ class BZBot(BZBotAI):
         logger.info("[%s] MsgKilled (GotRunOver, Killer=%d) gesendet", self.callsign, killer_id)
 
     # ── Netzwerk senden ───────────────────────────────────────────────────
+
+    def _maybe_send_server_update(self, now: float) -> None:
+        """Sendet MsgPlayerUpdate mit fester Kadenz (30 Hz bzw. `_updateThrottleRate`-Intervall).
+
+        Drift-freie Kadenz über `+= interval`; die Klemme danach verhindert
+        Burst-Nachholen: nach einem Stall (GC, Container-Scheduling) wird die
+        Kadenz neu aufgesetzt statt jede verpasste Periode nachzusenden — sonst
+        ginge pro Tick ein Update raus, bis das Defizit abgetragen ist (genau
+        der N1a-Bug aus FABLE-PLAN.md Teil 1b, dort via Init-Wert 0.0)."""
+        if now >= self._next_server_update:
+            self._send_update()
+            self._next_server_update += self._server_update_interval
+            if self._next_server_update <= now:   # Stall/Start: neu aufsetzen statt nachholen
+                self._next_server_update = now + self._server_update_interval
 
     def _send_update(self) -> None:
         """Sendet MsgPlayerUpdate (Position + Velocity + Status) via UDP — spiegelt den echten Client.
