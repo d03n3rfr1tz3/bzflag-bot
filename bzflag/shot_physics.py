@@ -611,6 +611,22 @@ def _segment_hits_obb_3d(ax: float, ay: float, az: float,
     return True
 
 
+def _extend_segment(ax: float, ay: float, az: float,
+                    bx: float, by: float, bz: float,
+                    extra: float) -> Tuple[float, float, float,
+                                           float, float, float]:
+    """Verlängert das Segment [A,B] an beiden Enden um `extra` entlang seiner
+    eigenen Richtung (SB-Längskapsel: der Bolt ragt vor und hinter das
+    Schusszentrum, seitlich bleibt die Reichweite unverändert)."""
+    dx, dy, dz = bx - ax, by - ay, bz - az
+    length = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if length < 1.0e-9:
+        return ax, ay, az, bx, by, bz
+    f = extra / length
+    ex, ey, ez = dx * f, dy * f, dz * f
+    return ax - ex, ay - ey, az - ez, bx + ex, by + ey, bz + ez
+
+
 # ---------------------------------------------------------------------------
 # Hauptfunktion: Schuss-Pfad-Simulation
 # ---------------------------------------------------------------------------
@@ -632,7 +648,8 @@ def simulate_shot_path(pos: Tuple[float, float, float],
                         link_map: Optional[dict] = None,
                         tele_log: Optional[list] = None,
                         solid_obs: Optional[List[BoxObstacle]] = None,
-                        obs_grid: Optional["ObstacleGrid"] = None) -> List[Segment]:
+                        obs_grid: Optional["ObstacleGrid"] = None,
+                        phase_walls: bool = False) -> List[Segment]:
     """
     Port von SegmentedShotStrategy::makeSegments() + Teleporter-Querung.
     Simuliert den vollständigen Schuss-Pfad inkl. Abpraller und Teleporter.
@@ -644,6 +661,11 @@ def simulate_shot_path(pos: Tuple[float, float, float],
     reflect_all = server_ricochet OR flag==R. Teleporter transportieren JEDEN Schuss,
     auch ohne Ricochet — daher läuft die Schleife sobald reflect_all ODER teleporters.
     Max. `max_bounces` Iterationen (deckelt auch Teleport-Ping-Pong).
+
+    phase_walls=True (SB/PZ, ObstacleEffect::Through): Obstacles und Weltgrenzen
+    stoppen den Schuss NICHT (makeSegments überspringt für Through nur die
+    Gebäude-Suche) — Teleporter-Querungen greifen aber weiterhin, denn der
+    Teleporter-Lookup in makeSegments läuft unabhängig vom ObstacleEffect.
     """
     speed = math.sqrt(vel[0]**2 + vel[1]**2 + vel[2]**2)
     if speed < 1.0e-6 or lifetime <= 0.0:
@@ -657,8 +679,9 @@ def simulate_shot_path(pos: Tuple[float, float, float],
     teles = teleporters or []
     lmap = link_map or {}
 
-    if not reflect_all and not teles:
-        # Kein Ricochet und keine Teleporter: gerader Pfad bis Lifetime-Ende
+    if not teles and (phase_walls or not reflect_all):
+        # Keine Teleporter und nichts, was den Schuss ablenken kann
+        # (phasend oder ohne Ricochet): gerader Pfad bis Lifetime-Ende
         return [Segment(pos[0], pos[1], pos[2],
                         pos[0] + vel[0] * lifetime,
                         pos[1] + vel[1] * lifetime,
@@ -688,37 +711,38 @@ def simulate_shot_path(pos: Tuple[float, float, float],
         best_n = (0.0, 0.0, 0.0)
         best_tele: Optional[Tuple[int, int]] = None  # (ziel_teleporter_index, ziel_face) oder None
 
-        # Weltgrenzen
-        for wt, wnx, wny, wnz in _world_boundary_hits(ox, oy, oz, ddx, ddy, ddz, world_half, wall_height):
-            if eps < wt < best_t:
-                best_t = wt
-                best_n = (wnx, wny, wnz)
-                best_tele = None
+        if not phase_walls:
+            # Weltgrenzen
+            for wt, wnx, wny, wnz in _world_boundary_hits(ox, oy, oz, ddx, ddy, ddz, world_half, wall_height):
+                if eps < wt < best_t:
+                    best_t = wt
+                    best_n = (wnx, wny, wnz)
+                    best_tele = None
 
-        # Obstacles — Broad-Phase (P1): nur Kandidaten der in XY überflogenen
-        # Zellen statt aller Obstacles. Exakt äquivalent: die DDA liefert jede
-        # Box, deren gepolsterte AABB eine durchquerte Zelle berührt (keine
-        # False Negatives, s. ObstacleGrid-Docstring); Hits jenseits time_left,
-        # die der Query-Strecke fehlen könnten, enden in beiden Pfaden im
-        # identischen „Segment bis Lifetime-Ende"-Zweig (best_t > time_left).
-        if obs_grid is not None:
-            cand_obs = obs_grid.query_ray(ox, oy,
-                                          ox + ddx * time_left,
-                                          oy + ddy * time_left)
-        else:
-            cand_obs = test_obs
-        for obs in cand_obs:
-            if obs.is_pyramid:
-                result = ray_pyramid_hit(ox, oy, oz, ddx, ddy, ddz, obs)
+            # Obstacles — Broad-Phase (P1): nur Kandidaten der in XY überflogenen
+            # Zellen statt aller Obstacles. Exakt äquivalent: die DDA liefert jede
+            # Box, deren gepolsterte AABB eine durchquerte Zelle berührt (keine
+            # False Negatives, s. ObstacleGrid-Docstring); Hits jenseits time_left,
+            # die der Query-Strecke fehlen könnten, enden in beiden Pfaden im
+            # identischen „Segment bis Lifetime-Ende"-Zweig (best_t > time_left).
+            if obs_grid is not None:
+                cand_obs = obs_grid.query_ray(ox, oy,
+                                              ox + ddx * time_left,
+                                              oy + ddy * time_left)
             else:
-                result = ray_box_hit(ox, oy, oz, ddx, ddy, ddz, obs)
-            if result is None:
-                continue
-            t_hit, hnx, hny, hnz = result
-            if eps < t_hit < best_t:
-                best_t = t_hit
-                best_n = (hnx, hny, hnz)
-                best_tele = None
+                cand_obs = test_obs
+            for obs in cand_obs:
+                if obs.is_pyramid:
+                    result = ray_pyramid_hit(ox, oy, oz, ddx, ddy, ddz, obs)
+                else:
+                    result = ray_box_hit(ox, oy, oz, ddx, ddy, ddz, obs)
+                if result is None:
+                    continue
+                t_hit, hnx, hny, hnz = result
+                if eps < t_hit < best_t:
+                    best_t = t_hit
+                    best_n = (hnx, hny, hnz)
+                    best_tele = None
 
         # Teleporter-Querungen (transportieren jeden Schuss)
         for ti, tele in enumerate(teles):

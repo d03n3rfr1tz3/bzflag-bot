@@ -748,13 +748,32 @@ def position_at(self, t):
     return (pos[0] + vel[0]*dt, pos[1] + vel[1]*dt, pos[2] + vel[2]*dt)
 ```
 
-Für den normalen Trefferkraft-Check wird ein Segment `[A, B]` über einen Tick definiert:
-- `A = shot.position_at(now - dt)` (Schussposition letzter Tick)
-- `B = shot.position_at(now)` (Schussposition aktueller Tick)
+Für den normalen Treffer-Check wird ein Segment `[A, B]` über das **Prüf-Fenster** definiert:
+- `A = shot.position_at(prev_t)` mit `prev_t = max(fire_time, win_start)`
+- `B = shot.position_at(now)`
 
-Dann: `_segment_point_dist3d(A, B, tank_center) < hit_radius`
+`win_start = min(_last_hit_check_t, now − dt)`: mindestens der aktuelle Tick, zusätzlich
+alles seit dem letzten `_resolve_incoming_shots`-Lauf. Die Abdeckung hängt damit **nicht**
+am 0,1-s-Stall-Clamp der Hauptschleife — auch ein langer Tick (GC, Container-Scheduling,
+historisch: synchrone A*-Freezes) verliert keinen Schusspfad; Überlappung ist harmlos
+(idempotenter Segment-Test), Lücken nicht. Beim Spawn wird die Referenz zurückgesetzt
+(`_on_alive`), sonst würde das Totliege-Fenster gegen die neue Position getestet
+(Geister-Treffer beim Einspawnen).
 
-Die `hit_radius` ist `TANK_RADIUS * scale * 0.99`:
+**Relativ-Sweep (Eigenbewegung):** Der Startpunkt `A` wird um die eigene Bewegung seit
+`prev_t` in den Tank-Frame von `now` verschoben (Client-Äquivalent: `relativeRay` in
+`checkHit`) — ein Tank, der während des Fensters selbst durch die Schussbahn fährt, wird
+getroffen. Guard: unplausibel großer eigener Sprung (Teleport; `> 2·tank_speed·Fenster + 5`)
+→ Korrektur entfällt, statischer Test.
+
+Getestet wird das Segment gegen die Tank-**OBB** (`_hitbox_half_dims`: Tank-Halbmaße +
+`_shotRadius`-Aufschlag je Dimension; Flaggen-Skalierung O/T/TH, N-Sonderfall) via
+`_segment_hits_obb_3d` — geometrisch eine Kapsel mit Radius `_shotRadius` um die Flugbahn.
+Die OBB rekonstruiert BZFlags `checkHit`-Verhalten: Breitphasen-AABB-Gate (echte
+Panzer-Maße, erklärt BU-Immunität und laterale Enge) vor der `0.99·tankRadius`-Kugel.
+
+Die Kugel-Variante (`_segment_point_dist3d < _effective_hit_radius`) nutzt nur noch der
+GM-Zweig. `_effective_hit_radius` ist `TANK_RADIUS * scale * 0.99`:
 - Normal: `4.32 * 1.0 * 0.99 = 4.28u`
 - Tiny (T): `4.32 * 0.4 * 0.99 = 1.71u`
 - Obesity (O): `4.32 * 2.5 * 0.99 = 10.69u`
@@ -798,6 +817,18 @@ die tatsächliche Tank-Form besser ab: lang (3.5u), schmal (1.0u), normalhohe (1
 - **Instant** (bewusste Vereinfachung, kein Bug → BUGS/FSD P3-SHT-06): Sofort-Check bei
   `MsgShotBegin` über die volle Distanz; abgeprallter Laser prüft alle Ricochet-Segmente
 - Segment-Prüfung: `A = laser_origin`, `B = laser_origin + direction × range`
+
+**Super Bullet (SB):**
+- Geometrisch identisch zu Normal (Client: `SuperBulletStrategy` erbt `checkHit`
+  unverändert), aber `makeSegments(Through)`: Wände und Weltgrenzen stoppen den Schuss
+  nicht — **Teleporter greifen trotzdem** (der Teleporter-Lookup in `makeSegments` läuft
+  unabhängig vom ObstacleEffect; live verifiziert). Auf Teleporter-Karten laufen SB- und
+  PZ-Schüsse deshalb durch `simulate_shot_path(..., phase_walls=True)` und landen im
+  Segment-Cache (`_ricochet_paths`) — ohne Teleporter bleibt SB der gerade else-Zweig.
+- **Längskapsel (bewusste, kleine Abweichung vom Client):** Das getestete Segment wird
+  beidseitig um `_shotRadius` verlängert (`_extend_segment`) → Längsreichweite
+  vorn/hinten `2×_shotRadius` (Default 1,0u), seitlich/vertikal unverändert. Bildet die
+  optische Bolt-Länge ab; der away-skip bleibt aktiv (vorbei/wegteleportiert = weg).
 
 **Thief (TH):**
 - **Instant** wie Laser; Sofort-Check bei `MsgShotBegin` (direkt + Ricochet-Segmente)
