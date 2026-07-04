@@ -574,6 +574,56 @@ class BZBot(BZBotAI):
 
     # ── Treffer-Erkennung ─────────────────────────────────────────────────
 
+    def _hitbox_half_dims(self) -> Tuple[float, float, float]:
+        """Halbe Hitbox-Maße (len, w, h) des eigenen Tanks inkl. Flaggen-Skalierung
+        (O/T/TH), N-Sonderfall (schmale Quer-Hitbox) und Schussradius-Aufschlag.
+        Einzige Quelle für die OBB-Treffertests (F9 — vorher 3× dupliziert)."""
+        if   self.own_flag == "O":  sc = self._obese_factor
+        elif self.own_flag == "T":  sc = self._tiny_factor
+        elif self.own_flag == "TH": sc = self._thief_tiny_factor
+        else:                       sc = 1.0
+        half_w   = (self._narrow_hw if self.own_flag == "N"
+                    else self._tank_width / 2 * sc) + self._shot_radius
+        half_len = self._tank_length / 2 * sc + self._shot_radius
+        half_h   = self._tank_height / 2 * sc + self._shot_radius
+        return half_len, half_w, half_h
+
+    def _instant_shot_hits(self, shooter: int, shot_id: int,
+                           px: float, py: float, pz: float,
+                           vx: float, vy: float, vz: float,
+                           lifetime: float) -> bool:
+        """True wenn ein Instant-Schuss (Laser/Thief) den eigenen Tank trifft.
+
+        Mit Pfad-Cache: OBB-Test über alle Segmente (Abpraller/Teleporter);
+        ohne Cache: Punkt-zu-Strahl-Abstand über die gerade Linie.
+        (F9: vorher zwei nahezu identische Blöcke für Laser und Thief.)"""
+        segs = self._ricochet_paths.get((shooter, shot_id))
+        if segs:
+            half_len, half_w, half_h = self._hitbox_half_dims()
+            tcx = self.pos[0]; tcy = self.pos[1]
+            tcz = self.pos[2] + self._tank_height / 2
+            for seg in segs:
+                if _segment_hits_obb_3d(seg.px, seg.py, seg.pz,
+                                         seg.ex, seg.ey, seg.ez,
+                                         tcx, tcy, tcz, self.azimuth,
+                                         half_len, half_w, half_h):
+                    return True
+            return False
+        speed_xyz = math.sqrt(vx**2 + vy**2 + vz**2)
+        if speed_xyz <= 0:
+            return False
+        dnx, dny, dnz = vx / speed_xyz, vy / speed_xyz, vz / speed_xyz
+        shot_range = speed_xyz * lifetime
+        cx = self.pos[0]; cy = self.pos[1]; cz = self.pos[2] + self._tank_height / 2
+        dx, dy, dz = cx - px, cy - py, cz - pz
+        t_proj = dx * dnx + dy * dny + dz * dnz
+        if not (0.0 <= t_proj <= shot_range):
+            return False
+        perpx = dx - dnx * t_proj
+        perpy = dy - dny * t_proj
+        perpz = dz - dnz * t_proj
+        return math.sqrt(perpx**2 + perpy**2 + perpz**2) < HIT_RADIUS
+
     def _resolve_incoming_shots(self, now: float, dt: float) -> None:
         """Prüft alle aktiven Schüsse auf Treffer; behandelt auch SH-Absorption
         (überlebt) und TH-Flaggendiebstahl (kein Kill). Siehe DEVELOPER.md §7."""
@@ -601,6 +651,10 @@ class BZBot(BZBotAI):
                 else:
                     if shot.is_gm:
                         if shot.shooter_id == self.player_id:
+                            # Bewusste Vereinfachung (F8): Im echten BZFlag kann die
+                            # eigene Rakete einen treffen — praktisch aber nur mit
+                            # stark veränderten Server-Variablen oder extrem
+                            # ungünstigen Teleporter-Schüssen erreichbar → ignoriert.
                             continue
                         prev_x, prev_y, prev_z = shot.pos[0], shot.pos[1], shot.pos[2]
                         gm_tx = gm_ty = gm_tz = None
@@ -611,7 +665,7 @@ class BZBot(BZBotAI):
                                 _p = self.players.get(shot.gm_target_pid)
                                 if _p is not None:
                                     gm_tx = _p.pos[0]; gm_ty = _p.pos[1]
-                                    gm_tz = _p.pos[2] + TANK_HEIGHT / 2
+                                    gm_tz = _p.pos[2] + self._tank_height / 2
                         if gm_tx is not None:
                             _dx = gm_tx - prev_x; _dy = gm_ty - prev_y; _dz = gm_tz - prev_z
                             _dist = math.sqrt(_dx*_dx + _dy*_dy + _dz*_dz)
@@ -642,14 +696,7 @@ class BZBot(BZBotAI):
                                                     tank_cx, tank_cy, tank_cz) < eff_r
                     else:
                         prev_t = max(shot.fire_time, now - min(dt, 0.2))
-                        if   self.own_flag == "O":  _sc = self._obese_factor
-                        elif self.own_flag == "T":  _sc = self._tiny_factor
-                        elif self.own_flag == "TH": _sc = self._thief_tiny_factor
-                        else:                       _sc = 1.0
-                        _half_w   = (self._narrow_hw if self.own_flag == "N"
-                                     else self._tank_width / 2 * _sc) + self._shot_radius
-                        _half_len = self._tank_length / 2 * _sc + self._shot_radius
-                        _half_h   = self._tank_height / 2 * _sc + self._shot_radius
+                        _half_len, _half_w, _half_h = self._hitbox_half_dims()
                         segs = self._ricochet_paths.get(
                             (shot.shooter_id, shot.shot_id))
                         if segs:
@@ -1415,92 +1462,27 @@ class BZBot(BZBotAI):
             _shooter_info.last_seen = time.monotonic()
             _shooter_info.radar_blind_until = 0.0
         if shot.is_laser and self.alive and self.player_id is not None:
-            segs = self._ricochet_paths.get((shooter, shot_id))
-            if segs:
-                # Abgeprallter Laser: Sofortcheck über alle Segmente (effektiv instant)
-                if   self.own_flag == "O":  _sc = self._obese_factor
-                elif self.own_flag == "T":  _sc = self._tiny_factor
-                elif self.own_flag == "TH": _sc = self._thief_tiny_factor
-                else:                       _sc = 1.0
-                _half_w   = (self._narrow_hw if self.own_flag == "N"
-                             else self._tank_width / 2 * _sc) + self._shot_radius
-                _half_len = self._tank_length / 2 * _sc + self._shot_radius
-                _half_h   = self._tank_height / 2 * _sc + self._shot_radius
-                _tcx = self.pos[0]; _tcy = self.pos[1]
-                _tcz = self.pos[2] + self._tank_height / 2
-                for seg in segs:
-                    if _segment_hits_obb_3d(seg.px, seg.py, seg.pz,
-                                             seg.ex, seg.ey, seg.ez,
-                                             _tcx, _tcy, _tcz, self.azimuth,
-                                             _half_len, _half_w, _half_h):
-                        logger.info("[%s] Laser-Treffer (Abpraller) von Spieler %d",
-                                    self.callsign, shooter)
-                        self._report_killed(shot)
-                        break
-            else:
-                speed_xyz = math.sqrt(vx**2 + vy**2 + vz**2)
-                if speed_xyz > 0:
-                    dnx, dny, dnz = vx / speed_xyz, vy / speed_xyz, vz / speed_xyz
-                    laser_range = speed_xyz * shot.lifetime
-                    cx = self.pos[0]; cy = self.pos[1]; cz = self.pos[2] + TANK_HEIGHT / 2
-                    dx, dy, dz = cx - px, cy - py, cz - pz
-                    t_proj = dx * dnx + dy * dny + dz * dnz
-                    if 0.0 <= t_proj <= laser_range:
-                        perpx = dx - dnx * t_proj
-                        perpy = dy - dny * t_proj
-                        perpz = dz - dnz * t_proj
-                        if math.sqrt(perpx**2 + perpy**2 + perpz**2) < HIT_RADIUS:
-                            logger.info("[%s] Laser-Treffer von Spieler %d", self.callsign, shooter)
-                            self._report_killed(shot)
+            # Laser ist effektiv instant → Sofortcheck (Segmente falls gecacht, sonst Gerade)
+            if self._instant_shot_hits(shooter, shot_id, px, py, pz, vx, vy, vz, shot.lifetime):
+                _rico = (shooter, shot_id) in self._ricochet_paths
+                logger.info("[%s] Laser-Treffer %svon Spieler %d",
+                            self.callsign, "(Abpraller) " if _rico else "", shooter)
+                self._report_killed(shot)
         if shot.is_thief and self.alive and self.player_id is not None:
-            segs = self._ricochet_paths.get((shooter, shot_id))
-            if segs:
-                # Abgeprallter Thief: Sofortcheck über alle Segmente (effektiv instant)
-                if   self.own_flag == "O":  _sc = self._obese_factor
-                elif self.own_flag == "T":  _sc = self._tiny_factor
-                elif self.own_flag == "TH": _sc = self._thief_tiny_factor
-                else:                       _sc = 1.0
-                _half_w   = (self._narrow_hw if self.own_flag == "N"
-                             else self._tank_width / 2 * _sc) + self._shot_radius
-                _half_len = self._tank_length / 2 * _sc + self._shot_radius
-                _half_h   = self._tank_height / 2 * _sc + self._shot_radius
-                _tcx = self.pos[0]; _tcy = self.pos[1]
-                _tcz = self.pos[2] + self._tank_height / 2
-                for seg in segs:
-                    if _segment_hits_obb_3d(seg.px, seg.py, seg.pz,
-                                             seg.ex, seg.ey, seg.ez,
-                                             _tcx, _tcy, _tcz, self.azimuth,
-                                             _half_len, _half_w, _half_h):
-                        if self.own_flag:
-                            logger.info("[%s] Flagge '%s' durch TH-Abpraller von %d gestohlen",
-                                        self.callsign, self.own_flag, shooter)
-                            self.client.send(MsgTransferFlag,
-                                             struct.pack(">BB", self.player_id, shooter))
-                        break
-            else:
-                speed_xyz = math.sqrt(vx**2 + vy**2 + vz**2)
-                if speed_xyz > 0:
-                    dnx, dny, dnz = vx / speed_xyz, vy / speed_xyz, vz / speed_xyz
-                    thief_range = speed_xyz * shot.lifetime
-                    cx = self.pos[0]; cy = self.pos[1]; cz = self.pos[2] + TANK_HEIGHT / 2
-                    dx, dy, dz = cx - px, cy - py, cz - pz
-                    t_proj = dx * dnx + dy * dny + dz * dnz
-                    if 0.0 <= t_proj <= thief_range:
-                        perpx = dx - dnx * t_proj
-                        perpy = dy - dny * t_proj
-                        perpz = dz - dnz * t_proj
-                        if math.sqrt(perpx**2 + perpy**2 + perpz**2) < HIT_RADIUS:
-                            if self.own_flag:
-                                logger.info("[%s] Flagge '%s' durch TH-Schuss von %d gestohlen — sende MsgTransferFlag",
-                                            self.callsign, self.own_flag, shooter)
-                                self.client.send(MsgTransferFlag,
-                                                 struct.pack(">BB", self.player_id, shooter))
-                            else:
-                                if getattr(self, '_debug_log_shot', False):
-                                    logger.debug("[%s] Schuss: TH-Treffer von %d – keine eigene Flagge vorhanden",
-                                                 self.callsign, shooter)
+            # Thief ist effektiv instant → Sofortcheck; Treffer stiehlt die Flagge (kein Kill)
+            if self._instant_shot_hits(shooter, shot_id, px, py, pz, vx, vy, vz, shot.lifetime):
+                if self.own_flag:
+                    _rico = (shooter, shot_id) in self._ricochet_paths
+                    logger.info("[%s] Flagge '%s' durch TH-%s von %d gestohlen — sende MsgTransferFlag",
+                                self.callsign, self.own_flag,
+                                "Abpraller" if _rico else "Schuss", shooter)
+                    self.client.send(MsgTransferFlag,
+                                     struct.pack(">BB", self.player_id, shooter))
+                elif getattr(self, '_debug_log_shot', False):
+                    logger.debug("[%s] Schuss: TH-Treffer von %d – keine eigene Flagge vorhanden",
+                                 self.callsign, shooter)
         if shot.is_sw and self.alive and self.player_id is not None:
-            tank_cz_sw = self.pos[2] + TANK_HEIGHT / 2
+            tank_cz_sw = self.pos[2] + self._tank_height / 2
             _sw_dist = math.sqrt(
                 (px - self.pos[0])**2 +
                 (py - self.pos[1])**2 +
@@ -1553,7 +1535,7 @@ class BZBot(BZBotAI):
                 s.pos = [px, py, pz]; s.vel = [vx, vy, vz]
                 s.last_gm_update = time.monotonic()
                 s.gm_target_pid  = target
-        tank_cz = self.pos[2] + TANK_HEIGHT / 2
+        tank_cz = self.pos[2] + self._tank_height / 2
         dist3d  = math.sqrt((px-self.pos[0])**2 + (py-self.pos[1])**2 + (pz-tank_cz)**2)
         if self.alive and self.player_id is not None and dist3d < HIT_RADIUS:
             shot_obj = None

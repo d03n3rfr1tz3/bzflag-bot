@@ -493,6 +493,12 @@ class BZBotAI:
             return self._reload_time / max(self._rfire_ad_rate, 1.0)
         return self._reload_time
 
+    def _own_flag_bytes(self) -> bytes:
+        """2-Byte-Wire-Encoding der eigenen Flagge (Protokoll-FlagAbbr mit
+        Null-Padding; keine Flagge → b'\\x00\\x00'). F9: einzige Quelle —
+        vorher 6× inline dupliziert."""
+        return (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+
     def _effective_shot_speed(self) -> float:
         """Schussgeschwindigkeit (u/s) der aktiven Flagge (BZFlag: vel *= AdVel)."""
         f = self.own_flag
@@ -682,6 +688,20 @@ class BZBotAI:
         self._dispatch_movement(dt, now, ai_tick)
         self._check_teleport_crossing(old, now)
 
+    def _turn_toward(self, target_az: float, dt: float) -> float:
+        """Dreht azimuth mit _tank_turn_rate Richtung target_az und setzt ang_vel
+        konsistent (geklemmt, damit das gesendete PlayerUpdate zur realen Drehung
+        passt). Gibt den Winkelabstand VOR der Drehung zurück (Aufrufer nutzen
+        ihn für Speed-/Erreicht-Entscheidungen). F9: einzige Quelle für das
+        vorher 5× duplizierte Dreh-Snippet; Varianten mit effektiver Drehrate
+        (_eff_turn) oder Winkel-Cap (_compute_dodge_dir) bleiben bewusst eigen."""
+        diff = _angle_diff(target_az, self.azimuth)
+        self.ang_vel = math.copysign(
+            min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
+        self.azimuth = _wrap(
+            self.azimuth + math.copysign(min(abs(diff), self._tank_turn_rate * dt), diff))
+        return diff
+
     def _dispatch_movement(self, dt: float, now: float, ai_tick: bool = True) -> None:
         """Physik (60 Hz) + KI (10 Hz): State-Machine-Dispatch."""
         half = self.world_half
@@ -740,13 +760,8 @@ class BZBotAI:
                 self.vel[1] = 0.0
                 if self._landing_aim_pos is not None:
                     ax, ay = self._landing_aim_pos
-                    target_az = math.atan2(ay - self.pos[1], ax - self.pos[0])
-                    max_turn = self._tank_turn_rate * dt
-                    diff = _angle_diff(target_az, self.azimuth)
-                    self.ang_vel = math.copysign(
-                        min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-                    self.azimuth = _wrap(
-                        self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+                    self._turn_toward(
+                        math.atan2(ay - self.pos[1], ax - self.pos[0]), dt)
                 else:
                     self.ang_vel = 0.0
             return
@@ -883,11 +898,7 @@ class BZBotAI:
             self._transition_to(ret)
             return
         az_to_wp = math.atan2(wp[1] - self.pos[1], wp[0] - self.pos[0])
-        diff = _angle_diff(az_to_wp, self.azimuth)
-        max_turn = self._tank_turn_rate * dt
-        self.ang_vel = math.copysign(
-            min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-        self.azimuth = _wrap(self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+        diff = self._turn_toward(az_to_wp, dt)
         self.vel[0] = 0.0
         self.vel[1] = 0.0
         if abs(diff) <= math.pi / 36:
@@ -929,11 +940,7 @@ class BZBotAI:
         aim_x = cx + (ddx / d) * NAV_TELE_OVERSHOOT
         aim_y = cy + (ddy / d) * NAV_TELE_OVERSHOOT
         target_az = math.atan2(aim_y - self.pos[1], aim_x - self.pos[0])
-        diff = _angle_diff(target_az, self.azimuth)
-        max_turn = self._tank_turn_rate * dt
-        self.ang_vel = math.copysign(
-            min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-        self.azimuth = _wrap(self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+        diff = self._turn_toward(target_az, dt)
         speed = self._effective_tank_speed() if abs(diff) < math.pi / 2 else 0.0
         self.vel[0] = math.cos(self.azimuth) * speed
         self.vel[1] = math.sin(self.azimuth) * speed
@@ -1074,12 +1081,7 @@ class BZBotAI:
                 self.ang_vel = 0.0
                 speed = self._tank_speed
             else:
-                diff = _angle_diff(self._dodge_dir, self.azimuth)
-                max_turn = self._tank_turn_rate * dt
-                self.ang_vel = math.copysign(
-                    min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-                self.azimuth = _wrap(
-                    self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+                self._turn_toward(self._dodge_dir, dt)
                 speed = self._tank_speed
             self.vel[0] = math.cos(self.azimuth) * speed
             self.vel[1] = math.sin(self.azimuth) * speed
@@ -1309,7 +1311,12 @@ class BZBotAI:
                 _d = math.hypot(_tx - self.pos[0], _ty - self.pos[1])
                 _in_r = _d < self._effective_radar_range()
                 _in_s = False
-                if _d < SHOT_RANGE:
+                # F5: Server-Basiswert (_shotRange) statt Konstante. Bewusst OHNE eigene
+                # Flaggen-Multiplikatoren (_effective_shot_range): das ist ein Sicht-/
+                # Halte-Fenster, kein Waffenwert — Laser (AdVel×1000) würde es sonst
+                # auf die ganze Karte ausdehnen. Deckungsgleich zum Zielwahl-Fenster
+                # in _find_target_player.
+                if _d < self._shot_range:
                     _ang = math.atan2(_ty - self.pos[1], _tx - self.pos[0])
                     _in_s = abs(_angle_diff(_ang, self.azimuth)) < self._effective_fov()
                 if not _in_r and not _in_s:
@@ -1475,8 +1482,10 @@ class BZBotAI:
         _opt = self._effective_optimal_range()
         _enemy_z = info.pos[2] if info is not None else self.pos[2]
         _los_clear   = self._has_los_to_enemy(self.target_player)
-        _dist_thresh = SHOT_RANGE if _los_clear else _opt * 1.1
-        _check1      = self.pos[2] + TANK_HEIGHT > _enemy_z
+        # F5: Server-Basiswert (_shotRange) statt Konstante; ohne Flaggen-Multiplikatoren,
+        # sonst würde z.B. Laser den Direktmodus kartenweit aktivieren (nie mehr A*-Nav).
+        _dist_thresh = self._shot_range if _los_clear else _opt * 1.1
+        _check1      = self.pos[2] + self._tank_height > _enemy_z
         # C: Bot unter erhöhtem Gegner mit verfügbarem Indirekt-Schuss → stehen & aufs Tor zielen
         # statt hochzuklettern, zeitlich gedeckelt (kein ewiges Festkleben). sobald die
         # Navigation durch Tore routet, wird genau diese Bedingung zur traverse-vs-shoot-Entscheidung.
@@ -1492,12 +1501,12 @@ class BZBotAI:
             _skip_nav = False
         replan_xy  = (nav_goal is None or math.hypot(ep[0] - nav_goal[0],
                                                      ep[1] - nav_goal[1]) > 20.0)
-        replan_z   = abs(enemy_z - nav_goal_z) > TANK_HEIGHT * 2
+        replan_z   = abs(enemy_z - nav_goal_z) > self._tank_height * 2
         # Während einer Stuck-Episode verwaltet _combat_escalate das Planen allein (sonst würde
         # replan_xy den Reposition-Pfad überschreiben). Im Direktmodus wird kein Pfad gefahren →
         # gar nicht erst planen (spart A* und vermeidet ungenutzte Wegpunkt-Logs).
         if (replan_xy or replan_z) and not _stuck_active and not _skip_nav:
-            if enemy_z > TANK_HEIGHT:
+            if enemy_z > self._tank_height:
                 # Z_ATTACK möglich → 50% NAV_JUMP hoch; sonst (auch _too_high) → immer hoch
                 _goal_z = enemy_z if (_too_high or not self._z_attack_feasible(now)
                                       or random.random() < 0.5) else None
@@ -1538,12 +1547,7 @@ class BZBotAI:
             _tan = self._steep_wall_ahead(target_az, min(dist, NAV_WALL_PROBE_DIST))
             if _tan is not None:
                 target_az = _tan
-        max_turn  = self._tank_turn_rate * dt
-        diff = _angle_diff(target_az, self.azimuth)
-        self.ang_vel = math.copysign(
-            min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
-        self.azimuth = _wrap(
-            self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+        self._turn_toward(target_az, dt)
         if dist < _opt:
             speed = -self._tank_speed * 0.5
             _nav = getattr(self, "_nav_graph", None)
@@ -2114,7 +2118,7 @@ class BZBotAI:
         """Voller Fenster-Sichtkontakt: Flagge erlaubt Fenster-Sicht UND im FoV UND unverdeckt (LoS)."""
         return (self._enemy_visible_window(info)
                 and self._in_fov(x, y)
-                and self._has_los_to_point(x, y, z + TANK_HEIGHT * 0.5))
+                and self._has_los_to_point(x, y, z + self._tank_height * 0.5))
 
     # Schuss-Sichtbarkeit = Spiegelbild der Tank-Sichtbarkeit (SE betrifft nur Tanks, nicht Schüsse).
     def _shot_visible_radar(self, shooter) -> bool:
@@ -2135,8 +2139,12 @@ class BZBotAI:
     def _should_update_player(self, info, px: float, py: float, pz: float, now: float) -> bool:
         """Übernimmt der Bot diese Gegnerposition jetzt?
         - Direkter Sichtkontakt (Fenster: FoV+LoS) → immer aktuell (man schaut ihn an).
-        - Nur Radar → Radar-Aufmerksamkeit: pro Tick mit (1-skip) hinschauen; bei Fehlschlag für
-          einen Cooldown ganz wegschauen (CL stärker). Weder Fenster noch Radar (ST/eigenes JM) → nie."""
+        - Nur Radar → Radar-Aufmerksamkeit: pro EINGEHENDEM MsgPlayerUpdate mit (1-skip)
+          hinschauen; bei Fehlschlag für einen Cooldown ganz wegschauen (CL stärker).
+          Achtung (F8, dokumentiert): der Würfelwurf hängt damit an der Server-Update-Rate
+          (Standard 30 Hz × Spieler) — bei abweichender Rate verschiebt sich die effektive
+          Aufmerksamkeit; der Cooldown (zeitbasiert) dämpft das. Bewusst so belassen.
+        - Weder Fenster noch Radar (ST/eigenes JM) → nie."""
         if self._sees_in_window(info, px, py, pz):
             return True
         if not self._enemy_visible_radar(info):
@@ -2254,10 +2262,18 @@ class BZBotAI:
         return best, best_t
 
     def _effective_radar_range(self) -> float:
-        """Liefert effektive Radar-Reichweite (25% wenn BU + pos[2] < 0)."""
+        """Liefert effektive Radar-Reichweite (25% wenn BU + pos[2] < 0).
+
+        F6, bewusste Design-Entscheidung: Reichweite = HALBE Weltgröße
+        (self.world_half, via _worldSize nachgeführt), NICHT die volle. Das
+        echte Client-Radar hat Zoomstufen und dreht mit der Blickrichtung —
+        ein Mensch sieht nie permanent die ganze Karte. Da der Bot über
+        FoV+LoS bereits kartenweit schauen darf, wäre ein Voll-Radar
+        Allwissenheit; das Halbe-Welt-Limit hält ihn fair. Nicht „fixen"!"""
+        base = getattr(self, "world_half", RADAR_RANGE)
         if self.own_flag == "BU" and self.pos[2] < 0.0:
-            return RADAR_RANGE * 0.25
-        return RADAR_RANGE
+            return base * 0.25
+        return base
 
     def _find_target_player(self):
         """Wählt das nächste Ziel; None im Passivmodus."""
@@ -2279,12 +2295,14 @@ class BZBotAI:
             d = math.hypot(info.pos[0] - self.pos[0], info.pos[1] - self.pos[1])
             in_radar = d < self._effective_radar_range() and self._enemy_visible_radar(info)
             in_sight = False
-            if d < SHOT_RANGE and self._enemy_visible_window(info):
+            # F5: Server-Basiswert (_shotRange) statt Konstante — Sicht-Zielfenster,
+            # bewusst ohne Flaggen-Multiplikatoren (s. _validate_and_find_target).
+            if d < self._shot_range and self._enemy_visible_window(info):
                 angle_to = math.atan2(
                     info.pos[1] - self.pos[1], info.pos[0] - self.pos[0])
                 in_sight = (abs(_angle_diff(angle_to, self.azimuth)) < self._effective_fov()
                             and self._has_los_to_point(info.pos[0], info.pos[1],
-                                                       info.pos[2] + TANK_HEIGHT * 0.5))
+                                                       info.pos[2] + self._tank_height * 0.5))
             if not in_radar and not in_sight:
                 continue
             if not self._is_foe(info, in_sight):
@@ -3008,7 +3026,7 @@ class BZBotAI:
         nav = getattr(self, "_nav_graph", None)
         if nav is None or max_dist <= 0.0:
             return None
-        ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + TANK_HEIGHT * 0.5
+        ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + self._tank_height * 0.5
         dx = math.cos(az) * max_dist; dy = math.sin(az) * max_dist
         best_t = 2.0; best_axis = -1; best_box = None
         # Broad-Phase: nur Boxen entlang des Strahls (DDA); Fallback auf linearen Scan ohne _los_grid.
@@ -3061,7 +3079,7 @@ class BZBotAI:
     def _has_los_to_point(self, ex: float, ey: float, ez: float) -> bool:
         """Reine Sicht-LoS: True, wenn keine solide Box zwischen Bot-Auge und (ex,ey,ez) liegt.
         Teleporter blockieren KEINE Sicht (das ist nur Schuss-LoS, s. _has_los_to_enemy)."""
-        return self._segment_clear(self.pos[0], self.pos[1], self.pos[2] + TANK_HEIGHT * 0.5,
+        return self._segment_clear(self.pos[0], self.pos[1], self.pos[2] + self._tank_height * 0.5,
                                    ex, ey, ez)
 
     def _muzzle_clear(self, az: float) -> bool:
@@ -3090,7 +3108,7 @@ class BZBotAI:
         info = self.players.get(target_pid) if target_pid else None
         if info is None or not info.alive:
             return True
-        ex = info.pos[0]; ey = info.pos[1]; ez = info.pos[2] + TANK_HEIGHT * 0.5
+        ex = info.pos[0]; ey = info.pos[1]; ez = info.pos[2] + self._tank_height * 0.5
         # P4a: Per-Tick-Memo — bis zu 3× pro Tick identisch aufgerufen
         # (_execute_combat_move 2×, _maybe_shoot_standard 1×). Key enthält
         # beide Positionen → bewegt sich der Gegner mittendrin (Recv-Thread),
@@ -3109,7 +3127,7 @@ class BZBotAI:
             # also kein sauberer Direktschuss (der indirekte Aim-Sweep übernimmt dann, s. A4).
             wm = getattr(self, "_world_map", None)
             if wm and wm.teleporters:
-                ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + TANK_HEIGHT * 0.5
+                ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + self._tank_height * 0.5
                 dx = ex - ox; dy = ey - oy; dz = ez - oz
                 lmap = getattr(self, "_link_map", {})
                 for ti, tele in enumerate(wm.teleporters):
@@ -3411,7 +3429,7 @@ class BZBotAI:
         Nutzt denselben 2s-Cache wie `_find_ricochet_aim_angle` (kein zusätzlicher Sweep)."""
         if target_pid is None:
             return False
-        _fb = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+        _fb = self._own_flag_bytes()
         if not (self._has_teleporters()
                 or can_ricochet(_fb, self.own_flag == "GM", self.own_flag == "SW",
                                 self._server_ricochet)):
@@ -3446,13 +3464,13 @@ class BZBotAI:
         bx, by, bz = self.pos[0], self.pos[1], self.pos[2]
         ecx = predicted_pos[0] if predicted_pos else enemy.pos[0]
         ecy = predicted_pos[1] if predicted_pos else enemy.pos[1]
-        ecz = enemy.pos[2] + TANK_HEIGHT * 0.5
+        ecz = enemy.pos[2] + self._tank_height * 0.5
 
         hw   = self._tank_width  / 2 + self._shot_radius
         hlen = self._tank_length / 2 + self._shot_radius
         hh   = self._tank_height / 2 + self._shot_radius
 
-        flag_bytes = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+        flag_bytes = self._own_flag_bytes()
         direct_az  = math.atan2(enemy.pos[1] - by, enemy.pos[0] - bx)
 
         eff_speed      = self._effective_shot_speed()
@@ -3581,7 +3599,7 @@ class BZBotAI:
             mz = self.pos[2] + self._muzzle_height
             ax = mx + math.cos(az) * self._gm_min_range
             ay = my + math.sin(az) * self._gm_min_range
-            ez = (info.pos[2] if info is not None else self.pos[2]) + TANK_HEIGHT * 0.5
+            ez = (info.pos[2] if info is not None else self.pos[2]) + self._tank_height * 0.5
             if not (self._segment_clear(mx, my, mz, ax, ay, mz)
                     and self._segment_clear(ax, ay, mz, ep[0], ep[1], ez)):
                 return
@@ -3597,7 +3615,7 @@ class BZBotAI:
         aim_angle = math.atan2(ep[1] - self.pos[1], ep[0] - self.pos[0])
         _indirect = False
         if not self._has_los_to_enemy(self.target_player) or self._cross_floor_indirect(info):
-            _fb = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+            _fb = self._own_flag_bytes()
             if can_ricochet(_fb, False, False, self._server_ricochet) or self._has_teleporters():
                 _rico_az = self._find_ricochet_aim_angle(
                     self.target_player, (ep[0], ep[1])
@@ -3615,7 +3633,7 @@ class BZBotAI:
         if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(5):
             return
         if (not _indirect and info is not None
-                and abs(info.pos[2] - self.pos[2]) > TANK_HEIGHT * 0.7):
+                and abs(info.pos[2] - self.pos[2]) > self._tank_height * 0.7):
             return
         self._send_shot(now, self.azimuth)
         self._set_next_shoot_after_fire(now)
@@ -3628,7 +3646,7 @@ class BZBotAI:
         aim_angle = math.atan2(ep[1] - self.pos[1], ep[0] - self.pos[0])
         _indirect = False
         if not self._has_los_to_enemy(self.target_player) or self._cross_floor_indirect(info):
-            _fb = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+            _fb = self._own_flag_bytes()
             if can_ricochet(_fb, False, False, self._server_ricochet) or self._has_teleporters():
                 _rico_az = self._find_ricochet_aim_angle(self.target_player, None)
                 if _rico_az is not None:
@@ -3644,10 +3662,20 @@ class BZBotAI:
         if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(10):
             return
         if (not _indirect and info is not None
-                and abs(info.pos[2] - self.pos[2]) > TANK_HEIGHT * 0.7):
+                and abs(info.pos[2] - self.pos[2]) > self._tank_height * 0.7):
             return
         self._send_shot(now, self.azimuth)
         self._set_next_shoot_after_fire(now)
+
+    def _fire_gate_rad(self, dist: float) -> float:
+        """Maximal erlaubte Abweichung zwischen Ziel- und Blickwinkel beim Feuern,
+        distanzabhängig (F8): linear von 25° (Zieldistanz ≤10u) auf 5° (≥100u)
+        verengt — max_dev_deg = 25 − 20 · clamp((dist − 10) / 90, 0, 1).
+        Im Nahkampf ist Streuung okay (Ziel füllt den Winkel), auf Distanz ist
+        ein 20°-Fehlschuss praktisch garantiert (Slot-Verschwendung). Gilt
+        einheitlich für Direkt- wie Indirekt-Schüsse."""
+        f = max(0.0, min(1.0, (dist - 10.0) / 90.0))
+        return math.radians(25.0 - 20.0 * f)
 
     def _maybe_shoot_sb(
         self, now: float, ep, info, dx: float, dy: float, dist: float
@@ -3657,7 +3685,7 @@ class BZBotAI:
         if aim_xy is None:
             return
         aim_angle = math.atan2(aim_xy[1] - self.pos[1], aim_xy[0] - self.pos[0])
-        if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(25):
+        if abs(_angle_diff(aim_angle, self.azimuth)) > self._fire_gate_rad(dist):
             return
         _warning = False
         if self._ai_state != AIState.LANDING_SHOT and info is not None:
@@ -3692,7 +3720,7 @@ class BZBotAI:
         _indirect = False
         _no_los = not self._has_los_to_enemy(self.target_player)
         if _no_los or self._cross_floor_indirect(info):
-            _fb = (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+            _fb = self._own_flag_bytes()
             _can_rico = can_ricochet(_fb, self.own_flag == "GM",
                                       self.own_flag == "SW", self._server_ricochet)
             # Teleporter routen auch normale Schüsse → Aim-Sweep auch ohne Ricochet versuchen.
@@ -3718,7 +3746,7 @@ class BZBotAI:
                 _warning = True
             else:
                 return   # Cross-Floor, aber kein indirekter Schuss gefunden → Feuer halten
-        if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(25):
+        if abs(_angle_diff(aim_angle, self.azimuth)) > self._fire_gate_rad(dist):
             return
         # SS1: Z-Achsen-Block — GM und LANDING_SHOT ausgenommen; indirekte (Teleporter-/Abpraller-)
         # Schüsse überbrücken die Etage (Simulation hat den Treffer bestätigt) → ausgenommen.
@@ -3826,7 +3854,7 @@ class BZBotAI:
             + struct.pack(">fff", vx, vy, 0.0)
             + struct.pack(">f",  0.0)
             + struct.pack(">h",  team_id)
-            + (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
+            + self._own_flag_bytes()
             + struct.pack(">f",  self._shot_lifetime)
         )
         assert len(payload) == 43

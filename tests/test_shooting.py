@@ -413,16 +413,22 @@ class TestLaserAimThreshold:
         bot._maybe_shoot(time.monotonic())
         bot.client.send.assert_called()
 
-    def test_normal_flag_at_20_degrees_shoots(self, bot):
+    def test_normal_flag_at_20_degrees_only_close(self, bot):
+        """F8: 20°-Abweichung feuert nur noch im Nahkampf (Gate 25° bei ≤10u);
+        auf 100u ist das Gate 5° → Schuss wird unterdrückt (kein Slot-Müll)."""
         from conftest import make_player
         p = make_player(bot, 2, pos=(100.0, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
         bot.own_flag = ""
-        bot.azimuth = math.radians(20)  # 20° → < 25° Threshold
+        bot.azimuth = math.radians(20)
         bot._next_shoot = 0.0
         bot._maybe_shoot(time.monotonic())
-        bot.client.send.assert_called()
+        assert not bot.client.send.called            # 100u: Gate 5° < 20°
+        p.pos = [9.0, 0.0, 0.0]
+        bot._next_shoot = 0.0
+        bot._maybe_shoot(time.monotonic())
+        bot.client.send.assert_called()              # 9u: Gate 25° > 20°
 
 
 # ---------------------------------------------------------------------------
@@ -964,3 +970,40 @@ class TestMuzzleOcclusionGate:
         bot._maybe_shoot_sb = lambda *a, **k: called.append(True)
         bot._maybe_shoot(time.monotonic())
         assert called
+
+
+# ---------------------------------------------------------------------------
+# F8: distanzabhängiges Feuer-Gate (25° nah → 5° fern, linear 10u..100u)
+# ---------------------------------------------------------------------------
+
+class TestDistanceFireGate:
+    """_fire_gate_rad: max. Winkelabweichung beim Feuern verengt sich linear
+    von 25° (≤10u) auf 5° (≥100u) — auf Distanz ist ein 20°-Fehlschuss
+    praktisch garantiert, im Nahkampf füllt das Ziel den Winkel."""
+
+    def test_gate_values(self, bot):
+        assert bot._fire_gate_rad(0.0)    == pytest.approx(math.radians(25.0))
+        assert bot._fire_gate_rad(10.0)   == pytest.approx(math.radians(25.0))
+        assert bot._fire_gate_rad(55.0)   == pytest.approx(math.radians(15.0))
+        assert bot._fire_gate_rad(100.0)  == pytest.approx(math.radians(5.0))
+        assert bot._fire_gate_rad(1000.0) == pytest.approx(math.radians(5.0))
+
+    def test_distant_misaligned_shot_suppressed(self, bot):
+        """150u entfernt, 15° daneben: früher gefeuert (25°-Gate), jetzt nicht (5°)."""
+        make_player(bot, 2, pos=(150.0, 0.0, 0.0))
+        bot.target_player = 2
+        bot.azimuth = math.radians(15.0)
+        bot._next_shoot = 0.0
+        bot.client.send.reset_mock()
+        bot._maybe_shoot(time.monotonic())
+        assert not bot.client.send.called
+
+    def test_close_misaligned_shot_still_fires(self, bot):
+        """8u entfernt, 15° daneben: Nahkampf-Gate (25°) lässt den Schuss zu."""
+        make_player(bot, 2, pos=(8.0, 0.0, 0.0))
+        bot.target_player = 2
+        bot.azimuth = math.radians(15.0)
+        bot._next_shoot = 0.0
+        bot.client.send.reset_mock()
+        bot._maybe_shoot(time.monotonic())
+        assert bot.client.send.called

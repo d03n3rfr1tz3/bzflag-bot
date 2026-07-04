@@ -154,23 +154,23 @@ Sortiert nach Schwere. „Verifiziert" = im Code nachvollzogen, kein Verdacht. D
 **Fix:** Zentral in `_run_game_loop`: `dt_r = min(dt_r, 0.1)` (6 Nominal-Ticks) mit Kommentar; optional den Skip in (3) nur anwenden, wenn auch der Segment-**Anfang** sich schon entfernt (`vel·(a−tank) > 0`).
 **Risiko:** Gering — ändert nur das Verhalten in pathologischen Stall-Fällen, und dort zum Besseren (Zeit „verlangsamt" statt Sprung). Der 0,1s-Wert sollte bewusst gewählt/abgestimmt werden. **Test:** Unit-Test `_resolve_incoming_shots` mit dt=0,5s-Segment quer durch den Tank → muss treffen.
 
-### F5 — `SHOT_RANGE`-Konstante statt Server-Variable an Entscheidungsstellen 🟡
+### F5 — `SHOT_RANGE`-Konstante statt Server-Variable an Entscheidungsstellen 🟡 — ✅ umgesetzt (Branch `consistency/track3`, Commit `ef34c67`; bewusst `self._shot_range` ohne Flaggen-Multiplikatoren, Begründung im Code)
 
 **Befund:** `self._shot_range` wird via `MsgSetVar _shotRange` nachgeführt und `_effective_shot_range()` existiert ([bzbot_ai.py:501](bzbot_ai.py#L501)) — aber drei Entscheidungsstellen nutzen die Konstante 350: [bzbot_ai.py:1298](bzbot_ai.py#L1298) (Threat-Radius), [1461](bzbot_ai.py#L1461) (`_dist_thresh` im COMBAT-Direktmodus), [2257](bzbot_ai.py#L2257) (Zielwahl-Fenster). Auf Servern mit abweichender `_shotRange`/`_shotSpeed` kämpft der Bot mit falschen Distanzannahmen.
 **Fix:** `_effective_shot_range()` verwenden (bei 1298/2257 ggf. bewusst OHNE Flaggen-Multiplikatoren → dann `self._shot_range`; Entscheidung je Stelle dokumentieren). **Risiko:** Niedrig auf Standard-Servern (Werte identisch), gewollte Korrektur auf Custom-Servern. **Test:** bestehende Targeting-Tests + einer mit verändertem `_shotRange`.
 
-### F6 — Radar-Reichweite: bewusst halbe Weltgröße, aber `_worldSize` nachführen 🟡
+### F6 — Radar-Reichweite: bewusst halbe Weltgröße, aber `_worldSize` nachführen 🟡 — ✅ umgesetzt (Branch `consistency/track3`, Commit `67b3319`; Design-Begründung im Docstring)
 
 **Befund:** `RADAR_RANGE = WORLD_HALF_DEFAULT` (= 400, [bzbot_ai.py:165](bzbot_ai.py#L165)) ist hart kodiert; `_effective_radar_range()` ([bzbot_ai.py:2231](bzbot_ai.py#L2231)) skaliert nur den BU-Fall. `self.world_half` wird via `_worldSize` nachgeführt ([bzbot.py:1688](bzbot.py#L1688)) — die Radar-Reichweite bleibt aber bei 400, auch wenn die Weltgröße abweicht.
 **Klärung (User): Die Begrenzung auf die HALBE Weltgröße ist gewollt** (Fairness-Limit): Das echte Client-Radar hat mehrere Zoomstufen und dreht sich mit der Blickrichtung — ein menschlicher Spieler sieht auf Standard-Zoom je nach Blickwinkel nie permanent die ganze Karte. Da der Bot über FoV+LoS bereits die ganze Karte einsehen darf, würde ein Radar über die volle Weltgröße ihn faktisch allwissend machen. Die Reichweite soll also NICHT auf die volle Weltgröße angehoben werden — sie soll aber Änderungen der Server-Variable `_worldSize` folgen und dann weiterhin die jeweilige **halbe** Weltgröße betragen.
 **Fix:** `_effective_radar_range()` auf `self.world_half` stützen (= halbe Weltgröße, via `_worldSize` nachgeführt; BU-Viertelung beibehalten). Die Design-Entscheidung „halbe, nicht ganze Weltgröße" als Kommentar dort + in DEVELOPER.md dokumentieren, damit künftige Reviews sie nicht erneut als Bug aufgreifen. **Risiko:** Null auf Standardkarten (world_half = 400 = heutiger Wert); gewollte Korrektur bei abweichender Weltgröße. **Test:** Unit-Test mit `world_half = 800` (1600u-Welt) → Gegner bei 600u wird gefunden, bei 900u nicht.
 
-### F7 — `TANK_HEIGHT`-Konstante vs. `self._tank_height` gemischt 🟡
+### F7 — `TANK_HEIGHT`-Konstante vs. `self._tank_height` gemischt 🟡 — ✅ umgesetzt (Branch `consistency/track3`, Commit `cc5f2a0`; TANK_WIDTH/RADIUS-Kette bewusst NICHT umgestellt: daran hängen Modulkonstanten (HIT_RADIUS/DODGE_DIST/MUZZLE_FRONT) und der NavGrid-GRID_PAD — Umstellung wäre ein eigener Punkt mit Pad-Neuberechnung beim Weltladen)
 
 **Befund:** Dieselbe physikalische Größe wird mal als Konstante (22 Vorkommen), mal als Server-nachgeführtes Attribut (15 Vorkommen, `_tankHeight`-Handler existiert [bzbot.py:1979](bzbot.py#L1979)) verwendet — teils in derselben Funktion: `_resolve_incoming_shots` nutzt für die eigene Tankmitte `self._tank_height` ([bzbot.py:569](bzbot.py#L569)), für das GM-Fremdziel `TANK_HEIGHT` ([bzbot.py:601](bzbot.py#L601)); ebenso `_execute_combat_move` ([bzbot_ai.py:1462](bzbot_ai.py#L1462)), LoS-Augenhöhen (`TANK_HEIGHT * 0.5` in `_has_los_to_point`/`_sees_in_window`), u.v.m. Auf Servern mit verändertem `_tankHeight` rechnen verschiedene Codepfade mit verschiedenen Höhen.
 **Fix:** Mechanische Vereinheitlichung auf `self._tank_height` (gilt serverweit für alle Tanks). Grep-Checkliste `TANK_HEIGHT` außerhalb von constants/Defaults. **Risiko:** Null auf Standard-Servern (2.05 == 2.05); Konsistenzgewinn auf Custom-Servern. Gleiches Muster einmalig für `TANK_WIDTH`/`TANK_LENGTH`/`TANK_RADIUS`-Vorkommen prüfen.
 
-### F8 — Kleinere Ungenauigkeiten / Beobachtungen 🟢
+### F8 — Kleinere Ungenauigkeiten / Beobachtungen 🟢 — ✅ Feuer-Gate umgesetzt + Doku-Punkte (Branch `consistency/track3`, Commit `2953cd5`: `_fire_gate_rad` 25°→5° linear 10u–100u; GM-Selbsttreffer-Skip kommentiert; Radar-Attention-Kommentar korrigiert. Offen/bewusst belassen: Steamroller-BU-Großzügigkeit + fehlende `_srRadiusMult`-Nachführung → W3, `_vn_cache`-Hinweis)
 
 - **Steamroller-BU-Fall zu großzügig:** [bzbot.py:726–739](bzbot.py#L726): JEDER Gegner überrollt einen BU-Bot mit SR-Radius `TANK_RADIUS*(1+SR_RADIUS_MULT)`; real crusht ein normaler Tank einen eingegrabenen nur bei echter Überlappung. `_srRadiusMult` wird zudem nicht via MsgSetVar nachgeführt. Nebenbei: `math.sqrt(math.hypot(dx,dy)**2 + …)` — redundantes sqrt(hypot²).
 - **Eigener GM kann Selbsttreffer nicht auslösen:** [bzbot.py:590](bzbot.py#L590) skippt eigene GM-Schüsse — im echten BZFlag kann die eigene Rakete einen treffen. **Klärung (User): bewusste Vereinfachung** — der Fall ist praktisch nur mit stark veränderten Server-Variablen oder extrem ungünstigen Teleporter-Schüssen erreichbar und wurde bewusst ignoriert. Nur als Kommentar an der Stelle dokumentieren, keine Logik-Änderung.
@@ -179,7 +179,7 @@ Sortiert nach Schwere. „Verifiziert" = im Code nachvollzogen, kein Verdacht. D
 - **Wahrnehmungs-Arbeit im Recv-Thread:** `_on_player_update_full` → `_sees_in_window` → Raycasts laufen im Recv-Thread und lesen `self.pos` ohne Lock (torn reads theoretisch möglich, praktisch durch GIL+float-Zuweisung mild). Mit P7 (TTL-Cache) sinkt die Last; Konvention dokumentieren.
 - **`_vn_cache` unbounded:** Sprungkanten-Cache wächst pro (Knoten × tank_speed-Variante); auf HIX-Größe unkritisch (~41k × wenige Speeds), aber bewusst so — Kommentar existiert, ggf. Obergrenze notieren.
 
-### F9 — Duplizierte Berechnungen zentralisieren (Divergenz-Prävention)
+### F9 — Duplizierte Berechnungen zentralisieren (Divergenz-Prävention) — ✅ umgesetzt (Branch `consistency/track3`, Commit `036b43c`: `_hitbox_half_dims`, `_instant_shot_hits` (Laser/Thief vereint), `_turn_toward` (5 Stellen), `_own_flag_bytes` (6 Stellen); Varianten mit effektiver Drehrate/60°-Cap bewusst eigenständig)
 
 | Duplikat | Stellen | Helper-Vorschlag |
 |---|---|---|
@@ -351,7 +351,7 @@ Die Tracks spiegeln die Themen-Priorität (Performance → Fehlerpotenzial → W
 
 1. **Track 1 — Sofort-Bugfixes (klein, hohes Server-Potenzial; F3 ist faktisch auch eine Performance-Maßnahme):** F3 (Rico-Leak, 2 Zeilen) → F2 (Dict-Snapshots) → F1 (GM-Dodge) → F4 (dt-Clamp).
 2. **Track 2 — Performance:** P2 → P3 → P4a → W6 (ObstacleGrid-Split, aus dem Struktur-Track vorgezogen) → P1 (Grid in simulate_shot_path) → **Server-Messung** → danach je nach Befund P5, P6, P7, P4b, P8, P9. — ✅ P2/P3/P4a/W6/P1 umgesetzt (Branch `perf/track2`); **nächster Schritt: Server-Messung (User)**, erst danach P5+ entscheiden.
-3. **Track 3 — Konsistenz (restliches Fehlerpotenzial; bewusst VOR dem Struktur-Track, weil die Fixes Grep-basiert über den heutigen Dateistand laufen):** F5 → F6 (Radar an `world_half` koppeln, halbe Weltgröße bleibt) → F7 → F9 (= W9; Helper wandern später beim Split als Einheit mit) → F8 (distanzabhängiges Feuer-Gate als eigener PR + Doku-Punkte).
+3. **Track 3 — Konsistenz (restliches Fehlerpotenzial; bewusst VOR dem Struktur-Track, weil die Fixes Grep-basiert über den heutigen Dateistand laufen):** F5 → F6 (Radar an `world_half` koppeln, halbe Weltgröße bleibt) → F7 → F9 (= W9; Helper wandern später beim Split als Einheit mit) → F8 (distanzabhängiges Feuer-Gate als eigener PR + Doku-Punkte). — ✅ komplett umgesetzt (Branch `consistency/track3`).
 4. **Track 4 — Struktur (Wartbarkeit, zuletzt):** W1 (constants.py, zusammen mit W8-Tabelle) → W2 (models/util) → W4 (Mixin-Split, 9 Einzel-Commits) → W5 (bzbot.py dünn) → W7 → W3 (_on_set_var-Tabelle, mit Snapshot-Test). Zu diesem Zeitpunkt sind alle P/F-Punkte abgeschlossen → keine Referenz-Entwertung; sollte doch ein Punkt offen sein, gilt Regel 4 aus „Wechselwirkungen" (Referenzen im Plan pro W-PR nachziehen, Landkarten-Tabelle nutzen).
 
 ## Verifikation (gesamt)
