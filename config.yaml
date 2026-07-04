@@ -51,3 +51,12 @@ reconnect_delay: 10.0    # Sekunden vor Observer-Reconnect nach Verbindungsabbru
 
 # ── Logging ───────────────────────────────────────────────────────────────
 log_level: "INFO"        # DEBUG | INFO | WARNING | ERROR
+
+# ── Profiling ─────────────────────────────────────────────────────────────
+# profile: true startet jeden Bot unter cProfile. Das Profil wird beim regulären
+# Bot-Ende (Stop, Lebensdauer-Rotation, Rundenende) als
+#   <profile_dir>/bzbot_<name>_<id>_<zeitstempel>.prof
+# geschrieben; der Manager stoppt Bots dafür per SIGINT (sauberer Shutdown).
+# Auswertung z.B.: python -m pstats /tmp/bzbot_....prof  →  sort cumtime / stats 30
+# profile: false
+# profile_dir: "/tmp"

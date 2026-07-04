@@ -76,6 +76,12 @@ class Config:
         self.restart_healthy_s    = 30.0   # ab dieser Laufzeit gilt ein Bot als „gesund" → Reset
         self.good_flags: Optional[List[str]] = None   # None = Standardliste aus bzbot.py
         self.bad_flags:  Optional[List[str]] = None   # None = Standardliste aus bzbot.py
+        # cProfile-Instrumentierung: profile=True startet jeden Bot als
+        # `python -m cProfile -o <profile_dir>/bzbot_<name>_<id>_<zeit>.prof bzbot.py …`.
+        # Das Profil wird beim regulären Prozessende geschrieben — stop() sendet dafür
+        # zuerst SIGINT (sauberer Shutdown statt SIGTERM-Kill, siehe BotProcess.stop).
+        self.profile      = False
+        self.profile_dir  = "/tmp"   # Zielordner für .prof-Dateien
 
     def full_bot_callsigns(self) -> List[str]:
         """In-Game-Callsigns aller konfigurierten Bots = bot_name_prefix + Basisname.
@@ -230,10 +236,30 @@ class BotProcess:
         self.on_status = None
         self.on_exit   = None
 
+    def _profile_outfile(self) -> str:
+        """Eindeutiger cProfile-Ausgabepfad: <profile_dir>/bzbot_<name>_<id>_<zeit>.prof.
+        Callsign wird dateinamen-sicher bereinigt; id+Zeitstempel verhindern, dass
+        Restarts (Lebensdauer/Rundenende) ein früheres Profil überschreiben."""
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", self.callsign).strip("_") or f"bot{self.id}"
+        out_dir = self.config.profile_dir or "/tmp"
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError as exc:
+            logger.warning("Profil-Ordner '%s' nicht anlegbar: %s", out_dir, exc)
+        fname = f"bzbot_{safe}_{self.id}_{time.strftime('%Y%m%d-%H%M%S')}.prof"
+        return os.path.join(out_dir, fname)
+
     def start(self) -> bool:
         """Startet bzbot.py als Subprozess und beginnt Log-Weiterleitung in eigenem Thread."""
-        cmd = [
-            sys.executable, str(BZBOT_SCRIPT),
+        cmd = [sys.executable]
+        profile_out = None
+        if self.config.profile:
+            # cProfile umhüllt den Bot-Prozess; -o schreibt das Profil erst beim
+            # regulären Prozessende (stop() erzwingt das per SIGINT-first).
+            profile_out = self._profile_outfile()
+            cmd += ["-m", "cProfile", "-o", profile_out]
+        cmd += [
+            str(BZBOT_SCRIPT),
             "--managed",                       # IPC über stdin/stdout aktivieren
             "--host",      self.config.host,
             "--port",      str(self.config.port),
@@ -268,6 +294,8 @@ class BotProcess:
             )
             self.start_time = time.monotonic()
             logger.info("Bot '%s' gestartet (PID %d)", self.callsign, self.process.pid)
+            if profile_out:
+                logger.info("Bot '%s' läuft unter cProfile → %s", self.callsign, profile_out)
 
             # Ausgabe-Logging in eigenem Thread
             t = threading.Thread(
@@ -282,7 +310,13 @@ class BotProcess:
             return False
 
     def stop(self, timeout: float = 5.0):
-        """Beendet Bot-Prozess (SIGTERM, danach SIGKILL falls nötig)."""
+        """Beendet Bot-Prozess gestaffelt: SIGINT → SIGTERM → SIGKILL.
+
+        SIGINT zuerst, weil es im Bot-Hauptthread KeyboardInterrupt auslöst und
+        main() sich damit regulär beendet — nur so schreibt ein unter cProfile
+        gestarteter Bot sein -o-Profil (SIGTERM tötet den Interpreter ohne
+        finally). Unter Windows unterstützt Popen kein SIGINT (ValueError) →
+        Sprung direkt zu terminate()."""
         if self.process is None:
             return
         if self.process.poll() is not None:
@@ -290,6 +324,15 @@ class BotProcess:
         logger.info("Stoppe Bot '%s' (PID %d)...", self.callsign, self.process.pid)
         self._stopping = True  # signalisiert _log_output: kein Absturz, sondern bewusster Stop
         try:
+            try:
+                self.process.send_signal(signal.SIGINT)
+                self.process.wait(timeout=timeout)
+                return
+            except (ValueError, OSError):
+                pass  # SIGINT nicht zustellbar (z.B. Windows) → SIGTERM versuchen
+            except subprocess.TimeoutExpired:
+                logger.warning("Bot '%s' reagiert nicht auf SIGINT – sende SIGTERM",
+                               self.callsign)
             self.process.terminate()
             self.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
