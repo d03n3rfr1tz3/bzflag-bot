@@ -120,7 +120,12 @@ class BZFlagClient:
         # UDP
         self._udp_sock:   Optional[socket.socket] = None
         self._udp_thread: Optional[threading.Thread] = None
-        self._server_addr: Optional[tuple] = None   # (host, port) für UDP-Sends
+        # Aufgelöste Server-Adresse (IP, Port) für UDP-Sends. WICHTIG: numerische IP,
+        # nicht Hostname — sendto() mit Hostname-Tupel macht in CPython pro Paket ein
+        # getaddrinfo (im Container via Docker-DNS ~1ms/Paket, war 46% der aktiven CPU;
+        # FABLE-PLAN.md Teil 1b, N1b). Gesetzt in connect() aus getpeername() der
+        # TCP-Verbindung → garantiert dieselbe Server-IP wie TCP.
+        self._server_addr: Optional[tuple] = None
         self.udp_active = False   # True sobald UDP-Handshake abgeschlossen
         self._udp_link_sent_at = 0.0   # monotonic des letzten MsgUDPLinkRequest (Retry-Throttle)
         self._udp_link_attempts = 0    # Anzahl gesendeter MsgUDPLinkRequest (für WARNING-Schwelle)
@@ -196,7 +201,9 @@ class BZFlagClient:
                 return False
 
             self.player_id    = pid
-            self._server_addr = (self.host, self.port)
+            # N1b: tatsächliche Peer-IP der TCP-Verbindung cachen (inet_pton-Fastpath
+            # in sendto, kein getaddrinfo pro UDP-Paket mehr)
+            self._server_addr = (sock.getpeername()[0], self.port)
             self._sock        = sock
             self._sock.settimeout(None)
             self.connected    = True
@@ -303,7 +310,7 @@ class BZFlagClient:
         if self._udp_sock is None or self.player_id is None:
             return
         pkt = pack_msg(MsgUDPLinkRequest, struct.pack(">B", self.player_id))
-        self._udp_sock.sendto(pkt, (self.host, self.port))
+        self._udp_sock.sendto(pkt, self._server_addr or (self.host, self.port))
         self._udp_link_sent_at = time.monotonic()
         self._udp_link_attempts += 1
         logger.debug("MsgUDPLinkRequest via UDP gesendet (player_id=%d, Versuch %d)",
@@ -348,7 +355,7 @@ class BZFlagClient:
 
         if use_udp:
             try:
-                self._udp_sock.sendto(data, (self.host, self.port))
+                self._udp_sock.sendto(data, self._server_addr or (self.host, self.port))
             except OSError as exc:
                 logger.error("UDP-Sendefehler 0x%04x: %s", code, exc)
         else:

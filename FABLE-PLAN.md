@@ -57,7 +57,7 @@ Schon im 2-Minuten-Lokallauf auf HIX sind das 468k+484k Ray-Tests — **der grö
 **Lösung:** Simulation VOR dem Lock ausführen (sie liest nur unveränderliche Weltdaten + lokale Schussparameter), dann kurz locken und `self._shots[...]` und `self._ricochet_paths[...]` **gemeinsam** eintragen (Atomicität von Shot+Pfad bleibt erhalten). Lock-Haltezeit sinkt von Millisekunden auf Mikrosekunden.
 **Potenzial:** Kein CPU-Gewinn, aber Latenz/Jitter der 60-Hz-Schleife (mit-ursächlich für `[nr]`-Symptome unter Last). **Risiko:** Niedrig — reine Umordnung, Atomicität erhalten. **Verifikation:** tests/test_shot_parsing.py, test_hit_detection.py; manueller Lauf mit `--debug-log-tele`.
 
-### P4 — Wahrnehmungs-Memoisierung pro Tick (LoS / Muzzle / Floor-Z) — ✅ Stufe a umgesetzt (Branch `perf/track2`, Commit `d85c19b`; Stufe b bewusst offen bis Server-Messung)
+### P4 — Wahrnehmungs-Memoisierung pro Tick (LoS / Muzzle / Floor-Z) — ✅ Stufe a umgesetzt (Branch `perf/track2`, Commit `d85c19b`); Stufe b ⛔ nicht nötig (Server-Messung 2026-07-04: `_has_los_to_enemy` cum ≈0,2%/Bot im Kampf)
 
 **Problem:** Pro 60-Hz-Tick werden identische Raycasts/Queries mehrfach mit identischen Eingaben berechnet:
 - `_has_los_to_enemy(target)`: 2× in `_execute_combat_move` ([bzbot_ai.py:1460](bzbot_ai.py#L1460), [1514](bzbot_ai.py#L1514)) + 1× in `_maybe_shoot_standard` ([bzbot_ai.py:3641](bzbot_ai.py#L3641)) — bis zu 3× pro Tick.
@@ -68,31 +68,31 @@ Schon im 2-Minuten-Lokallauf auf HIX sind das 468k+484k Ray-Tests — **der grö
 **Lösung (Stufe b, optional, nach Messung):** TTL-Cache 0,1s (= KI-Tick) für `_has_los_to_enemy` — Staleness vergleichbar mit existierender Radar-Aufmerksamkeit (0,25s Cooldown). Nur umsetzen, wenn Stufe a + P1 nicht reichen.
 **Potenzial:** LoS+FloorZ ≈ 25% der aktiven lokalen CPU → Stufe a spart grob die Hälfte davon. **Risiko:** Stufe a: null (positionsgebundener Memo-Key). Stufe b: niedrig (100ms Wahrnehmungs-Staleness). **Verifikation:** Bestehende Suite (886 Tests) muss unverändert grün sein; für Stufe a zusätzlich Assertion-Test, dass Memo-Hit == Direktberechnung.
 
-### P5 — Ricochet-Pfad-Segmente: Zeitfenster-Suche statt Vollscan (Server-Hebel #2)
+### P5 — Ricochet-Pfad-Segmente: Zeitfenster-Suche statt Vollscan (Server-Hebel #2) — ⛔ nicht nötig (Server-Messung 2026-07-04: `_resolve_incoming_shots` + `_find_incoming_shot` ≈0,25% absolut/Bot im Kampf — nach P1 kein Hebel mehr)
 
 **Problem:** `_resolve_incoming_shots` ([bzbot.py:645](bzbot.py#L645)) und `_find_incoming_shot` ([bzbot_ai.py:2195](bzbot_ai.py#L2195)) iterieren bei 60 Hz für jeden Ricochet-Schuss über **alle** gecachten Segmente (bei `max_bounces=100` bis zu ~100 Segmente/Schuss), obwohl pro Tick nur die 1–2 zeitlich aktuellen Segmente relevant sind. Auf Ricochet-Servern mit 10–30 aktiven Schüssen: bis zu 30 Schüsse × 100 Segmente × 60 Hz = 180k Segment-Interpolationen/s.
 **Lösung:** Segmente sind zeitlich streng aufsteigend sortiert (per Konstruktion in `simulate_shot_path`). Pro Schuss einen monoton fortschreitenden Index cachen (`shot.seg_cursor`): Segmente mit `seg.t_end <= now` überspringt der Cursor einmalig; Schleife bricht ab, sobald `seg.t_start > now + Lookahead` (bei `_resolve_incoming_shots`: `now`; bei `_find_incoming_shot`: `RICO_DODGE_LOOKAHEAD`). Amortisiert O(1) statt O(Segmente) pro Tick.
 **Potenzial:** Auf Rico-Servern hoch (linear in Schüssen × Segmenten), lokal moderat. **Risiko:** Niedrig — reine Suchraum-Beschneidung über bereits vorhandene Zeitschranken (`t1 <= t0`-Skips existieren schon, [bzbot.py:650](bzbot.py#L650), [bzbot_ai.py:2196](bzbot_ai.py#L2196)); Cursor-Logik mit Unit-Test absichern (Segment-Grenzfälle: exakt `t_end == now`). **Verifikation:** test_hit_detection.py + neuer Test „Cursor-Resolve == Vollscan-Resolve" über randomisierte Schusspfade.
 
-### P6 — Pyramiden-Narrow-Phase: Flächennormalen vorberechnen
+### P6 — Pyramiden-Narrow-Phase: Flächennormalen vorberechnen — ⛔ obsolet nach P1 (Server-Messung 2026-07-04: `ray_pyramid_hit` tottime 0,12s + `_time_ray_hits_plane` 0,03s über 5 Kampf-Profile — die 468k Calls des Alt-Profils sind auf 13k gefallen)
 
 **Problem:** `ray_pyramid_hit` ([shot_physics.py:442](bzflag/shot_physics.py#L442)) berechnet pro Aufruf (468k×) `math.cos(-angle)`/`math.sin(-angle)` neu (obwohl `BoxObstacle` gecachte `cos_a`/`sin_a` hat: `cos(-a)=cos_a`, `sin(-a)=-sin_a`) und ruft 5× `_time_ray_hits_plane`, das jedes Mal das **konstante** Kreuzprodukt der Ebenennormalen neu berechnet (1,23M Calls, Tupel-/Listen-Allokationen `pb`/`db`).
 **Lösung:** Die 5 Ebenen einer Pyramide sind im lokalen Frame allein durch (hw, hd, hh) bestimmt → Normalen + Stützpunkte einmalig in `BoxObstacle.__post_init__` cachen (Muster existiert: Trig-Cache aus der ObstacleGrid-Session). `_time_ray_hits_plane` degeneriert dann zu 2 Skalarprodukten; `pb`/`db`-Listen durch skalare Variablen ersetzen.
 **Potenzial:** 2–4× auf Pyramiden-Tests; HIX ist pyramidenreich. Nach P1 sinkt die Aufrufzahl bereits stark — deshalb NACH P1 messen, dann entscheiden. **Risiko:** Niedrig (pure-Function-Refactor). **Verifikation:** test_shot_physics.py + Äquivalenz-Fuzz (random Rays × random Pyramiden, alt == neu exakt).
 
-### P7 — Sichtbarkeits-LoS pro Spieler cachen (skaliert mit Spielerzahl)
+### P7 — Sichtbarkeits-LoS pro Spieler cachen (skaliert mit Spielerzahl) — 🗄️ Schublade (Server-Messung 2026-07-04: Empfangspfad cum ≈0,8%/Bot; halbiert sich mit N1a automatisch. Erst wieder prüfen, wenn regelmäßig viele echte Spieler online sind)
 
 **Problem:** Jedes eingehende `MsgPlayerUpdate` (30 Hz × Spieler) läuft durch `_should_update_player` → `_sees_in_window` → `_has_los_to_point`-Raycast ([bzbot_ai.py:2118→2096](bzbot_ai.py#L2118)). 10 Spieler ≈ 300 Raycasts/s zusätzlich; cProfile lokal: 35k Calls / 0,95s cum.
 **Lösung:** Pro `PlayerInfo` das LoS-Ergebnis mit Kurzzeit-TTL (~0,1s) cachen (`info.los_cache = (until, result)`), analog zur bestehenden Radar-Aufmerksamkeit (`radar_blind_until`). FoV-Check bleibt exakt (billig).
 **Potenzial:** Server: moderat–hoch bei vielen Spielern. **Risiko:** Niedrig — 100ms Staleness bei einem reinen Wahrnehmungs-Gate; die Radar-Attention arbeitet bereits mit 250ms. **Verifikation:** tests/test_targeting.py (Sichtbarkeits-Prädikate) unverändert; neuer Test für TTL-Ablauf.
 
-### P8 — Ricochet-Sweep verschlanken (optional, NACH P1 neu bewerten)
+### P8 — Ricochet-Sweep verschlanken (optional, NACH P1 neu bewerten) — ⛔ verworfen (Server-Messung 2026-07-04: `_compute_ricochet_aim` cum ≈0,8%/Bot bei nur 49 Sweeps — Verhaltensrisiko > Nutzen)
 
 **Problem:** `_compute_ricochet_aim` ([bzbot_ai.py:3416](bzbot_ai.py#L3416)) simuliert ~80 Winkel (±45°, 1°-Raster, |az|>5°) + Teleporter-Fenster, alle 2s pro Ziel.
 **Lösung (falls nach P1 noch nötig):** Zweistufiger Sweep — 3°-Raster (27 Sims), dann ±1° Verfeinerung um Treffer (≤6 Sims) ≈ 60% weniger Simulationen.
 **Potenzial:** 2–3× auf dem Sweep. **Risiko:** **Mittel** — schmale Abprall-Korridore (1–2° breit) können im Grobraster durchrutschen → Bot findet gelegentlich einen Rico-Schuss nicht, den er heute findet. Das ist eine echte (milde) Verhaltensänderung. Deshalb: nur nach Messung, hinter Vergleichstest (Trefferquote alt vs. neu über randomisierte Szenarien, Abweichung dokumentieren).
 
-### P9 — NumPy/Cython/mypyc (letzte Eskalationsstufe)
+### P9 — NumPy/Cython/mypyc (letzte Eskalationsstufe) — ⛔ nicht nötig (Server-Messung 2026-07-04: Compute ist nach P1 nicht mehr dominant — `sendto` ist es; s. Teil 1b)
 
 Vom User erwähnt (Kandidaten: `ray_pyramid_hit`, `ray_box_hit`, `_time_ray_hits_plane`, `_ray_orig_box_hit`, `simulate_shot_path`). Einschätzung:
 - **Erst P1/P5/P6 umsetzen** — sie reduzieren die Aufrufzahlen algorithmisch; Compile-Beschleunigung auf einen linearen Scan wäre Symptombekämpfung.
@@ -105,6 +105,7 @@ Vom User erwähnt (Kandidaten: `ray_pyramid_hit`, `ray_box_hit`, `_time_ray_hits
 1. **Zusätzlich auf dem Server profilen**: `py-spy record --pid <bot-pid> --duration 120 --rate 250 -o flame_server.svg` im Docker-Host/Container (py-spy braucht `SYS_PTRACE`-Capability im Container). Karte/Settings sind lokal identisch (HIX), die lokale Hot-Path-Verteilung ist also übertragbar — die Server-Messung braucht es trotzdem: für die absoluten CPU-% auf der schwächeren Hardware, für Langzeit-Effekte (F3-Leak nach Stunden Uptime) und für Gefechtsphasen mit echten Spielern.
 2. Vor/Nach jeder Maßnahme denselben 120s-Lauf auf derselben Karte mit ähnlicher Spielerlast; zusätzlich `docker stats`-CPU als Grobmetrik.
 3. Die bestehende Perf-Suite (`pytest -m perf -s`) um einen `simulate_shot_path`-Benchmark auf einer echten großen Karte erweitern (analog zu den plan_path-Benchmarks), damit P1/P5/P6 CI-messbar sind.
+4. **Alternative zu py-spy (bewährt am 2026-07-04):** cProfile direkt im Bot (Dump beim Prozess-Ende), Dateien aus dem Container extrahieren und lokal mit `pstats` auswerten. Wichtig bei der Auswertung: `total_tt` enthält Blocking-Waits — aktive CPU = Summe tottime OHNE `recv`/`recvfrom`/`lock.acquire`; und C-interne Kosten (z.B. getaddrinfo in `sendto`) sind für cProfile unsichtbar und landen im tottime des aufrufenden C-Calls.
 
 ### Übersichtstabelle Performance
 
@@ -114,12 +115,46 @@ Vom User erwähnt (Kandidaten: `ray_pyramid_hit`, `ray_box_hit`, `_time_ray_hits
 | P2 | `test_obs` vorberechnen | ⭐ | ○ | null | trivial |
 | P3 | Simulation aus `_shots_lock` ziehen | ⭐⭐ (Jitter/[nr]) | ○ | niedrig | klein |
 | P4a | Per-Tick-Memo (LoS/FloorZ/Muzzle) | ⭐⭐ | ⭐⭐ | null | klein |
-| P4b | LoS-TTL 0,1s | ⭐ | ⭐ | niedrig | klein |
-| P5 | Segment-Cursor statt Vollscan | ⭐⭐⭐ (Rico-Server) | ⭐ | niedrig | mittel |
-| P6 | Pyramiden-Normalen vorberechnen | ⭐⭐ | ⭐ | niedrig | mittel |
-| P7 | Sichtbarkeits-LoS-TTL pro Spieler | ⭐⭐ (viele Spieler) | ○ | niedrig | klein |
-| P8 | Sweep-Raster vergröbern | ⭐ | ⭐ | **mittel** (Verhalten) | klein |
-| P9 | mypyc/Cython shot_physics | ⭐⭐ | ⭐ | niedrig/mittel (Build) | mittel–groß |
+| P4b ⛔ | LoS-TTL 0,1s | ⭐ | ⭐ | niedrig | klein |
+| P5 ⛔ | Segment-Cursor statt Vollscan | ⭐⭐⭐ (Rico-Server) | ⭐ | niedrig | mittel |
+| P6 ⛔ | Pyramiden-Normalen vorberechnen | ⭐⭐ | ⭐ | niedrig | mittel |
+| P7 🗄️ | Sichtbarkeits-LoS-TTL pro Spieler | ⭐⭐ (viele Spieler) | ○ | niedrig | klein |
+| P8 ⛔ | Sweep-Raster vergröbern | ⭐ | ⭐ | **mittel** (Verhalten) | klein |
+| P9 ⛔ | mypyc/Cython shot_physics | ⭐⭐ | ⭐ | niedrig/mittel (Build) | mittel–groß |
+
+(⛔/🗄️ = Entscheidung aus der Server-Messung 2026-07-04, Details in den Überschriften und in Teil 1b.)
+
+---
+
+## Teil 1b: Server-Messung 2026-07-04 — Idle-Baseline (N-Punkte)
+
+Die in Track 2 vorgesehene Server-Messung liegt vor: cProfile-Dumps aus dem Live-Container, zwei Sessions à ~2min — **IDLE** (4 Bots, niemand sonst auf dem Server, docker stats ~20% Baseline-CPU) und **KAMPF** (User hat mitgekämpft). Aktive CPU (= total_tt minus Blocking `recv`/`recvfrom`/`lock.acquire`): IDLE 15,1%, KAMPF 16,6% pro Bot. **Ziel: Idle-Baseline < 10% ohne Verhaltensänderung.**
+
+**Kernbefund: `sendto` dominiert beide Sessions — 46,6% (IDLE) bzw. 41,8% (KAMPF) der aktiven CPU**, ~57 Pakete/s à 1,27ms. Zwei unabhängige, verifizierte Ursachen (N1a, N1b). Alles andere ist dagegen klein: Empfangspfad der Peer-Updates ≈1%/Bot (halbiert sich mit N1a von selbst, ebenso die bzfs-Relay-Last), Idle-Nav ≈2–3%/Bot (Wander-Verhalten + einmaliger `_vn_cache`-Warm-up — bewusst NICHT anfassen, Drosselung wäre sichtbare Verhaltensänderung).
+
+### N1a — 30-Hz-Update-Kadenz reparieren (Kadenz-Bug) ⭐ — ✅ umgesetzt (Branch `perf/idle-baseline`, Commit `72b4ee8`; `_maybe_send_server_update` mit Stall-Klemme + Kadenz-Anker vor der Schleife, tests/test_update_cadence.py)
+
+**Problem (verifizierter Bug):** `self._next_server_update = 0.0` (bzbot.py `__init__`) wird in `_run_game_loop` gegen `time.monotonic()` (= System-Uptime, auf dem Server riesig) verglichen → die Kadenz-Prüfung ist anfangs IMMER wahr. Der Catch-up `+= _server_update_interval` holt das Start-Defizit nur mit 1s/s auf → **der Bot sendet so lange mit Tick-Rate (~57–60 Hz) statt 30 Hz, wie der Host beim Bot-Start schon lief** — auf dem Server faktisch für immer. Beweis im Profil: `_send_update`-ncalls == Tick-Anzahl. Zum Vergleich: der echte Client sendet per Dead-Reckoning nur bei Prediction-Fehler, hart gedrosselt auf `_updateThrottleRate` (Default 30) — 30 Hz ist also die obere Grenze des Spec-Konformen (`Player.cxx:isDeadReckoningWrong`; `_on_set_var` trackt `_updateThrottleRate` bereits korrekt).
+**Fix:** `_next_server_update = time.monotonic()` unmittelbar vor der Schleife; Kadenz-Block als testbare Methode `_maybe_send_server_update(now)` mit Stall-Klemme (nach Stall neu aufsetzen statt Burst-Nachholen).
+**Potenzial:** Paketrate −47%; zusätzlich halbieren sich Peer-Empfangslast ALLER Bots und bzfs-Relay-Last (jedes Update geht an N−1 Clients). **Risiko:** Null — stellt das dokumentierte Soll-Verhalten (30 Hz) her. **Verifikation:** tests/test_update_cadence.py (Kadenz ~30/s trotz großem monotonic-Offset; kein Burst nach Stall; `_updateThrottleRate` respektiert).
+
+### N1b — UDP-Zieladresse einmal auflösen (DNS pro Paket) ⭐ — ✅ umgesetzt (Branch `perf/idle-baseline`, Commit `2538f5b`; `_server_addr` = getpeername()-IP, beide sendto-Stellen umgestellt, tests/test_client_udp_addr.py)
+
+**Problem (verifiziert):** `self._udp_sock.sendto(data, (self.host, self.port))` (client.py) — bei einem Hostnamen (Docker-Servicename, auch „localhost") macht CPython **pro Paket ein getaddrinfo** im C-Code von `sendto` (für cProfile unsichtbar → landet im sendto-tottime). Lokal gemessen: 2,6µs/Paket (IP-Tupel) vs. 90,4µs (Hostname-Tupel); im Container mit Docker-Embedded-DNS (127.0.0.11) erklärt das die 1,27ms vollständig. Nebeneffekt: `sendto` läuft im Game-Loop-Thread → blockierte bisher ~7% der Wall-Time der 60-Hz-Schleife (Tick-Jitter).
+**Fix:** Nach erfolgreichem TCP-Connect die tatsächliche Server-IP cachen (`self._udp_addr = (sock.getpeername()[0], self.port)` — garantiert dieselbe IP wie TCP) und beide sendto-Stellen darauf umstellen. Numerisches IP-Tupel → inet_pton-Fastpath, kein getaddrinfo. Bewusst KEIN `udp.connect()` (würde Empfangsfilterung/ICMP-Fehlersemantik ändern; als Option dokumentiert, nicht nötig).
+**Potenzial:** sendto ~7,2% absolut/Bot → ~0,1%. **Risiko:** Null (gleiche Pakete, gleiches Ziel). **Verifikation:** Client-Test mit gemocktem Socket (nach `connect()` ist `_udp_addr` die getpeername-IP; sendto erhält das gecachte Tupel).
+
+### N2 — Leerlauf-Early-Outs (offen, trivial)
+
+`_resolve_incoming_shots`, `_cleanup_shots` und `_find_incoming_shot` laufen 60 Hz auch bei komplett leeren Shot-Dicts durch Lock/Iterations-Overhead (~0,2–0,5%/Bot im Idle). Früher `if not self._shots and not self._ricochet_paths: return` (GIL-sicherer Lesezugriff, kein Lock nötig). **Risiko:** Null. **Verifikation:** bestehende test_hit_detection.py.
+
+### N3 — Tick-Wait verschlanken (Schublade)
+
+`Event.wait(timeout)` pro Tick kostet ~0,4%/Bot (Condition-Objekt + Lock-Maschinerie). `time.sleep` wäre billiger, verzögert aber `stop()` um bis zu 16ms. **Nur angehen, falls die Nachmessung nach N1a/N1b immer noch >10% zeigt.**
+
+### Erwartung Nachmessung
+
+Rechnerisch pro Bot (IDLE): ~20% → **~8–10%** (sendto-Posten praktisch weg, eigener Sendepfad + Peer-Empfang halbiert); im neuen Profil erwartbar: sendto-Anteil <5% der aktiven CPU, ~30 `_send_update`-Calls/s. Abnahme: Redeploy, `docker stats` über ~10min Idle, optional neue cProfile-Runde.
 
 ---
 
@@ -350,7 +385,8 @@ Startpunkt: erst nach Abschluss der Roadmap-Tracks 1–3 (s. „Wechselwirkungen
 Die Tracks spiegeln die Themen-Priorität (Performance → Fehlerpotenzial → Wartbarkeit) und laufen **sequenziell**: Der Struktur-Track kommt bewusst ganz ans Ende, damit die Datei:Zeile-Referenzen und Review-Befunde dieses Plans bis dahin gültig bleiben (s. Teil 3, „Wechselwirkungen"). Für Junior/Sonnet-Umsetzung: **ein Punkt = ein Branch/PR**, Suite (886 Tests) nach jedem Punkt grün.
 
 1. **Track 1 — Sofort-Bugfixes (klein, hohes Server-Potenzial; F3 ist faktisch auch eine Performance-Maßnahme):** F3 (Rico-Leak, 2 Zeilen) → F2 (Dict-Snapshots) → F1 (GM-Dodge) → F4 (dt-Clamp).
-2. **Track 2 — Performance:** P2 → P3 → P4a → W6 (ObstacleGrid-Split, aus dem Struktur-Track vorgezogen) → P1 (Grid in simulate_shot_path) → **Server-Messung** → danach je nach Befund P5, P6, P7, P4b, P8, P9. — ✅ P2/P3/P4a/W6/P1 umgesetzt (Branch `perf/track2`); **nächster Schritt: Server-Messung (User)**, erst danach P5+ entscheiden.
+2. **Track 2 — Performance:** P2 → P3 → P4a → W6 (ObstacleGrid-Split, aus dem Struktur-Track vorgezogen) → P1 (Grid in simulate_shot_path) → **Server-Messung** → danach je nach Befund P5, P6, P7, P4b, P8, P9. — ✅ P2/P3/P4a/W6/P1 umgesetzt (Branch `perf/track2`); ✅ Server-Messung 2026-07-04 erfolgt (cProfile IDLE + KAMPF aus dem Live-Container) → Ergebnis: P4b/P5/P6/P8/P9 ⛔, P7 🗄️ — stattdessen **Track N (Teil 1b)**.
+2b. **Track N — Idle-Baseline (aus der Server-Messung, Teil 1b):** N1a (30-Hz-Kadenz-Fix) → N1b (UDP-Adress-Cache) → Nachmessung (User; Ziel <10% Idle) → danach ggf. N2 (Leerlauf-Early-Outs), N3 (Schublade). — ✅ N1a+N1b umgesetzt (Branch `perf/idle-baseline`); **nächster Schritt: Nachmessung (User)**.
 3. **Track 3 — Konsistenz (restliches Fehlerpotenzial; bewusst VOR dem Struktur-Track, weil die Fixes Grep-basiert über den heutigen Dateistand laufen):** F5 → F6 (Radar an `world_half` koppeln, halbe Weltgröße bleibt) → F7 → F9 (= W9; Helper wandern später beim Split als Einheit mit) → F8 (distanzabhängiges Feuer-Gate als eigener PR + Doku-Punkte). — ✅ komplett umgesetzt (Branch `consistency/track3`).
 4. **Track 4 — Struktur (Wartbarkeit, zuletzt):** W1 (constants.py, zusammen mit W8-Tabelle) → W2 (models/util) → W4 (Mixin-Split, 9 Einzel-Commits) → W5 (bzbot.py dünn) → W7 → W3 (_on_set_var-Tabelle, mit Snapshot-Test). Zu diesem Zeitpunkt sind alle P/F-Punkte abgeschlossen → keine Referenz-Entwertung; sollte doch ein Punkt offen sein, gilt Regel 4 aus „Wechselwirkungen" (Referenzen im Plan pro W-PR nachziehen, Landkarten-Tabelle nutzen).
 
