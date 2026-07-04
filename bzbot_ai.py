@@ -414,11 +414,22 @@ class BZBotAI:
         der Bot auf BURROW_DEPTH)."""
         if self.own_flag == "OO":
             return 0.0
+        # P4a: Per-Tick-Memo (3–5 identische Aufrufe pro 60-Hz-Tick). Der Key
+        # enthält Position+Flagge → Aufrufe NACH einer pos-Mutation im selben
+        # Tick treffen einen neuen Key; Ergebnis bleibt verhaltensidentisch.
+        memo = getattr(self, "_tick_memo", None)
+        key = ("floor", self.pos[0], self.pos[1], self.pos[2], self.own_flag)
+        if memo is not None:
+            cached = memo.get(key)
+            if cached is not None:
+                return cached
         nav = getattr(self, "_nav_graph", None)
         floor = 0.0 if nav is None else nav.get_floor_z(
             self.pos[0], self.pos[1], self.pos[2], overhang=self._effective_half_width())
         if self.own_flag == "BU" and floor <= 0.0:
-            return self._burrow_depth
+            floor = self._burrow_depth
+        if memo is not None:
+            memo[key] = floor
         return floor
 
     # ── Capability-Checks ─────────────────────────────────────────────────
@@ -3058,10 +3069,20 @@ class BZBotAI:
         hinter/in einer soliden Wand steckt. Der reale Schuss spawnt an der Mündung (s. _send_shot);
         liegt eine dünne Wand zwischen Tank-Mitte und Mündung, würde bzfs den Schuss serverseitig
         'fressen' bzw. er ginge unfair durch die Wand → solche Schüsse unterdrücken (s. _maybe_shoot)."""
+        # P4a: Per-Tick-Memo — wird pro Tick mit identischem az mehrfach geprüft.
+        memo = getattr(self, "_tick_memo", None)
+        key = ("muzzle", az, self.pos[0], self.pos[1], self.pos[2])
+        if memo is not None:
+            cached = memo.get(key)
+            if cached is not None:
+                return cached
         mz = self.pos[2] + self._muzzle_height
         mx = self.pos[0] + math.cos(az) * self._muzzle_front
         my = self.pos[1] + math.sin(az) * self._muzzle_front
-        return self._segment_clear(self.pos[0], self.pos[1], mz, mx, my, mz)
+        result = self._segment_clear(self.pos[0], self.pos[1], mz, mx, my, mz)
+        if memo is not None:
+            memo[key] = result
+        return result
 
     def _has_los_to_enemy(self, target_pid: int) -> bool:
         """True wenn weder eine undurchschießbare Box noch ein verlinktes Teleporter-Feld zwischen
@@ -3070,23 +3091,38 @@ class BZBotAI:
         if info is None or not info.alive:
             return True
         ex = info.pos[0]; ey = info.pos[1]; ez = info.pos[2] + TANK_HEIGHT * 0.5
+        # P4a: Per-Tick-Memo — bis zu 3× pro Tick identisch aufgerufen
+        # (_execute_combat_move 2×, _maybe_shoot_standard 1×). Key enthält
+        # beide Positionen → bewegt sich der Gegner mittendrin (Recv-Thread),
+        # gibt es schlicht einen Miss statt eines stalen Treffers.
+        memo = getattr(self, "_tick_memo", None)
+        key = ("los", target_pid, self.pos[0], self.pos[1], self.pos[2], ex, ey, ez)
+        if memo is not None:
+            cached = memo.get(key)
+            if cached is not None:
+                return cached
+        result = True
         if not self._has_los_to_point(ex, ey, ez):
-            return False
-        # Teleporter-Feld zwischen Bot und Ziel → ein Direktschuss würde wegteleportiert,
-        # also kein sauberer Direktschuss (der indirekte Aim-Sweep übernimmt dann, s. A4).
-        wm = getattr(self, "_world_map", None)
-        if wm and wm.teleporters:
-            ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + TANK_HEIGHT * 0.5
-            dx = ex - ox; dy = ey - oy; dz = ez - oz
-            lmap = getattr(self, "_link_map", {})
-            for ti, tele in enumerate(wm.teleporters):
-                res = ray_teleporter_crossing(ox, oy, oz, dx, dy, dz, tele)
-                if res is None:
-                    continue
-                t_cross, face = res
-                if 0.0 < t_cross < 1.0 and (ti * 2 + face) in lmap:
-                    return False
-        return True
+            result = False
+        else:
+            # Teleporter-Feld zwischen Bot und Ziel → ein Direktschuss würde wegteleportiert,
+            # also kein sauberer Direktschuss (der indirekte Aim-Sweep übernimmt dann, s. A4).
+            wm = getattr(self, "_world_map", None)
+            if wm and wm.teleporters:
+                ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + TANK_HEIGHT * 0.5
+                dx = ex - ox; dy = ey - oy; dz = ez - oz
+                lmap = getattr(self, "_link_map", {})
+                for ti, tele in enumerate(wm.teleporters):
+                    res = ray_teleporter_crossing(ox, oy, oz, dx, dy, dz, tele)
+                    if res is None:
+                        continue
+                    t_cross, face = res
+                    if 0.0 < t_cross < 1.0 and (ti * 2 + face) in lmap:
+                        result = False
+                        break
+        if memo is not None:
+            memo[key] = result
+        return result
 
     def _z_attack_feasible(self, now: float) -> bool:
         """Prüft ob Z_ATTACK grundsätzlich möglich ist (ohne Zufalls-Gate, kein Sprung)."""
@@ -3483,6 +3519,8 @@ class BZBotAI:
                 teleporters=wmap.teleporters,
                 link_map=getattr(self, "_link_map", None),
                 tele_log=_tl,
+                solid_obs=wmap.solid_obstacles(),
+                obs_grid=getattr(self, "_shot_grid", None),
             )
             if len(segs) <= 1:
                 continue

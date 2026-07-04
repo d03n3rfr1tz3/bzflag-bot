@@ -27,7 +27,7 @@ Der BZFlag-Bot (Python, ~10.600 Zeilen) läuft lokal mit <1–7% CPU, auf dem On
 
 Priorisiert nach **Server-Potenzial ÷ Risiko**. Reihenfolge ist zugleich empfohlene Umsetzungsreihenfolge; nach P1–P4 auf dem Server neu messen (py-spy, s. „Messmethodik" unten), bevor P6+ angegangen wird.
 
-### P1 — Broad-Phase-Grid für `simulate_shot_path` ⭐ größter Hebel
+### P1 — Broad-Phase-Grid für `simulate_shot_path` ⭐ größter Hebel — ✅ umgesetzt (Branch `perf/track2`, Commit `35bec5f`; Benchmark HIX 300 Rico-Schüsse: 62ms → 8ms ≈ 8×, Äquivalenz 0 Mismatch über 600 Random-Schüsse inkl. HIX)
 
 **Problem:** `simulate_shot_path` ([shot_physics.py:691](bzflag/shot_physics.py#L691)) iteriert pro Bounce-Iteration **linear über alle** nicht-durchschießbaren Obstacles (`ray_pyramid_hit`/`ray_box_hit` je Obstacle). Aufrufer:
 1. **Defensiv** — [bzbot.py:1340](bzbot.py#L1340) `_on_shot_begin`: pro gegnerischem Schuss, mit `max_bounces=100` (Default). Auf Ricochet-Servern prallt ein Schuss real 10–30× ab → 10–30 volle Obstacle-Scans **pro Schuss**, bei vielen Spielern ständig.
@@ -45,19 +45,19 @@ Schon im 2-Minuten-Lokallauf auf HIX sind das 468k+484k Ray-Tests — **der grö
 **Risiko:** Niedrig–mittel. Semantik bleibt exakt (Narrow-Phase unverändert); Restrisiko nur in der Kandidaten-Vollständigkeit → durch Äquivalenztest abgedeckt.
 **Verifikation:** Äquivalenztest nach dem Muster `TestLosRayGridEquivalence`/`TestGetFloorZGridEquivalence` (tests/test_performance.py bzw. test_nav_graph.py): auf einer echten Karte (inkl. Pyramiden, Teleporter, rotierte Boxen) einige tausend zufällige Schuss-Parameter simulieren, Segmentlisten alt vs. neu **exakt** vergleichen (0 Mismatch). Bestehende `test_shot_physics.py` muss grün bleiben.
 
-### P2 — `test_obs`-Filterliste vorberechnen (Quick Win)
+### P2 — `test_obs`-Filterliste vorberechnen (Quick Win) — ✅ umgesetzt (Branch `perf/track2`, Commit `0d4ab1c`; `WorldMap.solid_obstacles()` + `solid_obs`-Parameter)
 
 **Problem:** `test_obs = [o for o in obstacles if not o.shoot_through]` ([shot_physics.py:664](bzflag/shot_physics.py#L664)) wird bei **jedem** der 4.749 Aufrufe neu gebaut (List-Comprehension über alle Obstacles).
 **Lösung:** Fällt mit P1 weg (Grid ersetzt die Liste); falls P1 verschoben wird: gefilterte Liste einmalig am `WorldMap` cachen und übergeben.
 **Potenzial:** Klein lokal, moderat auf großen Karten. **Risiko:** Null. **Verifikation:** bestehende Tests.
 
-### P3 — `simulate_shot_path` aus dem `_shots_lock` herausziehen
+### P3 — `simulate_shot_path` aus dem `_shots_lock` herausziehen — ✅ umgesetzt (Branch `perf/track2`, Commit `f4cba41`)
 
 **Problem:** In `_on_shot_begin` ([bzbot.py:1323–1348](bzbot.py#L1323-L1348)) läuft die komplette Schusspfad-Simulation (max_bounces=100 × alle Obstacles) **innerhalb** von `with self._shots_lock:` — und zwar im Recv-Thread. Die 60-Hz-Schleife blockiert derweil in `_resolve_incoming_shots`/`_find_incoming_shot` auf demselben Lock → Tick-Jitter, auf dem Server bei Schuss-Bursts spürbar.
 **Lösung:** Simulation VOR dem Lock ausführen (sie liest nur unveränderliche Weltdaten + lokale Schussparameter), dann kurz locken und `self._shots[...]` und `self._ricochet_paths[...]` **gemeinsam** eintragen (Atomicität von Shot+Pfad bleibt erhalten). Lock-Haltezeit sinkt von Millisekunden auf Mikrosekunden.
 **Potenzial:** Kein CPU-Gewinn, aber Latenz/Jitter der 60-Hz-Schleife (mit-ursächlich für `[nr]`-Symptome unter Last). **Risiko:** Niedrig — reine Umordnung, Atomicität erhalten. **Verifikation:** tests/test_shot_parsing.py, test_hit_detection.py; manueller Lauf mit `--debug-log-tele`.
 
-### P4 — Wahrnehmungs-Memoisierung pro Tick (LoS / Muzzle / Floor-Z)
+### P4 — Wahrnehmungs-Memoisierung pro Tick (LoS / Muzzle / Floor-Z) — ✅ Stufe a umgesetzt (Branch `perf/track2`, Commit `d85c19b`; Stufe b bewusst offen bis Server-Messung)
 
 **Problem:** Pro 60-Hz-Tick werden identische Raycasts/Queries mehrfach mit identischen Eingaben berechnet:
 - `_has_los_to_enemy(target)`: 2× in `_execute_combat_move` ([bzbot_ai.py:1460](bzbot_ai.py#L1460), [1514](bzbot_ai.py#L1514)) + 1× in `_maybe_shoot_standard` ([bzbot_ai.py:3641](bzbot_ai.py#L3641)) — bis zu 3× pro Tick.
@@ -127,25 +127,25 @@ Vom User erwähnt (Kandidaten: `ray_pyramid_hit`, `ray_box_hit`, `_time_ray_hits
 
 Sortiert nach Schwere. „Verifiziert" = im Code nachvollzogen, kein Verdacht. Der Bot hat keine *bekannten* Bugs — die folgenden Punkte sind latent (treten nur unter bestimmten Bedingungen auf) oder betreffen stille Ungenauigkeiten. Die 🔴-Punkte sind zugleich Performance-relevant (F3 direkt, F2 als Crash-Ursache) und laufen deshalb im Roadmap-Track 1 **vor** dem Performance-Track.
 
-### F1 — GM-Bedrohungsposition wird doppelt extrapoliert (verifizierter latenter Bug) 🔴
+### F1 — GM-Bedrohungsposition wird doppelt extrapoliert (verifizierter latenter Bug) 🔴 — ✅ umgesetzt (Branch `bugfix/track1`, Commit `5c3fe0f`; zusätzlich `_compute_dodge_dir` + J1a-Elapsed-Abzug GM-bereinigt)
 
 **Befund:** Für GM-Schüsse wird `shot.pos` laufend auf die AKTUELLE Raketenposition gesetzt — durch Integration in `_resolve_incoming_shots` ([bzbot.py:624–626](bzbot.py#L624)) und durch `_on_gm_update` ([bzbot.py:1510](bzbot.py#L1510)). `Shot.position_at(t)` rechnet aber `pos + vel * (t − fire_time)` ([bzbot.py:94–98](bzbot.py#L94)) — für GM wird die **gesamte bisherige Flugzeit ein zweites Mal** aufaddiert. `_find_incoming_shot` ruft für GM-Schüsse genau dieses `position_at(now)` auf ([bzbot_ai.py:2151](bzbot_ai.py#L2151), kein GM-Sonderfall) → der Dodge sieht die Rakete bei 100 u/s nach 1s Flugzeit ~100u vor ihrer echten Position. Häufige Folge: `t_rel_raw < 0` → „entfernt sich" → **GM wird beim Ausweichen ignoriert** (oder Phantom-Dodge).
 **Zusatzbefund (gleicher Komplex):** Auf Teleporter-Karten cached `_on_shot_begin` für GM einen **geraden** `simulate_shot_path` (`_tele_route` greift, GM ist nicht ausgenommen, [bzbot.py:1333–1338](bzbot.py#L1333)) → `_find_incoming_shot` überspringt den GM dann im Direkt-Zweig ([bzbot_ai.py:2149](bzbot_ai.py#L2149)) und bewertet stattdessen den falschen geraden Pfad einer gelenkten Rakete.
 **Fix:** (a) In `_find_incoming_shot` für `shot.is_gm` direkt `shot.pos` verwenden (Position ist aktuell, keine Extrapolation); (b) in `_on_shot_begin` GM von `_tele_route`/Pfad-Cache ausnehmen (`and not shot.is_gm`).
 **Risiko des Fixes:** Gering; Verhalten gegen GM wird korrekter (= Verhaltensänderung, aber in Richtung Spezifikation FSD-Dodge). **Test:** Unit-Test: GM 50u entfernt, vel auf Bot zu, 1s Flugzeit simuliert → `_find_incoming_shot` muss den GM liefern (schlägt heute fehl).
 
-### F2 — `players`/`flags`-Dicts: Iteration ohne Lock über Thread-Grenze (verifiziertes Race) 🔴
+### F2 — `players`/`flags`-Dicts: Iteration ohne Lock über Thread-Grenze (verifiziertes Race) 🔴 — ✅ umgesetzt (Branch `bugfix/track1`, Commit `4646646`; Konvention in DEVELOPER.md §2 dokumentiert)
 
 **Befund:** Message-Handler laufen im Recv-Thread (client `_dispatch`); `_on_add_player`/`_on_remove_player` mutieren `self.players`, `_on_flag_update`/Grab/Drop mutieren `self.flags`. Die Game-Loop (Main-Thread) iteriert gleichzeitig ohne Lock: [bzbot.py:728](bzbot.py#L728) (`_check_steamroller`), [bzbot_ai.py:466](bzbot_ai.py#L466) (`_genocide_multikill_possible`), [bzbot_ai.py:2247](bzbot_ai.py#L2247) (`_find_target_player`), analoge Stellen für `self.flags` (`_flags_on_route_all`, `_new_target`). Join/Leave eines Spielers während der Iteration → `RuntimeError: dictionary changed size during iteration` → **die Game-Loop (Main-Thread) stirbt, der Bot-Prozess crasht**. Selten (Fenster = µs, Trigger = Join/Leave), aber real — und ein plausibler Kandidat für sporadische, bisher unerklärte Bot-Abstürze unter Server-Betrieb.
 **Fix (minimal-invasiv):** An allen Iterationsstellen über Thread-geteilte Dicts Snapshot ziehen: `for pid, info in list(self.players.items())`. Kein neues Lock nötig (CPython-GIL macht die Snapshot-Erstellung atomar genug). Grep-Checkliste: alle `self.players.items()/values()` und `self.flags.items()/values()`-Iterationen außerhalb des Recv-Threads.
 **Risiko:** Null (Semantik identisch, Kopie ist Momentaufnahme). **Test:** deterministisch kaum testbar → Begründungskommentar an den Stellen + Konvention in DEVELOPER.md.
 
-### F3 — `_ricochet_paths`-Leak bei Timeout-Cleanup (verifiziert; frisst Server-CPU über Uptime) 🔴
+### F3 — `_ricochet_paths`-Leak bei Timeout-Cleanup (verifiziert; frisst Server-CPU über Uptime) 🔴 — ✅ umgesetzt (Branch `bugfix/track1`, Commit `10ba41e`)
 
 **Befund:** `_cleanup_shots` ([bzbot.py:2045–2049](bzbot.py#L2045)) entfernt abgelaufene Schüsse nur aus `self._shots`, NICHT aus `self._ricochet_paths`. `_resolve_incoming_shots` räumt zwar beide — läuft aber nur solange `self.alive`. Während Tod/Explosion/Respawn (≥3–8s, häufig!) ablaufende Rico-/Tele-Schüsse hinterlassen verwaiste Segmentlisten (bis ~100 Segmente bei `max_bounces=100`). Diese werden erst überschrieben, wenn dieselbe `(shooter, shot_id)`-Kombination wiederkehrt — Shot-IDs wachsen aber (16-Bit-Raum). `_find_incoming_shot` iteriert bei jedem Threat-Check über **alle** Einträge ([bzbot_ai.py:2187](bzbot_ai.py#L2187)) → Speicher UND CPU wachsen mit der Laufzeit. Bots auf dem Server laufen stundenlang → schleichende CPU-Degradation, passt zum Symptom „Server 30–50%, lokal 1%".
 **Fix (2 Zeilen):** In `_cleanup_shots` im selben Durchlauf `self._ricochet_paths.pop(k, None)`. **Risiko:** Null. **Test:** Unit-Test: Schuss einfügen + Pfad cachen, `is_expired` erzwingen, `_cleanup_shots` → beide Dicts leer.
 
-### F4 — Ungeklemmtes `dt_r`: Tunneling & Geister-Durchflüge bei Stalls 🟡
+### F4 — Ungeklemmtes `dt_r`: Tunneling & Geister-Durchflüge bei Stalls 🟡 — ✅ umgesetzt (Branch `bugfix/track1`, Commit `5d1597d`; inkl. optionaler Segment-Anfang-Skip-Härtung)
 
 **Befund:** [bzbot.py:507](bzbot.py#L507) `dt_r = now - last_tick` ohne Obergrenze. Bei Stalls (GC, Async-Plan-Übernahme, Netz-Hänger, Container-Scheduling — auf dem Server wahrscheinlicher als lokal) entsteht ein großer Einzelschritt mit drei Folgeproblemen:
 1. `pos += vel * dt` springt viele Einheiten → `_apply_obstacle_bounds` prüft nur den Zielpunkt → Tunneln durch dünne Wände.
@@ -319,7 +319,7 @@ Startpunkt: erst nach Abschluss der Roadmap-Tracks 1–3 (s. „Wechselwirkungen
 3. **W3 — `_on_set_var` tabellen-getrieben:** Die 345-Zeilen-Kette durch eine Dispatch-Tabelle ersetzen: `_SETVAR_HANDLERS: dict[bytes, Callable[[BZBot, float|str], None]]` bzw. für die Mehrheit der Fälle (Float → Attribut) eine Mapping-Tabelle `var_name → (attr_name, cast, optionaler Nachlauf-Hook)`. Sonderfälle (z.B. `_jumpVelocity` → `set_physics`, Flag-Listen) bleiben eigene kleine Funktionen. Das ist der einzige Schritt in Teil 3 mit echter Code-Umformung → eigener Test, der alle heute behandelten Variablen einmal durchschickt und die resultierenden Attribute mit dem Alt-Verhalten vergleicht (Snapshot-Test VOR dem Refactor schreiben!). Dabei die in Teil 2/F8 notierte fehlende `_srRadiusMult`-Nachführung ergänzen.
 4. **W4 — `BZBotAI` in Mixins zerlegen:** pro Commit EIN Mixin-Modul herauslösen (Methoden unverändert verschieben, Imports nachziehen). Empfohlene Reihenfolge (nach Kopplungsgrad aufsteigend): capabilities → physics → perception → shooting → targeting → tactics → navigation → combat → states.
 5. **W5 — `bzbot.py` zerlegen:** handlers.py, hit_detection.py, core.py; `bzbot.py` wird dünner Entry-Point + Kompat-Re-Export. `BZBOT_SCRIPT` in [bot_manager.py:41](bot_manager.py#L41) zeigt weiterhin auf `bzbot.py` → Manager unverändert.
-6. **W6 — `ObstacleGrid` → `bzflag/obstacle_grid.py`** (Voraussetzung für P1; läuft als Teil des Performance-Tracks VOR allen anderen W-Schritten). `nav_graph.py` re-exportiert (`from .obstacle_grid import ObstacleGrid`), damit bestehende Importe/Tests weiterlaufen.
+6. **W6 — `ObstacleGrid` → `bzflag/obstacle_grid.py`** (Voraussetzung für P1; läuft als Teil des Performance-Tracks VOR allen anderen W-Schritten). `nav_graph.py` re-exportiert (`from .obstacle_grid import ObstacleGrid`), damit bestehende Importe/Tests weiterlaufen. — ✅ umgesetzt (Branch `perf/track2`, Commit `c6818b1`; inkl. `TANK_HALF_WIDTH` als kanonische Definition dort)
 7. **W7 — `__init__` gliedern:** Die 300 Zeilen in benannte private Methoden gruppieren (`_init_network()`, `_init_tank_state()`, `_init_ai_state()`, `_init_flags()`, `_init_nav()`, `_init_debug()`), aufgerufen aus `__init__` in fester Reihenfolge. Reine Umsortierung, keine Umbenennung von Attributen.
 
 ### Weitere Architektur-Empfehlungen (geringerer Dringlichkeit)
@@ -350,7 +350,7 @@ Startpunkt: erst nach Abschluss der Roadmap-Tracks 1–3 (s. „Wechselwirkungen
 Die Tracks spiegeln die Themen-Priorität (Performance → Fehlerpotenzial → Wartbarkeit) und laufen **sequenziell**: Der Struktur-Track kommt bewusst ganz ans Ende, damit die Datei:Zeile-Referenzen und Review-Befunde dieses Plans bis dahin gültig bleiben (s. Teil 3, „Wechselwirkungen"). Für Junior/Sonnet-Umsetzung: **ein Punkt = ein Branch/PR**, Suite (886 Tests) nach jedem Punkt grün.
 
 1. **Track 1 — Sofort-Bugfixes (klein, hohes Server-Potenzial; F3 ist faktisch auch eine Performance-Maßnahme):** F3 (Rico-Leak, 2 Zeilen) → F2 (Dict-Snapshots) → F1 (GM-Dodge) → F4 (dt-Clamp).
-2. **Track 2 — Performance:** P2 → P3 → P4a → W6 (ObstacleGrid-Split, aus dem Struktur-Track vorgezogen) → P1 (Grid in simulate_shot_path) → **Server-Messung** → danach je nach Befund P5, P6, P7, P4b, P8, P9.
+2. **Track 2 — Performance:** P2 → P3 → P4a → W6 (ObstacleGrid-Split, aus dem Struktur-Track vorgezogen) → P1 (Grid in simulate_shot_path) → **Server-Messung** → danach je nach Befund P5, P6, P7, P4b, P8, P9. — ✅ P2/P3/P4a/W6/P1 umgesetzt (Branch `perf/track2`); **nächster Schritt: Server-Messung (User)**, erst danach P5+ entscheiden.
 3. **Track 3 — Konsistenz (restliches Fehlerpotenzial; bewusst VOR dem Struktur-Track, weil die Fixes Grep-basiert über den heutigen Dateistand laufen):** F5 → F6 (Radar an `world_half` koppeln, halbe Weltgröße bleibt) → F7 → F9 (= W9; Helper wandern später beim Split als Einheit mit) → F8 (distanzabhängiges Feuer-Gate als eigener PR + Doku-Punkte).
 4. **Track 4 — Struktur (Wartbarkeit, zuletzt):** W1 (constants.py, zusammen mit W8-Tabelle) → W2 (models/util) → W4 (Mixin-Split, 9 Einzel-Commits) → W5 (bzbot.py dünn) → W7 → W3 (_on_set_var-Tabelle, mit Snapshot-Test). Zu diesem Zeitpunkt sind alle P/F-Punkte abgeschlossen → keine Referenz-Entwertung; sollte doch ein Punkt offen sein, gilt Regel 4 aus „Wechselwirkungen" (Referenzen im Plan pro W-PR nachziehen, Landkarten-Tabelle nutzen).
 

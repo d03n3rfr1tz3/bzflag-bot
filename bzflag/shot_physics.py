@@ -12,10 +12,13 @@ Koordinaten-Konvention: identisch zu world_map.py (BZFlag big-endian, Z nach obe
 """
 
 import math
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, TYPE_CHECKING
 from collections import namedtuple
 
 from .world_map import BoxObstacle, TeleporterObstacle
+
+if TYPE_CHECKING:   # nur Typ-Annotation (obs_grid) — kein Laufzeit-Import nötig
+    from .obstacle_grid import ObstacleGrid
 
 # Segment eines Schuss-Pfades (alle absoluten Zeitstempel in Sekunden)
 Segment = namedtuple('Segment', ['px', 'py', 'pz',   # Startpunkt
@@ -627,7 +630,9 @@ def simulate_shot_path(pos: Tuple[float, float, float],
                         wall_height: float = 6.15,
                         teleporters: Optional[List[TeleporterObstacle]] = None,
                         link_map: Optional[dict] = None,
-                        tele_log: Optional[list] = None) -> List[Segment]:
+                        tele_log: Optional[list] = None,
+                        solid_obs: Optional[List[BoxObstacle]] = None,
+                        obs_grid: Optional["ObstacleGrid"] = None) -> List[Segment]:
     """
     Port von SegmentedShotStrategy::makeSegments() + Teleporter-Querung.
     Simuliert den vollständigen Schuss-Pfad inkl. Abpraller und Teleporter.
@@ -660,8 +665,11 @@ def simulate_shot_path(pos: Tuple[float, float, float],
                         pos[2] + vel[2] * lifetime,
                         fire_time, fire_time + lifetime)]
 
-    # Alle Obstacles die Schüsse ablenken können (shoot_through → transparent)
-    test_obs = [o for o in obstacles if not o.shoot_through]
+    # Alle Obstacles die Schüsse ablenken können (shoot_through → transparent).
+    # solid_obs = vorgefilterte Liste (WorldMap.solid_obstacles()) — erspart den
+    # Filter über alle Obstacles pro Aufruf; ohne solid_obs unverändertes Verhalten.
+    test_obs = solid_obs if solid_obs is not None else \
+        [o for o in obstacles if not o.shoot_through]
 
     ox, oy, oz = pos[0], pos[1], pos[2]
     # Geschwindigkeitsvektor als Richtung — t aus Intersection-Tests ist in Sekunden
@@ -687,8 +695,19 @@ def simulate_shot_path(pos: Tuple[float, float, float],
                 best_n = (wnx, wny, wnz)
                 best_tele = None
 
-        # Obstacles
-        for obs in test_obs:
+        # Obstacles — Broad-Phase (P1): nur Kandidaten der in XY überflogenen
+        # Zellen statt aller Obstacles. Exakt äquivalent: die DDA liefert jede
+        # Box, deren gepolsterte AABB eine durchquerte Zelle berührt (keine
+        # False Negatives, s. ObstacleGrid-Docstring); Hits jenseits time_left,
+        # die der Query-Strecke fehlen könnten, enden in beiden Pfaden im
+        # identischen „Segment bis Lifetime-Ende"-Zweig (best_t > time_left).
+        if obs_grid is not None:
+            cand_obs = obs_grid.query_ray(ox, oy,
+                                          ox + ddx * time_left,
+                                          oy + ddy * time_left)
+        else:
+            cand_obs = test_obs
+        for obs in cand_obs:
             if obs.is_pyramid:
                 result = ray_pyramid_hit(ox, oy, oz, ddx, ddy, ddz, obs)
             else:

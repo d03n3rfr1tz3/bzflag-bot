@@ -15,6 +15,7 @@ from bzflag.shot_physics import (simulate_shot_path,
                                   build_link_map,
                                   _segment_hits_obb_3d)
 from bzflag.world_map import teleporter_solid_boxes
+from bzflag.obstacle_grid import ObstacleGrid, LOS_GRID_PAD
 from bzflag.protocol import (
     DEFAULT_PORT, PLAYER_TYPE_TANK, PLAYER_TYPE_COMPUTER,
     TEAM_AUTOMATIC, TEAM_OBSERVER,
@@ -295,6 +296,7 @@ class BZBot(BZBotAI):
         self.human_count    = 0
         self.observer_count = 0
         self._world_map = None   # Optional[WorldMap] — gesetzt nach Welt-Download
+        self._shot_grid = None   # Optional[ObstacleGrid] — Broad-Phase für simulate_shot_path (P1)
         self._link_map = {}      # face-Index → Ziel-face-Index (Teleporter), aus _world_map.links
         self._tele_solid_boxes: list = []  # Teleporter-Posts+Crossbar als BoxObstacle (Kollision)
         self._teleporting_until = 0.0      # P3-NAV-02: PS_TELEPORTING-Ende + Re-Trigger-Sperre
@@ -417,6 +419,11 @@ class BZBot(BZBotAI):
         self._next_server_update: float = 0.0
         self._server_update_interval: float = 1.0 / SERVER_UPDATE_RATE_HZ
         self._tick_count: int = 0
+        # P4a: Per-Tick-Memo für teure, mehrfach pro Tick identisch aufgerufene
+        # Wahrnehmungs-Queries (_get_floor_z/_has_los_to_enemy/_muzzle_clear).
+        # Keys enthalten alle Eingaben (Position etc.) → reiner Funktions-Memo;
+        # wird am Anfang jedes Game-Loop-Ticks geleert. Nur Main-Thread.
+        self._tick_memo: Dict = {}
 
         self._running          = False
         self._stop_event       = threading.Event()
@@ -519,6 +526,7 @@ class BZBot(BZBotAI):
             if not self.client.udp_active:
                 self.client.retry_udp_link()
             self._tick_count += 1
+            self._tick_memo.clear()   # P4a: Wahrnehmungs-Memo gilt genau einen Tick
             ai_tick = (self._tick_count % (UPDATE_RATE_HZ // AI_RATE_HZ) == 0)
             if self.alive:
                 self._resolve_incoming_shots(now, dt_r)
@@ -879,10 +887,16 @@ class BZBot(BZBotAI):
     def _on_world_ready(self, world_map) -> None:
         """Callback nach Welt-Download: speichert WorldMap und baut NavGraph."""
         self._world_map = world_map
+        self._shot_grid = None   # nie stale zur alten Welt (Rebuild unten)
         if world_map is None:
             logger.warning("[%s] Karten-Wissen nicht verfügbar (Parse-Fehler)", self.callsign)
             return
         self._link_map = build_link_map(world_map.links)
+        # P1: Broad-Phase-Grid für simulate_shot_path — einmalig pro Weltladen aus
+        # den soliden Obstacles. Kleines Pad genügt: die Ray-Narrow-Phase
+        # (ray_box_hit/ray_pyramid_hit) hat Margin 0, das Pad dient nur der
+        # Float-Robustheit an Zellgrenzen (wie beim LoS-Grid).
+        self._shot_grid = ObstacleGrid(world_map.solid_obstacles(), pad=LOS_GRID_PAD)
         # P3-NAV-02: solide Teleporter-Teile (Posts + Crossbar) für die reaktive Kollision cachen.
         self._tele_solid_boxes = [box for t in world_map.teleporters
                                   for box in teleporter_solid_boxes(t)]
@@ -1333,54 +1347,64 @@ class BZBot(BZBotAI):
                     is_sw=(flag_type == b"SW"),
                     is_thief=(flag_type == b"TH"),
                     flag_abbr=flag_type)
+        # P3: Schusspfad-Simulation VOR dem Lock — sie liest nur statische
+        # Weltdaten und lokale Schussparameter. Im Lock würde sie die 60-Hz-
+        # Schleife (_resolve_incoming_shots/_find_incoming_shot) bei Schuss-
+        # Bursts millisekundenlang blockieren; so bleibt die Haltezeit bei
+        # Mikrosekunden und Shot+Pfad landen weiterhin atomar in beiden Dicts.
+        _is_pz = bool(self.players.get(shooter, None) and self.players[shooter].is_phantom_zoned)
+        # Teleporter transportieren jeden Schuss (auch Nicht-Ricochet) → Pfad auch dann
+        # vorberechnen, wenn die Karte Teleporter hat. Sonst landet ein nicht-ricochet
+        # Laser/Thief im geraden-Linien-else-Zweig und „sieht" den Teleporter nie.
+        # wand-durchdringende Schüsse (PhantomZone, Super Bullet) bleiben außen
+        # vor — die wandbewusste Simulation würde ihren Pfad fälschlich an Wänden stoppen;
+        # ihr alter Pfad (kein Cache → gerade Linie) ist für sie korrekt.
+        _phases_walls = _is_pz or shot.flag_abbr == b"SB"
+        # GM bekommt KEINEN Pfad-Cache: die Rakete lenkt, ein vorberechneter
+        # gerader Pfad wäre falsch — und _find_incoming_shot würde den GM wegen
+        # des Cache-Eintrags im Direkt-Zweig überspringen und stattdessen den
+        # falschen Pfad bewerten. Die live nachgeführte shot.pos (Integration
+        # in _resolve_incoming_shots + MsgGMUpdate) ist für GM die Wahrheit.
+        _tele_route = (self._world_map is not None
+                       and bool(self._world_map.teleporters)
+                       and not _phases_walls and not shot.is_gm)
+        path_segs = None
+        _tlog = [] if self._debug_log_tele else None
+        if (self._world_map is not None
+                and (_tele_route
+                     or _can_ricochet_shot(shot.flag_abbr, shot.is_gm, shot.is_sw,
+                                           self._server_ricochet, is_phantom_zoned=_is_pz))):
+            path_segs = simulate_shot_path(
+                (px, py, pz), (vx, vy, vz), shot.fire_time, shot.lifetime,
+                shot.flag_abbr, self._world_map.boxes,
+                self.world_half, self._server_ricochet,
+                wall_height=self._wall_height,
+                teleporters=self._world_map.teleporters,
+                link_map=self._link_map,
+                tele_log=_tlog,
+                solid_obs=self._world_map.solid_obstacles(),
+                obs_grid=self._shot_grid,
+            )
         with self._shots_lock:
             self._shots[(shooter, shot_id)] = shot
-            _is_pz = bool(self.players.get(shooter, None) and self.players[shooter].is_phantom_zoned)
-            # Teleporter transportieren jeden Schuss (auch Nicht-Ricochet) → Pfad auch dann
-            # vorberechnen, wenn die Karte Teleporter hat. Sonst landet ein nicht-ricochet
-            # Laser/Thief im geraden-Linien-else-Zweig und „sieht" den Teleporter nie.
-            # wand-durchdringende Schüsse (PhantomZone, Super Bullet) bleiben außen
-            # vor — die wandbewusste Simulation würde ihren Pfad fälschlich an Wänden stoppen;
-            # ihr alter Pfad (kein Cache → gerade Linie) ist für sie korrekt.
-            _phases_walls = _is_pz or shot.flag_abbr == b"SB"
-            # GM bekommt KEINEN Pfad-Cache: die Rakete lenkt, ein vorberechneter
-            # gerader Pfad wäre falsch — und _find_incoming_shot würde den GM wegen
-            # des Cache-Eintrags im Direkt-Zweig überspringen und stattdessen den
-            # falschen Pfad bewerten. Die live nachgeführte shot.pos (Integration
-            # in _resolve_incoming_shots + MsgGMUpdate) ist für GM die Wahrheit.
-            _tele_route = (self._world_map is not None
-                           and bool(self._world_map.teleporters)
-                           and not _phases_walls and not shot.is_gm)
-            if (self._world_map is not None
-                    and (_tele_route
-                         or _can_ricochet_shot(shot.flag_abbr, shot.is_gm, shot.is_sw,
-                                               self._server_ricochet, is_phantom_zoned=_is_pz))):
-                _tlog = [] if self._debug_log_tele else None
-                self._ricochet_paths[(shooter, shot_id)] = simulate_shot_path(
-                    (px, py, pz), (vx, vy, vz), shot.fire_time, shot.lifetime,
-                    shot.flag_abbr, self._world_map.boxes,
-                    self.world_half, self._server_ricochet,
-                    wall_height=self._wall_height,
-                    teleporters=self._world_map.teleporters,
-                    link_map=self._link_map,
-                    tele_log=_tlog,
-                )
-                if self._debug_log_tele:
-                    if _tlog:
-                        teles = self._world_map.teleporters
-                        for e_ti, e_face, d_ti, d_face, ep, xp, ain, aout in _tlog:
-                            en = teles[e_ti].name or f"/t{e_ti}"
-                            xn = teles[d_ti].name or f"/t{d_ti}"
-                            logger.debug(
-                                "[%s] Tele: Schuss %d/%d  %s:%s → %s:%s  "
-                                "ein(%.1f,%.1f,%.1f)@%.0f°  aus(%.1f,%.1f,%.1f)@%.0f°",
-                                self.callsign, shooter, shot_id,
-                                en, "fb"[e_face], xn, "fb"[d_face],
-                                ep[0], ep[1], ep[2], math.degrees(ain),
-                                xp[0], xp[1], xp[2], math.degrees(aout))
-                    else:
-                        logger.debug("[%s] Tele: Schuss %d/%d NICHT teleportiert",
-                                     self.callsign, shooter, shot_id)
+            if path_segs is not None:
+                self._ricochet_paths[(shooter, shot_id)] = path_segs
+        if path_segs is not None and self._debug_log_tele:
+            if _tlog:
+                teles = self._world_map.teleporters
+                for e_ti, e_face, d_ti, d_face, ep, xp, ain, aout in _tlog:
+                    en = teles[e_ti].name or f"/t{e_ti}"
+                    xn = teles[d_ti].name or f"/t{d_ti}"
+                    logger.debug(
+                        "[%s] Tele: Schuss %d/%d  %s:%s → %s:%s  "
+                        "ein(%.1f,%.1f,%.1f)@%.0f°  aus(%.1f,%.1f,%.1f)@%.0f°",
+                        self.callsign, shooter, shot_id,
+                        en, "fb"[e_face], xn, "fb"[d_face],
+                        ep[0], ep[1], ep[2], math.degrees(ain),
+                        xp[0], xp[1], xp[2], math.degrees(aout))
+            else:
+                logger.debug("[%s] Tele: Schuss %d/%d NICHT teleportiert",
+                             self.callsign, shooter, shot_id)
         # (d) Wahrnehmbarer Schuss verrät die Schützen-Position zu Schussbeginn: erzwungenes
         # Einmal-Update auf den Schuss-Ursprung (x,y; z ist Mündungshöhe) — umgeht die Radar-
         # Aufmerksamkeit, deckt so auch sonst unsichtbare (ST/CL) Gegner kurz auf.

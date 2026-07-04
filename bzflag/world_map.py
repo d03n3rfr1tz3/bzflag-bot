@@ -11,7 +11,7 @@ Koordinaten-Konvention (aus BZFlag-Quellcode BoxBuilding::setExtents):
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 @dataclass
@@ -72,6 +72,17 @@ class WorldMap:
     links: List[Tuple[int, int]] = field(default_factory=list)  # (from_face, to_face)
     world_half: float = 200.0
     world_hash: str = ""
+    _solid_cache: Optional[List[BoxObstacle]] = field(default=None, repr=False, compare=False)
+
+    def solid_obstacles(self) -> List[BoxObstacle]:
+        """Nicht-durchschießbare Obstacles, einmalig gefiltert und gecacht.
+
+        Die Karte ist nach dem Parsen statisch — der Cache erspart
+        simulate_shot_path den Filter über alle Obstacles pro Aufruf
+        (auf großen Karten tausendfach pro Sekunde)."""
+        if self._solid_cache is None:
+            self._solid_cache = [o for o in self.boxes if not o.shoot_through]
+        return self._solid_cache
 
 
 # ---------------------------------------------------------------------------
