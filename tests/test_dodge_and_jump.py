@@ -982,7 +982,7 @@ class TestZAttackJump:
         make_player(bot, pid=2, pos=(40.0, 0.0, 9.0))  # z=9: HIT_RADIUS < 9 < max_jump_h
         bot.target_player = 2
         now = time.monotonic()
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0   # < 0.5 → kein Skip
             mock_rng.uniform.return_value = 0.0  # kein Jitter
             result = bot._check_z_attack_jump(now)
@@ -1023,7 +1023,7 @@ class TestZAttackJump:
         bot.target_player = 2
         now = time.monotonic()
         bot._next_shoot = now + 5.0   # Schuss erst in 5s bereit, t_fire ≈ 0.55s
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0
             result = bot._check_z_attack_jump(now)
         assert result is False
@@ -1086,7 +1086,7 @@ class TestZAttackJump:
         make_player(bot, pid=2, pos=(40.0, 0.0, 45.0))  # z_diff=15: HIT_RADIUS < 15 < max_jump_h
         bot.target_player = 2
         now = time.monotonic()
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0   # < 0.5 → kein Skip
             mock_rng.uniform.return_value = 0.0  # kein Jitter
             result = bot._check_z_attack_jump(now)
@@ -1172,7 +1172,7 @@ class TestTactJumpRestrictionsTJ1:
         # enemy faces bot (azimuth ≈ 190° → looking back toward origin)
         self._setup(bot, ep, enemy_azimuth=math.radians(190))
         now = time.monotonic()
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0   # 0.0 >= 0.3 → False → kein Skip
             result = bot._check_tactical_jump(now)
         assert result is True
@@ -1239,7 +1239,7 @@ class TestTactJumpRestrictionsTJ1:
         p = self._setup(bot, ep, enemy_azimuth=math.radians(190))
         p.flag = "GM"
         now = time.monotonic()
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0   # 0.0 >= 0.3 → False → kein Skip
             result = bot._check_tactical_jump(now)
         assert result is True
