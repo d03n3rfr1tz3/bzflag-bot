@@ -504,7 +504,7 @@ class TestLaserZAxis:
         p = make_player(bot, 2, pos=(50.0, 0.0, 10.0))  # z=10 in ZJ1-Zone
         p.vel = [0.0, 0.0, 0.0]
         bot._next_shoot = 0.0
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.shooting.random") as mock_rng:
             mock_rng.random.return_value = 0.1   # 0.1 < 0.3 → Warnschuss
             bot._maybe_shoot(time.monotonic())
         bot.client.send.assert_called()
@@ -520,7 +520,7 @@ class TestLaserZAxis:
         p = make_player(bot, 2, pos=(50.0, 0.0, 10.0))
         p.vel = [0.0, 0.0, 0.0]
         bot._next_shoot = 0.0
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.shooting.random") as mock_rng:
             mock_rng.random.return_value = 0.5   # 0.5 >= 0.3 → kein Schuss
             bot._maybe_shoot(time.monotonic())
         bot.client.send.assert_not_called()
@@ -716,7 +716,7 @@ class TestMultiShot:
         bot.target_player = 2
 
         with patch.object(bot, "_has_los_to_enemy", return_value=False), \
-             patch("bzbot_ai.random") as mock_rng:
+             patch("bot.ai.shooting.random") as mock_rng:
             mock_rng.random.return_value = 0.0  # 0.0 < 0.15 → würde normalerweise schießen
             bot._maybe_shoot(now)
         # Letzter Slot → Konservierung → kein Schuss
@@ -776,7 +776,7 @@ class TestWarningShotNoBurst:
         bot.target_player = 2
 
         with patch.object(bot, "_has_los_to_enemy", return_value=False), \
-             patch("bzbot_ai.random") as mock_rng:
+             patch("bot.ai.shooting.random") as mock_rng:
             mock_rng.random.return_value = 0.0  # 0.0 <= 0.15 → Warnschuss
             mock_rng.gauss.return_value = 0.0
             bot._maybe_shoot(now)
@@ -803,7 +803,7 @@ class TestWarningShotNoBurst:
         bot.target_player = 2
 
         with patch.object(bot, "_has_los_to_enemy", return_value=True), \
-             patch("bzbot_ai.random") as mock_rng:
+             patch("bot.ai.shooting.random") as mock_rng:
             mock_rng.random.return_value = 0.1   # 0.1 < 0.3 → Warnschuss
             mock_rng.gauss.return_value = 0.0
             bot._maybe_shoot(now)
@@ -829,7 +829,7 @@ class TestWarningShotNoBurst:
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
 
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.shooting.random") as mock_rng:
             mock_rng.random.return_value = 0.1   # 0.1 < 0.3 → Warnschuss
             mock_rng.gauss.return_value = 0.0
             bot._maybe_shoot(now)

@@ -326,10 +326,10 @@ def test_compute_ricochet_aim_high_to_low_needs_z_tol(bot, monkeypatch):
     bot._link_map = build_link_map(wm.links)
     make_player(bot, 2, pos=(370.0, 370.0, 0.0))   # Bodengegner entlang der Austritts-Diagonale
 
-    monkeypatch.setattr(bzbot_ai, "TELE_AIM_Z_TOL", 0.0)
+    monkeypatch.setattr("bot.ai.shooting.TELE_AIM_Z_TOL", 0.0)
     assert bot._compute_ricochet_aim(2, None) is None, "ohne Z-Spielraum: Schuss tritt zu hoch aus"
 
-    monkeypatch.setattr(bzbot_ai, "TELE_AIM_Z_TOL", 1.0)
+    monkeypatch.setattr("bot.ai.shooting.TELE_AIM_Z_TOL", 1.0)
     result = bot._compute_ricochet_aim(2, None)
     assert result is not None and result[1] is True   # mit Z-Spielraum: Tor-Schuss gefunden
 
