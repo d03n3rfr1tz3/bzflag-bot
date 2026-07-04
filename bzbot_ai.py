@@ -13,7 +13,6 @@ import logging
 import struct
 import threading
 import time
-from enum import Enum, auto
 from typing import Optional, Tuple
 
 from bzflag.protocol import MsgGrabFlag, MsgShotBegin
@@ -27,42 +26,12 @@ logger = logging.getLogger("bzbot")
 # Konstanten → bot/constants.py (Track 4/W1); Stern-Import hält alle bisherigen
 # Namen (inkl. _TINY_FACTOR/_NARROW_HW via __all__) im Modul-Namespace.
 from bot.constants import *  # noqa: F401,F403
-
-
-# ── Winkel-Hilfsfunktionen ────────────────────────────────────────────────
-
-def _angle_diff(target: float, current: float) -> float:
-    """Kürzeste Winkeldifferenz in (-π, π]: Richtung von current nach target.
-    Genau 180° gibt -π zurück (CW bevorzugt bei Halbkreis-Grenzfall)."""
-    d = (target - current) % (2 * math.pi)
-    return d - 2 * math.pi if d >= math.pi else d
-
-
-def _wrap(a: float) -> float:
-    """Normalisiert Winkel auf [-π, π]."""
-    while a >  math.pi: a -= 2 * math.pi
-    while a < -math.pi: a += 2 * math.pi
-    return a
+# Winkel-Helfer + AIState → bot/util.py bzw. bot/models.py (Track 4/W2)
+from bot.util import _angle_diff, _wrap  # noqa: F401
+from bot.models import AIState
 
 
 # ── State Machine ─────────────────────────────────────────────────────────
-
-class AIState(Enum):
-    DEAD         = auto()  # tot, wartet auf Spawn
-    IDLE         = auto()  # passiv — keine Menschen auf Server
-    SEEKING      = auto()  # aktiv — Ziel oder Flaggen suchen
-    COMBAT       = auto()  # Kampf — Abstandshaltung + Schießen
-    EVADING      = auto()  # Ausweichen — Schuss im Anflug (timer-basiert)
-    JUMP_WINDUP  = auto()  # Übersprung-Wind-Up (committed, ~80–120ms)
-    JUMPING      = auto()  # in der Luft (Physik-committed, kein AI-Block)
-    Z_ATTACK     = auto()  # ZJ1-Höhenangriff: nur COMBAT→Z_ATTACK→COMBAT
-    DODGE_JUMP   = auto()  # Ausweichsprung — defensiver Sprung gegen eingehenden Schuss
-    LANDING_SHOT = auto()  # springenden Gegner auf Landepunkt anvisieren
-    NAV_JUMP     = auto()  # Navigationssprung — auf/über Gebäude (Pfad-Ausführung)
-    NAV_JUMP_ALIGN = auto()  # Vor NAV_JUMP: Tank auf Sprungziel-Azimuth ausrichten
-    NAV_TELE     = auto()  # Endanflug: direkt in die Teleporter-Mitte fahren, bis Querung/Revert
-    FALLING      = auto()  # Unkontrollierter Fall vom Dach (kein Lenken erlaubt)
-
 
 class BZBotAI:
     """Mixin: Bewegungs- und KI-Logik für BZBot.

@@ -2,11 +2,11 @@
 """BZFlag-2.4-Bot: Protokoll, Netzwerk, Spielmechanik, Hit-Detection.
 
 Bewegungs- und KI-Logik → bzbot_ai.py (BZBotAI-Mixin).
-Konstanten, AIState-Enum und Hilfsfunktionen ebenfalls in bzbot_ai.py.
+Konstanten → bot/constants.py; Shot/PlayerInfo/FlagInfo/AIState → bot/models.py;
+Geometrie-Helfer → bot/util.py (Track 4/W1+W2).
 """
 
 import argparse, collections, json, logging, math, random, re, struct, sys, time, threading
-from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from bzflag.client       import BZFlagClient
@@ -68,85 +68,10 @@ from bzbot_ai import (
 logger = logging.getLogger("bzbot")
 
 
-# ── Daten-Klassen ─────────────────────────────────────────────────────────
-
-@dataclass
-class Shot:
-    """Zustand eines aktiven Schusses auf dem Spielfeld."""
-
-    shooter_id: int
-    shot_id:    int
-    pos:        List[float]
-    vel:        List[float]
-    fire_time:  float
-    lifetime:   float
-    team:       int
-    is_sw:      bool = False
-    is_gm:      bool = False
-    is_laser:   bool = False
-    is_thief:   bool = False
-    flag_abbr:  bytes = b"\x00\x00"
-    gm_target_pid: Optional[int] = None
-    last_gm_update: float = 0.0
-
-    def is_expired(self, now: float) -> bool:
-        return now - self.fire_time >= self.lifetime
-
-    def position_at(self, t: float) -> Tuple[float, float, float]:
-        dt = t - self.fire_time
-        return (self.pos[0] + self.vel[0] * dt,
-                self.pos[1] + self.vel[1] * dt,
-                self.pos[2] + self.vel[2] * dt)
-
-    def time_to_closest(self, px: float, py: float) -> float:
-        """Zeit bis zur nächsten Annäherung an (px, py), ausgehend von self.pos."""
-        rvx = self.vel[0]; rvy = self.vel[1]
-        rx = self.pos[0] - px; ry = self.pos[1] - py
-        denom = rvx * rvx + rvy * rvy
-        # Schuss steht (quasi) still → kommt nie näher
-        if denom < 1e-6:
-            return float("inf")
-        # Zeitpunkt des nächsten Annäherns: negativer Anteil des Schuss-Richtungsvektors
-        # in Richtung des Abstands-Vektors (negativ → Schuss fährt auf Ziel zu)
-        return max(0.0, -(rx * rvx + ry * rvy) / denom)
-
-    def closest_approach_dist(self, px: float, py: float) -> float:
-        """Minimaler Abstand des Schusses zu (px, py) über seine Lebenszeit."""
-        t = self.time_to_closest(px, py)
-        if t == float("inf"):
-            return math.hypot(self.pos[0] - px, self.pos[1] - py)
-        ex = self.pos[0] + self.vel[0] * t
-        ey = self.pos[1] + self.vel[1] * t
-        return math.hypot(ex - px, ey - py)
-
-
-@dataclass
-class PlayerInfo:
-    """Zustand eines anderen Spielers."""
-    callsign:   str
-    team:       int
-    is_human:   bool
-    pos:        List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
-    vel:        List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
-    azimuth:    float = 0.0
-    alive:      bool  = False
-    flag:       str   = ""
-    is_airborne: bool  = False  # aus PS_FALLING: True bei Sprung UND Fall (nicht nur Springen)
-    last_seen:  float = 0.0
-    last_order: int   = -1
-    radar_blind_until: float = 0.0   # Radar-Aufmerksamkeit: bis dahin keine Radar-Updates (Cooldown)
-    is_phantom_zoned: bool = False
-    paused:     bool  = False  # aus MsgPause: pausiert = unverwundbar, nicht beschießen
-    last_teleport: Optional[Tuple[float, int, int]] = None  # (zeit, from_face, to_face), letzter Teleport
-
-
-@dataclass
-class FlagInfo:
-    """Eine Flag auf dem Spielfeld."""
-    flag_id: int
-    abbr:    str
-    status:  int
-    pos:     List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+# Daten-Klassen (Shot/PlayerInfo/FlagInfo) → bot/models.py, Geometrie-Helfer →
+# bot/util.py (Track 4/W2); Re-Import hält den bzbot-Namespace stabil.
+from bot.models import Shot, PlayerInfo, FlagInfo  # noqa: F401
+from bot.util import _segment_point_dist3d  # noqa: F401
 
 
 # ── Bot ───────────────────────────────────────────────────────────────────
@@ -2188,22 +2113,6 @@ class BZBot(BZBotAI):
         self._emit_status()
 
 
-# ── Hilfsfunktionen (Spielmechanik, nur in bzbot.py benötigt) ─────────────
-
-def _segment_point_dist3d(ax: float, ay: float, az: float,
-                           bx: float, by: float, bz: float,
-                           cx: float, cy: float, cz: float) -> float:
-    """Minimaler Abstand von Punkt C zum 3D-Liniensegment A→B."""
-    abx, aby, abz = bx-ax, by-ay, bz-az
-    acx, acy, acz = cx-ax, cy-ay, cz-az
-    ab2 = abx**2 + aby**2 + abz**2
-    # Segment hat Länge 0 → Abstand ist direkte Distanz A→C
-    if ab2 < 1e-10:
-        return math.sqrt(acx**2 + acy**2 + acz**2)
-    # t=0 → Punkt liegt am Anfang A, t=1 → am Ende B; clampen hält t im Segment
-    t = max(0.0, min(1.0, (acx*abx + acy*aby + acz*abz) / ab2))
-    dx, dy, dz = acx - t*abx, acy - t*aby, acz - t*abz
-    return math.sqrt(dx**2 + dy**2 + dz**2)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────
