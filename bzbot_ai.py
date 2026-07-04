@@ -80,7 +80,7 @@ NAV_TELE_OVERSHOOT    = 4.0             # u über die Mitte hinaus anzielen → 
 # Best-Effort-Teilpfad); dauerte das länger als NAV_ASYNC_TRIGGER_MS, läuft parallel in einem
 # Zweit-Thread eine Vollsuche mit großen Limits, deren bessere Route (inkl. Treppen-Sprüngen)
 # übernommen wird, sobald sie fertig ist — ohne die 60-Hz-Schleife zu blockieren.
-NAV_ASYNC_TRIGGER_MS     = 50.0    # Haupt-Thread-Plan teurer als das → Zweit-Thread-Vollsuche starten
+NAV_ASYNC_TRIGGER_MS     = 100.0   # Haupt-Thread-Plan teurer als das → Zweit-Thread-Vollsuche starten
 NAV_ASYNC_MAX_EXPANSIONS = 50000   # Expansionslimit der Hintergrund-Vollsuche
 NAV_ASYNC_MAX_MS         = 5000.0  # Wall-Clock-Limit der Hintergrund-Vollsuche
 NAV_ASYNC_RESYNC_TOL     = NAV_CELL_SIZE * 4.0  # Max. Abstand Bot ↔ Route, um das Async-Ergebnis noch zu übernehmen
