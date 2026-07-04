@@ -21,15 +21,44 @@ bot_manager.py          Steuer-Prozess (kein eigener Tank)
   └── ServerObserver    Fallback-BZFlagClient (TankPlayer + ObserverTeam),
                         nur aktiv wenn kein Bot Spielerzahlen liefert
 
-bzbot.py                Bot-Prozess (PLAYER_TYPE_TANK)
-  ├── BZFlagClient      TCP + UDP, empfängt alle Broadcasts
-  ├── BZBot             Spiellogik, Hit-Detection, Protokoll-Handler, IPC (--managed)
-  └── BZBotAI (Mixin)   State Machine, Physik, Navigation
+bzbot.py                Bot-Prozess (PLAYER_TYPE_TANK); Entry-Point → bot/-Paket
+  ├── BZFlagClient      TCP + UDP, empfängt alle Broadcasts (bzflag/client.py)
+  ├── BZBot             Spiellogik, Hit-Detection, Protokoll-Handler, IPC (bot/core.py)
+  └── BZBotAI (Mixin)   State Machine, Physik, Navigation (bot/ai/)
 ```
 
 Manager und Bots sind separate Prozesse, nicht Threads. Die Spielerzahl kommt primär
 von den laufenden Bots (IPC über stdin/stdout); ein Observer ist nur Fallback. Der
 Manager hat keinen eigenen Tank und sendet keine `MsgPlayerUpdate`-Pakete.
+
+### Modul-Landkarte (Stand nach Struktur-Track 4)
+
+Die frühere Zweiteilung `bzbot.py`/`bzbot_ai.py` ist in das Paket `bot/` zerlegt;
+alle Methoden wurden dabei unverändert verschoben (Methodennamen sind stabil geblieben).
+`bzbot.py` ist nur noch der startbare Entry-Point (CLI, `main`, Managed-stdin-Reader,
+Karten-Dump), `bot_manager.py` startet ihn unverändert als Subprozess.
+
+| Modul | Inhalt |
+|---|---|
+| `bot/constants.py` | Alle Spiel-Konstanten; pro nachgeführter Konstante die Zuordnung `↔ Server-Var ↔ self._attr` |
+| `bot/models.py` | `Shot`, `PlayerInfo`, `FlagInfo`, `AIState` |
+| `bot/util.py` | Zustandslose Geometrie-Helfer (`_angle_diff`, `_wrap`, `_segment_point_dist3d`) |
+| `bot/core.py` | `BZBot`: `__init__` (gegliedert in `_init_*`-Blöcke), Start/Stop, 60-Hz-Game-Loop, `_send_update`, Spawn, Callsign-Verwaltung |
+| `bot/handlers.py` | `HandlersMixin`: alle `_on_*`-Message-Handler; `_on_set_var` tabellen-getrieben (`_SETVAR_VARS`/`_SETVAR_SPECIAL`) |
+| `bot/hit_detection.py` | `HitDetectionMixin`: `_resolve_incoming_shots`, Steamroller, Schuss-Cleanup, Hitbox-Helfer |
+| `bot/ai/__init__.py` | `BZBotAI` = Sammelklasse der 9 Mixins (Methoden disjunkt → MRO verhaltensneutral) |
+| `bot/ai/capabilities.py` | `_can_*`-Gates und `_effective_*`-Ableitungen aus Flagge + Server-Vars |
+| `bot/ai/physics.py` | Eigene Tank-Physik: `_run_physics`, `_get_floor_z`, Hindernis-Kollision |
+| `bot/ai/states.py` | State-Machine: `_update_movement`/`_dispatch_movement`, alle `_tick_*` außer COMBAT |
+| `bot/ai/combat.py` | `_tick_combat`, `_execute_combat_move`, Bedrohungsreaktion/Dodge, Eskalation |
+| `bot/ai/navigation.py` | A*-Planung (sync/async), Wegpunkt-Abfahren, NAV_JUMP/NAV_TELE, Teleporter-Querung |
+| `bot/ai/perception.py` | FoV/LoS-Prädikate, Radar-Aufmerksamkeit, `_find_incoming_shot` |
+| `bot/ai/targeting.py` | Zielwahl, Ziel-Validierung/Staleness, Flaggen-Route |
+| `bot/ai/tactics.py` | Taktischer Übersprung, Z-Höhenangriff, Sprung-Ausführung |
+| `bot/ai/shooting.py` | Zielpunkt-/Ricochet-Berechnung, Feuer-Gates, alle `_maybe_shoot_*`, `_send_shot` |
+
+Die Engine-Schicht `bzflag/` (protocol, client, world_map, world_parser, obstacle_grid,
+shot_physics, nav_graph) war bereits vor dem Umbau sauber geschnitten und ist unverändert.
 
 ### Warum `PLAYER_TYPE_TANK` statt `PLAYER_TYPE_COMPUTER`
 
@@ -86,7 +115,7 @@ hat — menschliche Reaktionszeiten sind 150+ ms.
 ### `dt`, `now`, `ai_tick`
 
 ```python
-# In _run_game_loop() (bzbot.py):
+# In _run_game_loop() (bot/core.py):
 now     = time.monotonic()
 dt_r    = now - last_tick              # tatsächliche Zeit seit letztem Tick
 ai_tick = (self._tick_count % (UPDATE_RATE_HZ // AI_RATE_HZ) == 0)   # 60/10 → jeder 6.
@@ -210,7 +239,7 @@ gleichzeitig `_evade_cleared_shots[_last_threat_id] = now + EVADE_CLEAR_GRACE` z
 
 ## 4. Physik-System
 
-### `_run_physics(dt, now)` — bzbot_ai.py
+### `_run_physics(dt, now)` — bot/ai/physics.py
 
 Läuft immer, unabhängig vom AI-State. Verantwortlich für:
 1. BY-Flag Auto-Bounce (alle 0.2s automatischer Sprung)
@@ -246,7 +275,7 @@ räumlich ist.
 
 ### `_get_floor_z()` — Pixel-on-Bodenauflage
 
-`bzbot_ai._get_floor_z()` ruft `nav.get_floor_z(x, y, z, overhang=self._effective_half_width())`.
+`_get_floor_z()` (bot/ai/physics.py) ruft `nav.get_floor_z(x, y, z, overhang=self._effective_half_width())`.
 Der `overhang` (≈ Tank-Halbbreite 1.4u) weitet den Box-Test in `_point_in_rotated_box` — der Bot
 gilt als **getragen**, solange seine **Mitte** bis ~eine Tank-Halbbreite über die Plattformkante
 hinausragt (Pixel-on: trägt, solange ein Pixel aufliegt). Folge: FALLING-Erkennung
@@ -416,7 +445,7 @@ und seine „Überschuss bei Maximalreichweite"-Semantik war für Fast-Senkrecht
 schmale Diagonalbalken falsch (der Bot wählt seine Absprunggeschwindigkeit passend zum
 Landepunkt und schießt nicht hinaus).
 
-**Konsistenz Ausführung ↔ Planung:** `bzbot_ai._nav_jump_feasible` / `_nav_jump_geometry_ok`
+**Konsistenz Ausführung ↔ Planung:** `_nav_jump_feasible` / `_nav_jump_geometry_ok` (bot/ai/navigation.py)
 ziehen denselben Front-Catch ab (`hdist - JUMP_EDGE_TOL`, bestehender `·1.1`-Puffer), sonst
 plant A\* einen Sprung, den der Ausführungs-Gate ablehnt → NAV_JUMP_ALIGN-Timeout/Replan.
 
@@ -501,7 +530,7 @@ def invalidate_nav_cache(world_hash):
 und `world_half` sich ändert, muss der Cache explizit invalidiert werden:
 
 ```python
-# bzbot.py, _on_set_var:
+# bot/handlers.py, _on_set_var:
 if abs(new_half - old_half) > 0.1:
     invalidate_nav_cache(self._world_map.world_hash)
     self.client._deliver_world()    # NavGraph neu bauen mit korrektem world_half
@@ -682,7 +711,7 @@ als dünn klassifiziert oder der NavGraph stammt aus dem Cache eines alten Build
 
 ## 6. Kollisionssystem
 
-### `_apply_obstacle_bounds(dt)` — bzbot_ai.py
+### `_apply_obstacle_bounds(dt)` — bot/ai/physics.py
 
 Wird in `_apply_bounds()` aufgerufen, bevor `pos` aktualisiert wird.
 
@@ -784,7 +813,7 @@ Implementierung verwendet exakt diesen Wert.
 ### N-Flag (Narrow): OBB statt Kugel
 
 ```python
-# bzbot.py, _resolve_incoming_shots:
+# bot/hit_detection.py, _resolve_incoming_shots:
 if self.own_flag == "N":
     hit = _segment_hits_obb_3d(A, B,
         center=tank_center,
@@ -1295,8 +1324,8 @@ empfangen oder `world_half` ist bereits korrekt.
 
 ### Variablen-Katalog: `_on_set_var`
 
-Der `_on_set_var`-Handler in `bzbot.py` liest alle physikalischen und
-spielmechanischen Parameter vom Server. Hardcodierte Konstanten in `bzbot_ai.py`
+Der `_on_set_var`-Handler in `bot/handlers.py` liest alle physikalischen und
+spielmechanischen Parameter vom Server. Hardcodierte Konstanten in `bot/constants.py`
 (z.B. `LG_GRAVITY = 12.7`) sind nur Defaults bis der Server sie überschreibt.
 Code der direkt auf Konstanten statt auf `self._lg_gravity` etc. zugreift,
 ignoriert Server-Konfiguration — das ist ein Bug.
