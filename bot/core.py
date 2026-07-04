@@ -57,6 +57,27 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
                  debug_log_dodge: bool = False,
                  debug_log_flag: bool = False,
                  debug_log_tele: bool = False):
+        # W7: Gliederung in benannte Blöcke — reine Umsortierung, die Aufruf-
+        # Reihenfolge entspricht exakt der alten Zeilenfolge des Monolith-__init__.
+        self._init_identity(host, port, callsign, team, motto, token, world_half,
+                            bot_name_prefix, bot_callsigns, managed)
+        self._init_network()
+        self._init_tank_state()
+        self._init_server_vars()
+        self._init_world()
+        self._init_nav()
+        self._init_shots()
+        self._init_async_plan()
+        self._init_ai_state()
+        self._init_debug(debug_no_shoot, debug_no_jump, debug_log_path, debug_log_shot,
+                         debug_log_dodge, debug_log_flag, debug_log_tele)
+        self._init_flags(good_flags, bad_flags, limited_flags, debug_target_flag)
+        self._init_runtime_state()
+        self._init_handlers()
+
+    def _init_identity(self, host, port, callsign, team, motto, token, world_half,
+                       bot_name_prefix, bot_callsigns, managed):
+        """Verbindungs-Identität und Managed-Modus."""
         self.host             = host
         self.port             = port
         self.callsign         = callsign
@@ -74,11 +95,15 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # erlaubt main(), einen erwarteten Reject (BOT_EXIT_REJECTED) von einem Crash zu trennen.
         self._join_rejected   = False
 
-        self.client = BZFlagClient(host, port)
+    def _init_network(self):
+        """Client-Instanz + World-Callbacks."""
+        self.client = BZFlagClient(self.host, self.port)
         self.client._on_game_settings  = self._on_game_settings
-        self.client._world_half_cache  = world_half
+        self.client._world_half_cache  = self.world_half
         self.client.on_world_ready     = self._on_world_ready
 
+    def _init_tank_state(self):
+        """Eigener Tank-Zustand + Shot-Slots."""
         # Eigener Zustand
         self.player_id: Optional[int] = None
         self.pos       = [0.0, 0.0, 0.0]
@@ -98,6 +123,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._spawn_sent_at: Optional[float] = None
         self._reload_time = RELOAD_TIME_DEFAULT
 
+    def _init_server_vars(self):
+        """Server-Variablen-Defaults (via MsgSetVar/MsgGameSettings überschrieben, s. bot/constants.py)."""
         # Physik-Konstanten (Defaults; werden via MsgSetVar / MsgGameSettings überschrieben)
         self._shot_speed     = SHOT_SPEED_DEFAULT
         self._shot_range     = SHOT_RANGE
@@ -179,6 +206,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._laser_ad_rate = LASER_AD_RATE
         self._laser_ad_life = LASER_AD_LIFE
 
+    def _init_world(self):
+        """Welt-/Spieler-Zustand (gefüllt nach Welt-Download)."""
         # Welt
         self.players:  Dict[int, PlayerInfo] = {}
         self.human_count    = 0
@@ -188,6 +217,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._link_map = {}      # face-Index → Ziel-face-Index (Teleporter), aus _world_map.links
         self._tele_solid_boxes: list = []  # Teleporter-Posts+Crossbar als BoxObstacle (Kollision)
         self._teleporting_until = 0.0      # P3-NAV-02: PS_TELEPORTING-Ende + Re-Trigger-Sperre
+
+    def _init_nav(self):
+        """Navigation: Pfad-Queue, NAV_JUMP/NAV_TELE, COMBAT-Eskalations-Episode."""
         self._nav_graph = None   # Optional[NavGraph] — aus _world_map gebaut
         self._nav_path: list = []      # [(wx, wy, layer_z), ...] — aktuelle Pfad-Queue
         self._nav_goal = None          # Optional[Tuple[float, float]] — aktuelles Ziel
@@ -210,11 +242,15 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._wp_fail_count: int = 0                 # aufeinanderfolgende WP-Timeouts
         self._wp_timeout: float = 3.0                # per-WP Timeout (berechnet in bzbot_ai.py)
 
+    def _init_shots(self):
+        """Shot-Tracking (Recv-Thread schreibt, Game-Loop liest)."""
         # Shot-Tracking
         self._shots:          Dict[Tuple[int, int], Shot] = {}
         self._ricochet_paths: Dict[Tuple[int, int], List] = {}
         self._shots_lock = threading.Lock()
 
+    def _init_async_plan(self):
+        """P4-INF-01: Zweit-Thread-Pfadplanung."""
         # P4-INF-01: Asynchrone Pfadplanung (Zweit-Thread). Der gecachte NavGraph ist nach der
         # Reentranz-Umstellung parallel beplanbar; der Worker bekommt nur Plain-Value-Snapshots.
         self._async_plan_lock   = threading.Lock()
@@ -224,6 +260,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._async_cancel       = threading.Event()      # kooperatives Cancel der laufenden Vollsuche
         self._plan_gen           = 0                      # monoton; invalidiert veraltete Ergebnisse
 
+    def _init_ai_state(self):
+        """KI-Grundzustand (Ziel, Dodge, Sprung)."""
         # KI — Grundzustand
         self.target_pos:    Optional[Tuple[float, float]] = None
         self.target_player: Optional[int] = None
@@ -243,6 +281,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._z_attack_retry_after:  float = 0.0
         self._tact_jump_retry_after: float = 0.0
 
+    def _init_debug(self, debug_no_shoot, debug_no_jump, debug_log_path, debug_log_shot,
+                    debug_log_dodge, debug_log_flag, debug_log_tele):
+        """Debug-Flags (undokumentiert, nur für manuelle Tests)."""
         # Debug-Flags (undokumentiert, nur für manuelle Tests)
         self._debug_no_shoot  = debug_no_shoot
         self._debug_no_jump   = debug_no_jump
@@ -252,6 +293,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._debug_log_flag  = debug_log_flag
         self._debug_log_tele  = debug_log_tele
 
+    def _init_flags(self, good_flags, bad_flags, limited_flags, debug_target_flag):
+        """Flag-Strategie + Flag-Tracking."""
         # Flag-Strategie
         self.own_flag: str = ""
         self.good_flags = set(good_flags) if good_flags is not None else set(GOOD_FLAGS_DEFAULT)
@@ -272,6 +315,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self.flags: Dict[int, FlagInfo] = {}
         self._last_grab_attempt: float = 0.0
 
+    def _init_runtime_state(self):
+        """GM-Tracking, State Machine, Sende-Kadenz, Tick-Memo, Lebenszyklus-Flags."""
         # GM-Tracking
         self._active_gm: Optional[dict] = None
         self._gm_need_update: bool = False
@@ -323,6 +368,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._has_spawned: bool = False      # hat der Bot diese Session schon gespielt? (Reconnect-Gate)
         self.on_player_count_changed = None
 
+    def _init_handlers(self):
+        """Message-Handler beim Client registrieren."""
         # Handler
         self.client.add_handler(MsgAddPlayer,       self._on_add_player)
         self.client.add_handler(MsgRemovePlayer,    self._on_remove_player)
