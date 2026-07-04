@@ -359,6 +359,8 @@ bzflag-bot/
 
 Startpunkt: erst nach Abschluss der Roadmap-Tracks 1–3 (s. „Wechselwirkungen" oben); nur W6 läuft vorab im Performance-Track.
 
+**Status: ✅ komplett umgesetzt (Branch `structure/track4`, 2026-07-04)** in der Reihenfolge W1(+W8) → W2 → W4 (9 Einzel-Commits) → W5 (3 Commits) → W7 → W3 (Snapshot-Test vorab, + `_srRadiusMult`-Nachführung aus F8) → **W12 (neu, auf User-Wunsch):** Tests auf `bot.*` migriert, `bzbot_ai.py` gelöscht, `bzbot.py` = reiner Entry-Point ohne Kompat-Re-Exports (wie `bot_manager.py` nur Start-Code). Suite nach jedem Commit grün (am Ende 1096 Tests, +76 Setvar-Snapshots); ort-sensitive Patch-Ziele der Tests wurden pro Schritt nachgezogen (`patch("bzbot_ai.random")` → Mixin-Modul; string-basierte `bzbot_ai.random.random`-Patches trafen schon immer das globale random-Modul → jetzt direkt `random.random`). Modul-Landkarte: DEVELOPER.md §1.
+
 1. **W1 — Konstanten extrahieren:** `bot/constants.py` anlegen, Konstanten-Block aus `bzbot_ai.py:27–225` verschieben; `bzbot_ai.py` importiert sie zurück (`from bot.constants import *` + explizites `__all__` in constants.py). Der bestehende Re-Export in `bzbot.py:42–65` bleibt unverändert funktionsfähig. Risiko: minimal. *(Hinweis: `_TINY_FACTOR`/`_NARROW_HW` beginnen mit Unterstrich → von `import *` ausgeschlossen — entweder in `__all__` explizit aufnehmen oder umbenennen in `TINY_FACTOR`/`NARROW_HW` mit Alias.)*
 2. **W2 — Modelle & Utils:** `Shot`, `PlayerInfo`, `FlagInfo` (bzbot.py:73–156), `AIState`, `_angle_diff`, `_wrap`, `_segment_point_dist3d` nach `bot/models.py`/`bot/util.py`; Re-Import an alter Stelle.
 3. **W3 — `_on_set_var` tabellen-getrieben:** Die 345-Zeilen-Kette durch eine Dispatch-Tabelle ersetzen: `_SETVAR_HANDLERS: dict[bytes, Callable[[BZBot, float|str], None]]` bzw. für die Mehrheit der Fälle (Float → Attribut) eine Mapping-Tabelle `var_name → (attr_name, cast, optionaler Nachlauf-Hook)`. Sonderfälle (z.B. `_jumpVelocity` → `set_physics`, Flag-Listen) bleiben eigene kleine Funktionen. Das ist der einzige Schritt in Teil 3 mit echter Code-Umformung → eigener Test, der alle heute behandelten Variablen einmal durchschickt und die resultierenden Attribute mit dem Alt-Verhalten vergleicht (Snapshot-Test VOR dem Refactor schreiben!). Dabei die in Teil 2/F8 notierte fehlende `_srRadiusMult`-Nachführung ergänzen.
@@ -378,15 +380,16 @@ Startpunkt: erst nach Abschluss der Roadmap-Tracks 1–3 (s. „Wechselwirkungen
 
 | ID | Maßnahme | Nutzen | Risiko | Aufwand | Wann |
 |----|----------|--------|--------|---------|------|
-| W1 | constants.py („Header") | ⭐⭐⭐ | minimal | klein | Track 4 |
-| W2 | models.py / util.py | ⭐⭐ | minimal | klein | Track 4 |
-| W3 | `_on_set_var` Tabellen-Dispatch | ⭐⭐⭐ | niedrig (mit Snapshot-Test) | mittel | Track 4 |
-| W4 | BZBotAI → 9 Mixin-Module | ⭐⭐⭐ | niedrig (mechanisch, pro Commit ein Modul) | mittel–groß | Track 4 |
-| W5 | bzbot.py → Entry + 3 Module | ⭐⭐⭐ | niedrig | mittel | Track 4 |
-| W6 | obstacle_grid.py Split | ⭐⭐ (P1-Voraussetzung) | minimal | klein | **Track 2 (vorgezogen)** |
-| W7 | `__init__` in _init_*-Blöcke | ⭐⭐ | minimal | klein | Track 4 |
-| W8 | Server-Var-Tabelle in constants.py | ⭐⭐ | null | klein | Track 4 (mit W1) |
-| W9 | Dup-Berechnungen → Helper | ⭐⭐ | niedrig | klein | **Track 3 (= F9)** |
+| W1 ✅ | constants.py („Header") | ⭐⭐⭐ | minimal | klein | Track 4 |
+| W2 ✅ | models.py / util.py | ⭐⭐ | minimal | klein | Track 4 |
+| W3 ✅ | `_on_set_var` Tabellen-Dispatch | ⭐⭐⭐ | niedrig (mit Snapshot-Test) | mittel | Track 4 |
+| W4 ✅ | BZBotAI → 9 Mixin-Module | ⭐⭐⭐ | niedrig (mechanisch, pro Commit ein Modul) | mittel–groß | Track 4 |
+| W5 ✅ | bzbot.py → Entry + 3 Module | ⭐⭐⭐ | niedrig | mittel | Track 4 |
+| W6 ✅ | obstacle_grid.py Split | ⭐⭐ (P1-Voraussetzung) | minimal | klein | **Track 2 (vorgezogen)** |
+| W7 ✅ | `__init__` in _init_*-Blöcke | ⭐⭐ | minimal | klein | Track 4 |
+| W8 ✅ | Server-Var-Tabelle in constants.py | ⭐⭐ | null | klein | Track 4 (mit W1) |
+| W9 ✅ | Dup-Berechnungen → Helper | ⭐⭐ | niedrig | klein | **Track 3 (= F9)** |
+| W12 ✅ | Test-Migration + Shim-Abbau (bzbot_ai.py weg) | ⭐⭐ | niedrig | mittel | Track 4 (Abschluss) |
 
 ---
 
@@ -398,7 +401,7 @@ Die Tracks spiegeln die Themen-Priorität (Performance → Fehlerpotenzial → W
 2. **Track 2 — Performance:** P2 → P3 → P4a → W6 (ObstacleGrid-Split, aus dem Struktur-Track vorgezogen) → P1 (Grid in simulate_shot_path) → **Server-Messung** → danach je nach Befund P5, P6, P7, P4b, P8, P9. — ✅ P2/P3/P4a/W6/P1 umgesetzt (Branch `perf/track2`); ✅ Server-Messung 2026-07-04 erfolgt (cProfile IDLE + KAMPF aus dem Live-Container) → Ergebnis: P4b/P5/P6/P8/P9 ⛔, P7 🗄️ — stattdessen **Track N (Teil 1b)**.
 2b. **Track N — Idle-Baseline (aus der Server-Messung, Teil 1b):** N1a (30-Hz-Kadenz-Fix) → N1b (UDP-Adress-Cache) → Nachmessung → N2 (Leerlauf-Early-Outs) → N3 (Tick-Wait) → erneute Nachmessung (Ziel <10–12% docker). — ✅ N1a+N1b umgesetzt und live verifiziert (Nachmessung tmp4 2026-07-04: docker ~20% → 15–17% bei 4 Bots, aktive CPU/Bot 15,1% → ~6–7%); ✅ N2+N3 umgesetzt (Branch `perf/idle-early-outs`, Commits `b764a30`/`fbbe86d`); **nächster Schritt: Nachmessung (Ziel <10–12% docker)**.
 3. **Track 3 — Konsistenz (restliches Fehlerpotenzial; bewusst VOR dem Struktur-Track, weil die Fixes Grep-basiert über den heutigen Dateistand laufen):** F5 → F6 (Radar an `world_half` koppeln, halbe Weltgröße bleibt) → F7 → F9 (= W9; Helper wandern später beim Split als Einheit mit) → F8 (distanzabhängiges Feuer-Gate als eigener PR + Doku-Punkte). — ✅ komplett umgesetzt (Branch `consistency/track3`).
-4. **Track 4 — Struktur (Wartbarkeit):** W1 (constants.py, zusammen mit W8-Tabelle) → W2 (models/util) → W4 (Mixin-Split, 9 Einzel-Commits) → W5 (bzbot.py dünn) → W7 → W3 (_on_set_var-Tabelle, mit Snapshot-Test). Zu diesem Zeitpunkt sind alle P/F-Punkte abgeschlossen → keine Referenz-Entwertung; sollte doch ein Punkt offen sein, gilt Regel 4 aus „Wechselwirkungen" (Referenzen im Plan pro W-PR nachziehen, Landkarten-Tabelle nutzen). Track 4 bleibt reine Wartbarkeit/Struktur **ohne Funktionsänderung**, damit gut testbar.
+4. **Track 4 — Struktur (Wartbarkeit):** W1 (constants.py, zusammen mit W8-Tabelle) → W2 (models/util) → W4 (Mixin-Split, 9 Einzel-Commits) → W5 (bzbot.py dünn) → W7 → W3 (_on_set_var-Tabelle, mit Snapshot-Test) → W12 (Test-Migration + Shim-Abbau). Zu diesem Zeitpunkt sind alle P/F-Punkte abgeschlossen → keine Referenz-Entwertung; sollte doch ein Punkt offen sein, gilt Regel 4 aus „Wechselwirkungen" (Referenzen im Plan pro W-PR nachziehen, Landkarten-Tabelle nutzen). Track 4 bleibt reine Wartbarkeit/Struktur **ohne Funktionsänderung**, damit gut testbar. — ✅ komplett umgesetzt (Branch `structure/track4`, 2026-07-04; Details unter „Migrations-Reihenfolge" in Teil 3). Einzige bewusste Mini-Funktionserweiterung: `_srRadiusMult`-Nachführung (F8-Rest, in W3). Datei:Zeile-Referenzen in Teil 1/2 dieses Plans beziehen sich weiterhin auf den Stand VOR dem Umbau — stabile Anker sind die Methodennamen (Landkarten-Tabelle oben bzw. DEVELOPER.md §1 Modul-Landkarte).
 5. **Track 5 — Letzte Performance-Stufe (nach Track 4 + weiterem manuellen Testlauf):** P9 (mypyc/Cython-AOT der Compute-Module, erwartet ~11–13% docker) und/oder Ein-Prozess-Multi-Bot (geteilte World/NavGraph/ObstacleGrid — wird derzeit 4× identisch geladen — und 1 Tick-Loop; einziger Hebel gegen den Prozess-Floor und der einzige Weg Richtung ~5% docker).
 
 ## Verifikation (gesamt)

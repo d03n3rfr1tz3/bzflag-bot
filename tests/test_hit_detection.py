@@ -151,7 +151,7 @@ def test_short_lifetime_shot_expires_before_hit(bot):
 
 def test_normal_hit_radius_matches_bzflag(bot):
     """Normaler Tank: eff_r = TANK_RADIUS * 0.99 ≈ 4.28u (BZFlag-konform)."""
-    from bzbot_ai import TANK_RADIUS
+    from bot.constants import TANK_RADIUS
     bot.own_flag = ""
     eff_r = bot._effective_hit_radius()
     assert eff_r == pytest.approx(TANK_RADIUS * 0.99, abs=0.01)

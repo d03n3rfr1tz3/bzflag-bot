@@ -254,7 +254,7 @@ def test_compute_ricochet_aim_via_teleporter(bot):
 # ── MsgTeleport-Handler (P3-NAV-01c) ──────────────────────────────────────────
 
 def test_msg_teleport_records_last_teleport(bot):
-    from bzbot import PlayerInfo
+    from bot.models import PlayerInfo
     bot.players[5] = PlayerInfo(callsign="Foe", team=2, is_human=True)
     bot._on_teleport(MsgTeleport, struct.pack(">BHH", 5, 1, 6))
     lt = bot.players[5].last_teleport
@@ -313,7 +313,6 @@ def test_compute_ricochet_aim_high_to_low_needs_z_tol(bot, monkeypatch):
     """Situation 1 (Bot oben z=30 → Gegner unten z=0): die Tor-Transform skaliert die relative
     Eintrittshöhe HOCH (≈1.85×), der Flachschuss tritt ~0.35u über dem Bodenpanzer aus. Nur mit
     TELE_AIM_Z_TOL findet _compute_ricochet_aim den Tor-Schuss; ohne Z-Spielraum bleibt es None."""
-    import bzbot_ai
     from conftest import load_map_fixture, make_player
     wm = load_map_fixture("hix")
     if wm is None:
@@ -326,10 +325,10 @@ def test_compute_ricochet_aim_high_to_low_needs_z_tol(bot, monkeypatch):
     bot._link_map = build_link_map(wm.links)
     make_player(bot, 2, pos=(370.0, 370.0, 0.0))   # Bodengegner entlang der Austritts-Diagonale
 
-    monkeypatch.setattr(bzbot_ai, "TELE_AIM_Z_TOL", 0.0)
+    monkeypatch.setattr("bot.ai.shooting.TELE_AIM_Z_TOL", 0.0)
     assert bot._compute_ricochet_aim(2, None) is None, "ohne Z-Spielraum: Schuss tritt zu hoch aus"
 
-    monkeypatch.setattr(bzbot_ai, "TELE_AIM_Z_TOL", 1.0)
+    monkeypatch.setattr("bot.ai.shooting.TELE_AIM_Z_TOL", 1.0)
     result = bot._compute_ricochet_aim(2, None)
     assert result is not None and result[1] is True   # mit Z-Spielraum: Tor-Schuss gefunden
 
@@ -359,7 +358,7 @@ def test_indirect_shot_available(bot):
 def test_update_indirect_hold_caps_and_resets(bot):
     """C2: Zeit-Cap armt beim Eintritt, läuft nach INDIRECT_HOLD_S ab (ohne Re-Arm im selben Fall)
     und resettet beim Verlassen → armt beim nächsten Eintritt neu."""
-    from bzbot_ai import INDIRECT_HOLD_S
+    from bot.constants import INDIRECT_HOLD_S
     bot._indirect_hold_until = None
     assert bot._update_indirect_hold(100.0, True) is True            # Eintritt → armt bis 100+CAP
     assert bot._update_indirect_hold(100.0 + INDIRECT_HOLD_S - 0.1, True) is True
@@ -620,7 +619,7 @@ def test_plan_path_cross_floor_uses_teleport_not_jump():
 def test_advance_path_drives_through_teleport_exit_not_jump(bot):
     """Executor-Guard: ein Teleport-Exit-WP auf z=30 löst KEIN NAV_JUMP aus — der Bot fährt ihn an
     (durch das Tor), der reaktive Crossing-Check warpt ihn hoch."""
-    from bzbot_ai import AIState
+    from bot.models import AIState
 
     class _StubNav:
         def __init__(self, exits): self._tele_exit_wps = exits
@@ -745,7 +744,7 @@ def test_advance_path_engages_nav_tele_at_tele_exit(bot):
     """Erreicht der Bot den Eingangs-WP und ist der nächste WP ein Tor-Austritt, wechselt
     _advance_path in NAV_TELE und zielt auf die Tor-Mitte (statt am mittenseitigen Exit-WP davor
     stehen zu bleiben)."""
-    from bzbot_ai import AIState
+    from bot.models import AIState
 
     class _StubNav:
         _tele_exit_wps = {(50.0, 0.0)}
@@ -766,7 +765,8 @@ def test_advance_path_engages_nav_tele_at_tele_exit(bot):
 def test_nav_tele_engage_guards(bot):
     """_try_engage_nav_tele engaged nur, wenn die Tor-Mitte nah genug UND nicht gesperrt ist."""
     import time as _t
-    from bzbot_ai import AIState, NAV_TELE_ENGAGE_DIST
+    from bot.constants import NAV_TELE_ENGAGE_DIST
+    from bot.models import AIState
     bot.own_flag = ""
     bot.pos = [0.0, 0.0, 0.0]
     bot._ai_state = AIState.COMBAT
@@ -789,7 +789,7 @@ def test_nav_tele_drives_through_corner_gate(bot):
     from conftest import load_map_fixture
     from bzflag.shot_physics import build_link_map
     from bzflag.world_map import teleporter_solid_boxes
-    from bzbot_ai import AIState
+    from bot.models import AIState
     wm = load_map_fixture("hix")
     if wm is None:
         pytest.skip("hix-Fixture fehlt")
@@ -830,7 +830,8 @@ def test_nav_tele_drives_through_corner_gate(bot):
 def test_nav_tele_timeout_aborts_and_cooldowns(bot):
     """Quert der Bot binnen NAV_TELE_TIMEOUT nicht (blockiert/Revert), bricht NAV_TELE ab: Cooldown
     aufs Tor, Pfad verworfen, zurück auf Boden-State zum Neuplanen."""
-    from bzbot_ai import AIState, NAV_TELE_TIMEOUT
+    from bot.constants import NAV_TELE_TIMEOUT
+    from bot.models import AIState
     _bot_world(bot, [], {})                     # WorldMap ohne Teleporter → nie eine Querung
     bot.own_flag = ""
     bot.pos = [0.0, 0.0, 0.0]; bot.vel = [0.0, 0.0, 0.0]; bot.azimuth = 0.0

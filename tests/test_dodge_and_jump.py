@@ -398,7 +398,7 @@ class TestSidewaysEvasion:
     def test_dodge_reverse_with_zero_ang_vel(self, bot):
         """Im _dodge_reverse-Modus wird ang_vel auf 0 gesetzt und speed negativ.
         Fix E1: Shot muss registriert sein damit EVADING nicht sofort beendet wird."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
         bot._dodging = True
@@ -458,7 +458,7 @@ class TestDdg05TimeBasedJump:
     def test_jump_when_time_to_dodge_exceeds_impact_time(self, bot):
         """Shot 20u weg bei vel=-100: t_impact=0.2s < t_to_dodge=0.276s → Sprung statt Dodge."""
         from conftest import make_shot
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.alive = True
@@ -475,7 +475,7 @@ class TestDdg05TimeBasedJump:
         """Shot 40u weg bei vel=-100: t_impact=0.4s. Bot zeigt senkrecht (turn_rad=0).
         time_to_dodge=0.225s < 0.4s → Ausweichen (Fix B: Bot bereits auf Ausweichrichtung)."""
         from conftest import make_shot
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.alive = True
@@ -495,7 +495,7 @@ class TestEarlyDodgeExit:
 
     def test_early_exit_to_combat_when_no_threat(self, bot):
         """EVADING ohne Schuss → Exit nach COMBAT (nach 0.1s-Buffer)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         info = make_player(bot, 99, pos=(50.0, 0.0, 0.0))
         bot.target_player = 99
         bot.human_count = 1
@@ -510,7 +510,7 @@ class TestEarlyDodgeExit:
 
     def test_no_early_exit_when_shot_still_active(self, bot):
         """EVADING mit aktivem Schuss → dodge läuft weiter (kein früher Exit)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.azimuth = math.pi / 2
         bot.human_count = 1
@@ -529,7 +529,7 @@ class TestEarlyDodgeExit:
 
     def test_last_threat_id_cleared_on_early_exit(self, bot):
         """Bei frühem Exit wird _last_threat_id auf None gesetzt (nach 0.1s-Buffer)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.human_count = 1
         bot._last_threat_id = (2, 1)
         bot._dodging = True
@@ -544,7 +544,7 @@ class TestE2DodgeMargin:
 
     def test_borderline_case_triggers_dodge_jump(self, bot):
         """time_to_dodge=0.225s, t_impact=0.24s → 0.225*1.1=0.248 > 0.24 → DODGE_JUMP."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = math.pi / 2  # senkrecht → turn_rad=0 → time_to_dodge=0.225s
@@ -562,7 +562,7 @@ class TestE2DodgeMargin:
 
     def test_comfortable_case_still_evades(self, bot):
         """time_to_dodge=0.225s, t_impact=0.5s → 0.248 < 0.5 → EVADING."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = math.pi / 2  # senkrecht → turn_rad=0
@@ -582,7 +582,7 @@ class TestDodgeJumpState:
 
     def test_infeasible_dodge_transitions_to_dodge_jump(self, bot):
         """Schuss zu nah → DODGE_JUMP (nicht JUMPING)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.alive = True
@@ -599,7 +599,7 @@ class TestDodgeJumpState:
 
     def test_no_dodge_jump_when_server_no_jumping(self, bot):
         """Server ohne -j und ohne Sprung-Flagge → kein DODGE_JUMP (statt dessen Notschuss)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.alive = True
@@ -617,7 +617,7 @@ class TestDodgeJumpState:
 
     def test_dodge_jump_no_rotation_when_facing_enemy(self, bot):
         """DODGE_JUMP: Kein ang_vel wenn Bot < 135° vom Gegner entfernt."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0  # Bot schaut direkt auf Gegner bei +x
@@ -637,7 +637,7 @@ class TestDodgeJumpState:
 
     def test_dodge_jump_gentle_rotation_when_back_to_enemy(self, bot):
         """DODGE_JUMP: Sanfte Rotation wenn Bot > 135° vom Gegner (Rücken)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = math.pi  # Bot zeigt Rücken zu Gegner bei +x
@@ -659,7 +659,7 @@ class TestDodgeJumpState:
 
     def test_dodge_jump_lands_to_combat(self, bot):
         """DODGE_JUMP: Nach Landung → COMBAT wenn target_player vorhanden."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         info = make_player(bot, 99, pos=(30.0, 0.0, 0.0))
         bot.target_player = 99
         bot.human_count = 1
@@ -679,7 +679,7 @@ class TestSideShotReverseDirection:
     def test_backward_perp_triggers_reverse_dodge(self, bot):
         """Schuss von oben (+y-Richtung, senkrecht zur Bot-Blickrichtung) → _dodge_reverse=True.
         best_perp = rückwärts (−π), orig_diff=180° → reverse (statt turning) trotz 60°-Cap."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0  # blickt nach +x
@@ -701,7 +701,7 @@ class TestSideShotReverseDirection:
     def test_forward_perp_keeps_forward_dodge(self, bot):
         """Schuss von oben nach unten (shot_dir=-π/2), shot leicht links → best_perp=0 (vorwärts).
         orig_diff≈0° → _dodge_forward=True."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0  # blickt nach +x
@@ -727,7 +727,7 @@ class TestDodgeJumpElapsedTime:
     def test_aged_shot_triggers_dodge_jump(self, bot):
         """Schuss vor 200ms abgefeuert, bei 44u → time_to_closest=0.44s, Restzeit=0.24s.
         0.292*1.1=0.321 > 0.24 → DODGE_JUMP (ohne Fix wäre 0.321 ≤ 0.44 → EVADING)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = math.pi / 2  # bereits senkrecht → turn_rad=0
@@ -747,7 +747,7 @@ class TestDodgeJumpElapsedTime:
     def test_fresh_shot_unaffected(self, bot):
         """Frischer Schuss (elapsed≈0) → kein Unterschied zum alten Verhalten.
         Bei 50u: time_to_impact≈0.5s, 0.321 ≤ 0.5 → EVADING."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = math.pi / 2
@@ -765,7 +765,7 @@ class TestDodgeJumpElapsedTime:
     def test_ib_delay_aged_shot_triggers_dodge_jump(self, bot):
         """Schuss vor 0.5s abgefeuert, bei 80u: time_to_closest=0.8s, Restzeit=0.3s → DODGE_JUMP
         (ohne J1a-Fix wäre time_to_impact=0.8 → EVADING). react-Delay hier entkoppelt geprüft."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0  # IB-Schütze (bei +x) zentral im FoV (IB-Gate verlangt Sicht)
@@ -787,7 +787,7 @@ class TestDodgeJumpElapsedTime:
         """CS-Schütze (Cloaked Shot): react_delay = 0.25·3.0 = 0.75s. Bei nur 0.3s seit
         Erkennung reagiert der Bot noch NICHT (Schuss bleibt auf Radar sichtbar, nur die
         visuelle Bestätigung fehlt) — ein Normal-Schütze (0.25s) hätte hier längst reagiert."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = math.pi / 2
@@ -806,7 +806,7 @@ class TestDodgeJumpElapsedTime:
         """Kontrolle zu test_cs_shooter_reaction_delayed: gleiche Lage, aber Normal-Schütze →
         0.3s ≥ 0.25s → Bot reagiert (EVADING). Belegt, dass nur der CS-Malus die Reaktion
         zurückhält, nicht die Geometrie."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = math.pi / 2
@@ -879,7 +879,7 @@ class TestEvadingEarlyExitEV1:
 
     def test_evading_exits_when_shot_truly_gone(self, bot):
         """Schuss klar hinter Bot (+50u wegfliegend): alle 4 Prüfungen None → EVADING verlassen (nach Buffer)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -898,7 +898,7 @@ class TestEvadingEarlyExitEV1:
 
     def test_evading_stays_when_shot_approaching(self, bot):
         """Schuss im Anflug (-30u): mindestens eine der 4 Prüfungen findet Bedrohung → bleibt."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -919,7 +919,8 @@ class TestZAttackJump:
 
     def test_z_attack_not_triggered_when_enemy_too_high(self, bot):
         """Gegner bei z=25u >= max_jump_h ≈ 18.4u → kein Sprung."""
-        from bzbot_ai import AIState, JUMP_VELOCITY, GRAVITY, HIT_RADIUS
+        from bot.constants import JUMP_VELOCITY, GRAVITY, HIT_RADIUS
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot._jumping = False
@@ -936,7 +937,7 @@ class TestZAttackJump:
 
     def test_z_attack_fires_during_ascent(self, bot):
         """ZJ1 aktiv (_z_attack_mode=True), Aufstieg (vel[2]>0), pos[2]≈fire_z → Schuss."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 8.2]   # nahe am fire_z
         bot.vel = [0.0, 0.0, 5.0]   # aufsteigend
         bot._jumping = True
@@ -953,7 +954,7 @@ class TestZAttackJump:
 
     def test_z_attack_lands_to_combat(self, bot):
         """Z_ATTACK-Landung → immer COMBAT, egal ob target_player gesetzt oder nicht."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.5]
         bot.vel = [0.0, 0.0, -5.0]   # absteigend, landet bald
         bot._jumping = True
@@ -971,7 +972,7 @@ class TestZAttackJump:
         """_check_z_attack_jump erfolgreich → AIState.Z_ATTACK (nicht JUMPING)."""
         import math
         from unittest.mock import patch
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot._jumping = False
@@ -982,7 +983,7 @@ class TestZAttackJump:
         make_player(bot, pid=2, pos=(40.0, 0.0, 9.0))  # z=9: HIT_RADIUS < 9 < max_jump_h
         bot.target_player = 2
         now = time.monotonic()
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0   # < 0.5 → kein Skip
             mock_rng.uniform.return_value = 0.0  # kein Jitter
             result = bot._check_z_attack_jump(now)
@@ -992,7 +993,7 @@ class TestZAttackJump:
     def test_z_attack_blocked_when_enemy_jumping(self, bot):
         """ZJ1: Gegner is_airborne=True → kein Sprung, auch bei gültiger Höhe."""
         from unittest.mock import patch
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot._jumping = False
@@ -1011,7 +1012,7 @@ class TestZAttackJump:
     def test_z_attack_blocked_shot_not_ready(self, bot):
         """ZJ1: _next_shoot > now + t_fire → kein Sprung (Schuss nicht rechtzeitig bereit)."""
         from unittest.mock import patch
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot._jumping = False
@@ -1023,7 +1024,7 @@ class TestZAttackJump:
         bot.target_player = 2
         now = time.monotonic()
         bot._next_shoot = now + 5.0   # Schuss erst in 5s bereit, t_fire ≈ 0.55s
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0
             result = bot._check_z_attack_jump(now)
         assert result is False
@@ -1031,7 +1032,7 @@ class TestZAttackJump:
 
     def test_z_attack_no_random_shoot_during_flight(self, bot):
         """_maybe_shoot blockiert während Z_ATTACK — kein Zufallsschuss."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 5.0]
         bot.vel = [0.0, 0.0, 8.0]
         bot._jumping = True
@@ -1049,7 +1050,7 @@ class TestZAttackJump:
     def test_z_attack_no_shot_when_enemy_out_of_sightline(self, bot):
         """_tick_z_attack: Gegner >20° aus Schussfeld → kein Schuss, _z_attack_mode bleibt True (Retry)."""
         import math
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 8.2]
         bot.vel = [0.0, 0.0, 5.0]   # aufsteigend
         bot._jumping = True
@@ -1073,7 +1074,7 @@ class TestZAttackJump:
         nicht relativ (≈17.9). Sonst trifft der Tick-Vergleich gegen pos[2] (30..48) nie."""
         import pytest
         from unittest.mock import patch
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 30.0]     # erhöhte Plattform
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -1086,7 +1087,7 @@ class TestZAttackJump:
         make_player(bot, pid=2, pos=(40.0, 0.0, 45.0))  # z_diff=15: HIT_RADIUS < 15 < max_jump_h
         bot.target_player = 2
         now = time.monotonic()
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0   # < 0.5 → kein Skip
             mock_rng.uniform.return_value = 0.0  # kein Jitter
             result = bot._check_z_attack_jump(now)
@@ -1096,7 +1097,7 @@ class TestZAttackJump:
     def test_z_attack_fires_during_ascent_elevated(self, bot):
         """ZJ-02 End-to-End: in der Luft auf absoluter Feuer-Höhe (46) über z=30-Plattform →
         Schuss auf Gegner bei z=45."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 46.2]   # nahe an absoluter fire_z
         bot.vel = [0.0, 0.0, 5.0]    # aufsteigend → nicht gelandet
         bot.azimuth = 0.0            # auf Gegner (+x) ausgerichtet
@@ -1119,7 +1120,7 @@ class TestTactJumpRestrictionsTJ1:
     """TJ1: Restriktivere Trigger-Bedingungen für den Taktischen Übersprung."""
 
     def _setup(self, bot, enemy_pos, enemy_vel=(0.0, 0.0, 0.0), enemy_azimuth=None):
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -1139,7 +1140,7 @@ class TestTactJumpRestrictionsTJ1:
     def test_tact_jump_blocked_bot_not_aligned(self, bot):
         """Bot 20° vom Gegner weggedreht → angle_to_enemy > 15° → kein Frontalsprung."""
         import math
-        from bzbot_ai import AIState
+        from bot.models import AIState
         dist = 30.0
         ang = math.radians(20)
         ep = (math.cos(ang) * dist, math.sin(ang) * dist, 0.0)
@@ -1153,7 +1154,7 @@ class TestTactJumpRestrictionsTJ1:
     def test_tact_jump_blocked_enemy_facing_away(self, bot):
         """Bot gut ausgerichtet (angle_to_enemy=0°), aber Gegner 40° abgewandt → kein Sprung."""
         import math
-        from bzbot_ai import AIState
+        from bot.models import AIState
         # enemy_az=0°, direction enemy→bot=180°, enemy_azimuth=220° → angle_enemy_to_bot=40° > 15°
         self._setup(bot, (30.0, 0.0, 0.0), enemy_azimuth=math.radians(220))
         now = time.monotonic()
@@ -1165,14 +1166,14 @@ class TestTactJumpRestrictionsTJ1:
         """angle_to_enemy = 10° < 15°, alle anderen Gates grün → Sprung ausgelöst."""
         import math
         from unittest.mock import patch
-        from bzbot_ai import AIState
+        from bot.models import AIState
         dist = 30.0
         ang = math.radians(10)
         ep = (math.cos(ang) * dist, math.sin(ang) * dist, 0.0)
         # enemy faces bot (azimuth ≈ 190° → looking back toward origin)
         self._setup(bot, ep, enemy_azimuth=math.radians(190))
         now = time.monotonic()
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0   # 0.0 >= 0.3 → False → kein Skip
             result = bot._check_tactical_jump(now)
         assert result is True
@@ -1182,7 +1183,7 @@ class TestTactJumpRestrictionsTJ1:
         """Gegner weicht mit 20 u/s zurück → Clearance-Gate schlägt an."""
         # (25 + (−20)) * t_jump ≈ 5 * 3.88 = 19.4 < 40 * 1.2 = 48
         import math
-        from bzbot_ai import AIState
+        from bot.models import AIState
         self._setup(bot, (40.0, 0.0, 0.0),
                     enemy_vel=(20.0, 0.0, 0.0),
                     enemy_azimuth=math.radians(180))   # enemy faces bot
@@ -1193,7 +1194,8 @@ class TestTactJumpRestrictionsTJ1:
 
     def test_tact_jump_blocked_z_diff(self, bot):
         """z_diff > HIT_RADIUS → Z-Gate schlägt an, kein Sprung."""
-        from bzbot_ai import AIState, HIT_RADIUS
+        from bot.constants import HIT_RADIUS
+        from bot.models import AIState
         self._setup(bot, (30.0, 0.0, HIT_RADIUS + 1.0))
         now = time.monotonic()
         result = bot._check_tactical_jump(now)
@@ -1202,7 +1204,7 @@ class TestTactJumpRestrictionsTJ1:
 
     def test_tact_jump_retry_cooldown_blocks(self, bot):
         """_tact_jump_retry_after in der Zukunft → sofort False, alle anderen Gates egal."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         import math
         dist = 30.0
         ang = math.radians(10)
@@ -1217,7 +1219,7 @@ class TestTactJumpRestrictionsTJ1:
     def test_tact_jump_blocked_enemy_has_shockwave(self, bot):
         """TACT-02: anvisierter Gegner trägt SW → kein TactJump (Sprung in die SW-Kuppel)."""
         import math
-        from bzbot_ai import AIState
+        from bot.models import AIState
         dist = 30.0
         ang = math.radians(10)
         ep = (math.cos(ang) * dist, math.sin(ang) * dist, 0.0)
@@ -1232,14 +1234,14 @@ class TestTactJumpRestrictionsTJ1:
         """Gegenprobe zu TACT-02: ein Nicht-SW-Flag (hier GM) blockt den TactJump nicht."""
         import math
         from unittest.mock import patch
-        from bzbot_ai import AIState
+        from bot.models import AIState
         dist = 30.0
         ang = math.radians(10)
         ep = (math.cos(ang) * dist, math.sin(ang) * dist, 0.0)
         p = self._setup(bot, ep, enemy_azimuth=math.radians(190))
         p.flag = "GM"
         now = time.monotonic()
-        with patch("bzbot_ai.random") as mock_rng:
+        with patch("bot.ai.tactics.random") as mock_rng:
             mock_rng.random.return_value = 0.0   # 0.0 >= 0.3 → False → kein Skip
             result = bot._check_tactical_jump(now)
         assert result is True

@@ -183,7 +183,7 @@ class TestNoReverseWhenEnemyJumping:
 
     def test_hold_position_when_enemy_airborne(self, bot):
         """Gegner is_airborne=True, dist < OPTIMAL_RANGE → _move_reverse=False."""
-        from bzbot import OPTIMAL_RANGE
+        from bot.constants import OPTIMAL_RANGE
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -201,8 +201,8 @@ class TestNoReverseWhenEnemyJumping:
     def test_reverse_when_enemy_on_ground(self, bot):
         """Gegner is_airborne=False, dist < OPTIMAL_RANGE → Bot fährt rückwärts (vel[0] < 0).
         Neue Architektur: _execute_combat_move setzt negative Geschwindigkeit statt _move_reverse."""
-        from bzbot import OPTIMAL_RANGE
-        from bzbot_ai import AIState
+        from bot.constants import OPTIMAL_RANGE
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -227,7 +227,7 @@ class TestRamBurrowedEnemy:
         """Gegner mit BU-Flagge eingegraben (z=-1.32), dist=40 → Bot fährt vorwärts (vel[0] > 0).
         Spiegel zu test_reverse_when_enemy_on_ground: dort 40 < 60 → rückwärts; hier
         _opt = TANK_RADIUS*SR_RADIUS_MULT ≈ 8.64 < 40 → voll vorwärts zum Rammen."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
@@ -251,7 +251,7 @@ class TestRamBurrowedEnemy:
 
     def test_optimal_range_ram_for_burrowed_target(self, bot):
         """Bot ohne (GM/SW-)Flagge, Ziel mit BU → Ramm-Kontaktdistanz TANK_RADIUS*SR_RADIUS_MULT."""
-        from bzbot_ai import TANK_RADIUS, SR_RADIUS_MULT
+        from bot.constants import TANK_RADIUS, SR_RADIUS_MULT
         bot.own_flag = ""
         make_player(bot, 99, pos=(40.0, 0.0, -1.32), flag="BU")
         bot.target_player = 99
@@ -260,7 +260,7 @@ class TestRamBurrowedEnemy:
     def test_no_ram_for_bu_target_on_building(self, bot):
         """BU-Gegner auf einem Dach (z>0) ist NICHT eingegraben → normal trefbar → OPTIMAL_RANGE,
         kein Rammen (Burrow wirkt nur am Boden, z<0)."""
-        from bzbot_ai import OPTIMAL_RANGE
+        from bot.constants import OPTIMAL_RANGE
         bot.own_flag = ""
         make_player(bot, 99, pos=(40.0, 0.0, 5.0), flag="BU")   # z=5 → auf Gebäude
         bot.target_player = 99
@@ -283,7 +283,7 @@ def test_move_toward_enemy_when_close_in_combat(bot):
     """Im COMBAT-State: Bot zeigt auf Gegner und fährt rückwärts wenn Gegner < OPTIMAL_RANGE.
     (Neue Architektur: _execute_combat_move statt _move_reverse für COMBAT)"""
     from conftest import make_player
-    from bzbot_ai import AIState
+    from bot.models import AIState
     p = make_player(bot, 2, pos=(20.0, 0.0, 0.0))  # dist = 20 < OPTIMAL_RANGE
     p.vel = [0.0, 0.0, 0.0]
     bot.target_player = 2
@@ -319,7 +319,7 @@ def _give_bot_world_with_box(bot, obs):
 
 def test_ceiling_collision_stops_upward_movement(bot):
     """Bot springt von unten gegen Platform-Boden → vel[2]=0, pos[2] auf Decke."""
-    from bzbot_ai import TANK_HEIGHT
+    from bot.constants import TANK_HEIGHT
     obs = _make_box_obstacle(cx=0.0, cy=0.0, bottom_z=7.0, half_w=5.0, half_d=5.0, height=2.0)
     _give_bot_world_with_box(bot, obs)
     bot.pos = [0.0, 0.0, 5.5]   # bot_top = 5.5 + 2.05 = 7.55 > obs.bottom_z=7.0
@@ -331,7 +331,7 @@ def test_ceiling_collision_stops_upward_movement(bot):
 
 def test_ceiling_no_stop_if_already_inside(bot):
     """Bot bereits INNERHALB des Gebäudes (pz >= bottom_z) → kein Deckenstopp."""
-    from bzbot_ai import TANK_HEIGHT
+    from bot.constants import TANK_HEIGHT
     obs = _make_box_obstacle(cx=0.0, cy=0.0, bottom_z=0.0, half_w=5.0, half_d=5.0, height=6.0)
     _give_bot_world_with_box(bot, obs)
     bot.pos = [0.0, 0.0, 3.0]   # pz=3.0 >= bottom_z=0.0 → kein Decken-Check
@@ -535,7 +535,7 @@ class TestAdvancePathNavJump:
 
     def test_upward_feasible_triggers_jump(self, bot):
         """Aufwärts-WP + Machbarkeit → NAV_JUMP wird initiiert."""
-        from bzbot_ai import JUMP_VELOCITY, GRAVITY, TANK_SPEED
+        from bot.constants import JUMP_VELOCITY, GRAVITY, TANK_SPEED
         dz = 10.0
         disc = JUMP_VELOCITY**2 - 2.0 * abs(GRAVITY) * dz
         t_desc = (JUMP_VELOCITY + math.sqrt(disc)) / abs(GRAVITY)
@@ -548,7 +548,7 @@ class TestAdvancePathNavJump:
 
     def test_upward_infeasible_clears_path(self, bot):
         """Aufwärts-WP zu weit (> Abstiegs-Reichweite × 1.1) → Pfad verworfen, kein Sprung."""
-        from bzbot_ai import JUMP_VELOCITY, GRAVITY, TANK_SPEED
+        from bot.constants import JUMP_VELOCITY, GRAVITY, TANK_SPEED
         dz = 10.0
         disc = JUMP_VELOCITY**2 - 2.0 * abs(GRAVITY) * dz
         t_desc = (JUMP_VELOCITY + math.sqrt(disc)) / abs(GRAVITY)
@@ -618,7 +618,7 @@ class TestNavJumpAlignState:
 
     def _setup_align(self, bot, wp, azimuth, start_offset=0.0):
         """Setzt alle _nav_jump_align_*-Attribute am Bot."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._nav_jump_align_wp = list(wp)
         bot._nav_jump_align_start = time.monotonic() - start_offset
         bot._nav_jump_align_return_state = AIState.SEEKING
@@ -627,7 +627,7 @@ class TestNavJumpAlignState:
 
     def test_timeout_clears_path_and_transitions(self, bot):
         """Nach 5s Timeout → nav_path geleert, target_pos None, State → return_state."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         self._setup_align(bot, (20.0, 0.0, 10.0), azimuth=math.pi / 2, start_offset=6.0)
         bot._nav_path = [(20.0, 0.0, 10.0)]
@@ -640,7 +640,8 @@ class TestNavJumpAlignState:
 
     def test_cooldown_prevents_realign(self, bot):
         """Gecooldowntes WP → _advance_path löscht Pfad statt NAV_JUMP_ALIGN zu setzen."""
-        from bzbot_ai import AIState, JUMP_VELOCITY, GRAVITY, TANK_SPEED
+        from bot.constants import JUMP_VELOCITY, GRAVITY, TANK_SPEED
+        from bot.models import AIState
         dz = 10.0
         disc = JUMP_VELOCITY**2 - 2.0 * abs(GRAVITY) * dz
         t_desc = (JUMP_VELOCITY + math.sqrt(disc)) / abs(GRAVITY)
@@ -685,7 +686,8 @@ class TestAdvancePathNavJumpAlign:
 
     def test_azimuth_fail_geometry_ok_triggers_align(self, bot):
         """Geometry OK, Azimuth > 30° weg → State NAV_JUMP_ALIGN, Pfad bleibt erhalten."""
-        from bzbot_ai import AIState, JUMP_VELOCITY, GRAVITY, TANK_SPEED
+        from bot.constants import JUMP_VELOCITY, GRAVITY, TANK_SPEED
+        from bot.models import AIState
         dz = 10.0
         disc = JUMP_VELOCITY**2 - 2.0 * abs(GRAVITY) * dz
         t_desc = (JUMP_VELOCITY + math.sqrt(disc)) / abs(GRAVITY)
@@ -746,7 +748,7 @@ class TestNavJumpLandSpin:
 
     def test_faces_enemy_when_landing_at_enemy_level(self, bot):
         """Landepunkt z ≈ Gegner-z → Drehung zeigt zum Gegner, nicht zum nächsten WP."""
-        from bzbot_ai import _wrap
+        from bot.util import _wrap
         bot.pos = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
         wp = (15.0, 0.0, 0.0)
@@ -763,7 +765,7 @@ class TestNavJumpLandSpin:
 
     def test_faces_next_wp_when_not_at_enemy_level(self, bot):
         """Landepunkt z weit von Gegner-z (> NAV_JUMP_Z_TOL) → Drehung zum nächsten WP."""
-        from bzbot_ai import _wrap
+        from bot.util import _wrap
         bot.pos = [0.0, 0.0, 0.0]
         bot.azimuth = 0.0
         wp = (15.0, 0.0, 10.0)                       # Landepunkt z=10 (machbar: < 18.4u)
@@ -802,7 +804,7 @@ class TestNavJumpLandSpin:
 
     def test_tick_integrates_spin_into_azimuth(self, bot):
         """_tick_nav_jump dreht die Azimuth um _jump_ang_vel * dt (Lande-Drehung wirkt im Flug)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 10.0]
         bot.vel = [5.0, 0.0, 5.0]                     # steigend → nicht gelandet
         bot.azimuth = 0.0
@@ -819,7 +821,7 @@ class TestWpTimeoutScaling:
     """_wp_timeout wird nach Distanz berechnet: WP_TIMEOUT_BASE + dist * WP_TIMEOUT_SCALE."""
 
     def test_short_wp_timeout(self, bot):
-        from bzbot_ai import WP_TIMEOUT_BASE, WP_TIMEOUT_SCALE
+        from bot.constants import WP_TIMEOUT_BASE, WP_TIMEOUT_SCALE
         bot.pos = [0.0, 0.0, 0.0]
         bot._nav_path = [(0.0, 0.0, 0.0), (5.0, 0.0, 0.0)]
         bot._wp_fail_count = 0
@@ -828,7 +830,7 @@ class TestWpTimeoutScaling:
         assert bot._wp_timeout == pytest.approx(expected)
 
     def test_long_wp_timeout(self, bot):
-        from bzbot_ai import WP_TIMEOUT_BASE, WP_TIMEOUT_SCALE
+        from bot.constants import WP_TIMEOUT_BASE, WP_TIMEOUT_SCALE
         bot.pos = [0.0, 0.0, 0.0]
         bot._nav_path = [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0)]
         bot._wp_fail_count = 0
@@ -997,7 +999,7 @@ class TestDirectModeNoPlanning:
         """Gegner gleiche Z, dist < _opt·1.5 → _skip_nav True: _plan_path NICHT aufgerufen,
         _nav_path invalidiert. (replan_xy würde sonst wegen _nav_goal=None planen.)"""
         from unittest.mock import MagicMock
-        from bzbot_ai import AIState
+        from bot.models import AIState
         p = make_player(bot, 7, pos=(40.0, 0.0, 0.0))  # gleiche Z → _check1 True
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 7
@@ -1017,7 +1019,7 @@ class TestNavJumpZLandingCheck:
 
     def test_z_deviation_too_large_counts_as_failure(self, bot):
         """Bot horizontal nah an erhöhtem WP, aber auf falscher Z-Ebene → timed_out=True."""
-        from bzbot_ai import NAV_JUMP_Z_TOL
+        from bot.constants import NAV_JUMP_Z_TOL
         # Bot steht auf Boden (z=0), WP ist auf z=10 (elevated)
         bot.pos = [0.0, 0.0, 0.0]
         wp_z = 10.0
@@ -1031,7 +1033,7 @@ class TestNavJumpZLandingCheck:
 
     def test_z_deviation_acceptable_advances_normally(self, bot):
         """Kleine Z-Abweichung (≤ NAV_JUMP_Z_TOL) → normales WP-Advance."""
-        from bzbot_ai import NAV_JUMP_Z_TOL
+        from bot.constants import NAV_JUMP_Z_TOL
         # Bot fast auf Ziel-Z (Abweichung 1.0 < 2.5)
         wp_z = 10.0
         bot.pos = [0.0, 0.0, wp_z - 1.0]   # 1u zu niedrig → akzeptabel
@@ -1059,7 +1061,7 @@ class TestFallingState:
 
     def test_combat_at_height_transitions_to_falling(self, bot):
         """Bot in COMBAT, vel[2] < -0.1 und pos[2] > floor_z + 0.5 → FALLING."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._ai_state = AIState.COMBAT
         bot.pos  = [0.0, 0.0, 15.0]
         bot.vel  = [5.0, 0.0, -0.5]
@@ -1072,7 +1074,7 @@ class TestFallingState:
 
     def test_pre_fall_state_restored_on_landing(self, bot):
         """Nach FALLING landet Bot → State zurück auf _pre_fall_state."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._ai_state = AIState.FALLING
         bot._pre_fall_state = AIState.COMBAT
         bot._jumping = True
@@ -1084,7 +1086,7 @@ class TestFallingState:
 
     def test_falling_does_not_change_horizontal_velocity(self, bot):
         """_tick_falling: vel[0]/vel[1] bleiben unverändert (committed)."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._ai_state = AIState.FALLING
         bot._pre_fall_state = AIState.COMBAT
         bot._jumping = True
@@ -1097,7 +1099,7 @@ class TestFallingState:
 
     def test_seeking_also_enters_falling(self, bot):
         """Auch SEEKING → FALLING wenn airborne."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._ai_state = AIState.SEEKING
         bot.pos  = [0.0, 0.0, 15.0]
         bot.vel  = [0.0, 0.0, -0.5]
@@ -1108,7 +1110,7 @@ class TestFallingState:
 
     def test_on_ground_does_not_enter_falling(self, bot):
         """Bot steht auf Dach (pos[2] == floor_z) → kein FALLING."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._ai_state = AIState.COMBAT
         bot.pos  = [0.0, 0.0, 0.0]
         bot.vel  = [5.0, 0.0, 0.0]
@@ -1170,7 +1172,7 @@ class TestExecuteCombatMoveElevated:
 
     def test_does_not_crash_when_enemy_elevated(self, bot):
         """enemy_z > TANK_HEIGHT → _z_attack_feasible(now) wird aufgerufen; kein NameError."""
-        from bzbot_ai import TANK_HEIGHT
+        from bot.constants import TANK_HEIGHT
         p = make_player(bot, 2, pos=(30.0, 0.0, 15.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
@@ -1205,14 +1207,14 @@ class TestZAttackFeasible:
 
     def test_returns_false_when_enemy_too_high(self, bot):
         """Gegner über max_jump_h → nicht erreichbar → False."""
-        from bzbot_ai import JUMP_VELOCITY, GRAVITY
+        from bot.constants import JUMP_VELOCITY, GRAVITY
         max_jump_h = JUMP_VELOCITY ** 2 / (2.0 * abs(GRAVITY))
         self._setup(bot, enemy_pos=(50.0, 0.0, max_jump_h + 1.0))
         assert bot._z_attack_feasible(1000.0) is False
 
     def test_returns_false_when_jump_on_cooldown(self, bot):
         """Sprung-Cooldown aktiv → _can_jump False → False."""
-        from bzbot_ai import JUMP_COOLDOWN
+        from bot.constants import JUMP_COOLDOWN
         self._setup(bot, enemy_pos=(50.0, 0.0, 8.0))
         now = 1000.0
         bot._last_jump_at = now - JUMP_COOLDOWN + 0.5
@@ -1407,7 +1409,7 @@ class TestJumpGeometryCooldown:
 
     def test_geometry_fail_sets_cooldown(self, bot):
         """Wenn _nav_jump_geometry_ok=False → WP-Key in _nav_jump_cooldowns."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         from unittest.mock import patch
         bot._ai_state = AIState.SEEKING
         bot.pos = [0.0, 0.0, 0.0]
@@ -1426,7 +1428,7 @@ class TestJumpGeometryCooldown:
 
     def test_geometry_fail_clears_path(self, bot):
         """Geometry-Fehler leert Pfad komplett."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         from unittest.mock import patch
         bot._ai_state = AIState.SEEKING
         bot.pos = [0.0, 0.0, 0.0]
@@ -1448,7 +1450,7 @@ class TestRecentFlagTargets:
 
     def test_recent_targets_skip_on_next_call(self, bot):
         """Nach erster Auswahl ist die Flag im deque und wird beim nächsten Aufruf übersprungen."""
-        from bzbot import FlagInfo
+        from bot.models import FlagInfo
         bot.own_flag = ""
         bot.pos = [0.0, 0.0, 0.0]
         fi_f = FlagInfo(flag_id=0, abbr="GM", status=1, pos=[10.0, 0.0, 0.0])
@@ -1487,7 +1489,7 @@ class TestRecentFlagTargets:
 
     def test_id_fall_b_skips_recent(self, bot):
         """Fall B: kürzlich besuchte Flag wird im zweiten Loop übersprungen."""
-        from bzbot import FlagInfo
+        from bot.models import FlagInfo
         bot.own_flag = "ID"
         bot.pos = [0.0, 0.0, 0.0]
         # Zwei schlechte Flags außerhalb IDENTIFY_RANGE — eine davon im deque
@@ -1503,7 +1505,7 @@ class TestRecentFlagTargets:
 
     def test_id_fall_b_seeks_flag_outside_range(self, bot):
         """Fall B zweiter Loop: Flag bei >50u ohne deque-Eintrag wird angesteuert."""
-        from bzbot import FlagInfo
+        from bot.models import FlagInfo
         bot.own_flag = "ID"
         bot.pos = [0.0, 0.0, 0.0]
         fi = FlagInfo(flag_id=0, abbr="GM", status=1, pos=[60.0, 0.0, 0.0])
@@ -1517,7 +1519,7 @@ class TestRecentFlagTargets:
 
     def test_degenerate_path_no_hot_loop(self, bot):
         """Degenerate-Pfad: Flag geht in deque → zweiter _new_target()-Aufruf wählt andere."""
-        from bzbot import FlagInfo
+        from bot.models import FlagInfo
         bot.own_flag = ""
         bot.pos = [0.0, 0.0, 0.0]
         fi_f = FlagInfo(flag_id=0, abbr="GM", status=1, pos=[10.0, 0.0, 0.0])
@@ -1544,7 +1546,7 @@ class TestAgilityBoost:
 
     def test_agility_boost_from_standstill(self, bot):
         """A-Flagge + vel≈0 → Geschwindigkeit = tankSpeed × AGILITY_AD_VEL."""
-        from bzbot_ai import AGILITY_AD_VEL, TANK_SPEED
+        from bot.constants import AGILITY_AD_VEL, TANK_SPEED
         bot.own_flag = "A"
         bot.vel = [0.0, 0.0, 0.0]
         result = bot._effective_tank_speed()
@@ -1552,7 +1554,7 @@ class TestAgilityBoost:
 
     def test_agility_no_boost_when_moving(self, bot):
         """A-Flagge + vel≥1m/s → kein Boost, normale tankSpeed."""
-        from bzbot_ai import TANK_SPEED
+        from bot.constants import TANK_SPEED
         bot.own_flag = "A"
         bot.vel = [5.0, 0.0, 0.0]
         result = bot._effective_tank_speed()
@@ -1568,7 +1570,7 @@ class TestIdFallB2Filter:
         """Flagge mit bekannter schlechter Abkürzung bei d<50u → B2 überspringt sie.
         Eine Ausweich-Flagge außerhalb des Radius stellt sicher, dass die nahe PZ-Flagge
         wirklich übersprungen wird (kein Fall-C-Fallthrough als false-positive)."""
-        from bzbot import FlagInfo
+        from bot.models import FlagInfo
         bot.own_flag = "ID"
         bot.pos = [0.0, 0.0, 0.0]
         bot.good_flags = set()  # PZ ist nicht gut
@@ -1586,7 +1588,7 @@ class TestIdFallB2Filter:
 
     def test_b2_does_not_skip_unknown_within_range(self, bot):
         """Flagge mit abbr='' (unbekannt) bei d<50u → B2 überspringt sie NICHT."""
-        from bzbot import FlagInfo
+        from bot.models import FlagInfo
         bot.own_flag = "ID"
         bot.pos = [0.0, 0.0, 0.0]
         bot.good_flags = set()
@@ -1821,7 +1823,7 @@ class TestNavJumpReturnState:
     damit der 5-s-Timeout nicht 'auf sich selbst aussteigt'."""
 
     def test_initiate_nav_jump_from_align_resolves_owner(self, bot):
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 15.0]
         bot.azimuth = 0.0
         bot._ai_state = AIState.NAV_JUMP_ALIGN
@@ -1831,7 +1833,7 @@ class TestNavJumpReturnState:
         assert bot._ai_state == AIState.NAV_JUMP
 
     def test_align_timeout_exits_to_ground_state(self, bot):
-        from bzbot_ai import AIState
+        from bot.models import AIState
         make_player(bot, 2, pos=(50.0, 0.0, 30.0))
         bot.target_player = 2
         bot.human_count = 1
@@ -1844,7 +1846,7 @@ class TestNavJumpReturnState:
         assert bot._ai_state == AIState.COMBAT
 
     def test_ground_state_variants(self, bot):
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot._has_presence = lambda: True          # Mensch anwesend (Mitspieler ODER Zuschauer)
         bot.target_player = 2
         assert bot._ground_state() == AIState.COMBAT
@@ -1866,13 +1868,13 @@ class TestEffectiveJumpHelpers:
         assert bot._effective_gravity() == pytest.approx(-4.9)
 
     def test_effective_gravity_wings_fallback_when_unset(self, bot):
-        from bzbot_ai import GRAVITY
+        from bot.constants import GRAVITY
         bot.own_flag = "WG"
         bot._wings_gravity = None          # kein Server-Override → BZDB-Default "_gravity"
         assert bot._effective_gravity() == pytest.approx(GRAVITY)
 
     def test_effective_gravity_lg_still_works(self, bot):
-        from bzbot_ai import GRAVITY
+        from bot.constants import GRAVITY
         bot.own_flag = "LG"
         bot._lg_gravity = 12.7
         assert bot._effective_gravity() == pytest.approx(GRAVITY * 0.127)
@@ -1883,7 +1885,7 @@ class TestEffectiveJumpHelpers:
         assert bot._effective_jump_velocity() == pytest.approx(25.0)
 
     def test_effective_jump_velocity_fallback(self, bot):
-        from bzbot_ai import JUMP_VELOCITY
+        from bot.constants import JUMP_VELOCITY
         bot.own_flag = "WG"
         bot._wings_jump_velocity = None    # kein Override → Normalwert
         assert bot._effective_jump_velocity() == pytest.approx(JUMP_VELOCITY)
@@ -1892,13 +1894,13 @@ class TestEffectiveJumpHelpers:
         assert bot._effective_jump_velocity() == pytest.approx(JUMP_VELOCITY)
 
     def test_effective_jump_height_default_equals_raw(self, bot):
-        from bzbot_ai import JUMP_VELOCITY, GRAVITY
+        from bot.constants import JUMP_VELOCITY, GRAVITY
         bot.own_flag = ""
         expected = JUMP_VELOCITY ** 2 / (2.0 * abs(GRAVITY))
         assert bot._effective_jump_height() == pytest.approx(expected)
 
     def test_effective_jump_height_wings_combines_both(self, bot):
-        from bzbot_ai import JUMP_VELOCITY, GRAVITY
+        from bot.constants import JUMP_VELOCITY, GRAVITY
         bot.own_flag = "WG"
         bot._wings_gravity = -4.9
         bot._wings_jump_velocity = 25.0
@@ -1951,7 +1953,7 @@ class TestJumpLaunchVz:
     LocalPlayer.cxx doJump() — WG additiv beim Fallen / höhere Steig-Velocity behalten, sonst fest."""
 
     def test_normal_jump_is_fixed(self, bot):
-        from bzbot_ai import JUMP_VELOCITY
+        from bot.constants import JUMP_VELOCITY
         bot.own_flag = ""
         # Normalsprung ignoriert die aktuelle Velocity → fester Wert (auch im Fallen).
         assert bot._jump_launch_vz(0.0) == pytest.approx(JUMP_VELOCITY)
@@ -1959,18 +1961,18 @@ class TestJumpLaunchVz:
         assert bot._jump_launch_vz(5.0) == pytest.approx(JUMP_VELOCITY)
 
     def test_wings_falling_is_additive(self, bot):
-        from bzbot_ai import JUMP_VELOCITY
+        from bot.constants import JUMP_VELOCITY
         bot.own_flag = "WG"
         # fallend (vz=-10) → nur abgebremst: 19 + (-10) = 9, KEIN voller neuer Bogen.
         assert bot._jump_launch_vz(-10.0) == pytest.approx(JUMP_VELOCITY - 10.0)
 
     def test_wings_near_apex_nearly_full(self, bot):
-        from bzbot_ai import JUMP_VELOCITY
+        from bot.constants import JUMP_VELOCITY
         bot.own_flag = "WG"
         assert bot._jump_launch_vz(-0.5) == pytest.approx(JUMP_VELOCITY - 0.5)
 
     def test_wings_rising_slower_gets_full(self, bot):
-        from bzbot_ai import JUMP_VELOCITY
+        from bot.constants import JUMP_VELOCITY
         bot.own_flag = "WG"
         assert bot._jump_launch_vz(5.0) == pytest.approx(JUMP_VELOCITY)
 

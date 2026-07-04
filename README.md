@@ -143,8 +143,17 @@ bzflag-bot/
 │   ├── test_shot_physics.py   – Ricochet-Pfad-Simulation (Bounce, Normalen)
 │   ├── test_bot_manager.py    – Bot-Manager (Rebalancing, Observer-Zählung)
 │   └── test_performance.py    – Performance-/Timing-Checks (`pytest -m perf -s`)
-├── bzbot.py                   – Einzelner Bot (direkt startbar)
-├── bzbot_ai.py                – KI-Logik, Physik, State Machine, Kollision
+├── bzbot.py                   – Einzelner Bot (direkt startbar; Entry-Point)
+├── bot/                       – Bot-Logik als Paket
+│   ├── constants.py           – Spiel-Konstanten (+ Server-Var-Tabelle)
+│   ├── models.py              – Shot/PlayerInfo/FlagInfo/AIState
+│   ├── util.py                – Geometrie-Helfer
+│   ├── core.py                – BZBot: Game-Loop, Server-Updates, Spawn
+│   ├── handlers.py            – Message-Handler (_on_*, _on_set_var)
+│   ├── hit_detection.py       – Hit-Detection, Steamroller, Schuss-Cleanup
+│   └── ai/                    – BZBotAI als 9 Mixins (states, combat, navigation,
+│                                perception, targeting, tactics, shooting, physics,
+│                                capabilities)
 ├── bot_manager.py             – Manager für mehrere Bots
 ├── config.yaml                – Konfigurationsbeispiel
 └── README.md

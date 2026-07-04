@@ -726,3 +726,110 @@ class TestRoundRestart:
             mgr._rotate_expired_bots()
         start.assert_not_called()
         stop.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# BotProcess: cProfile-Start (profile/profile_dir) + gestaffelter Stop
+# ---------------------------------------------------------------------------
+
+class TestBotProcessProfile:
+
+    def _start_capture_cmd(self, bp):
+        """start() mit gemocktem Popen ausführen und die Kommandozeile zurückgeben.
+        stdout=None lässt den Log-Thread sofort zurückkehren."""
+        with patch("bot_manager.subprocess.Popen") as popen:
+            popen.return_value = MagicMock(pid=1234, stdout=None)
+            assert bp.start()
+        return popen.call_args[0][0]
+
+    def test_profile_defaults(self):
+        from bot_manager import Config
+        cfg = Config()
+        assert cfg.profile is False
+        assert cfg.profile_dir == "/tmp"
+
+    def test_default_start_without_cprofile(self):
+        from bot_manager import BotProcess, Config
+        bp = BotProcess(callsign="X", config=Config())
+        cmd = self._start_capture_cmd(bp)
+        assert "cProfile" not in cmd
+        assert cmd[1].endswith("bzbot.py")
+
+    def test_profile_wraps_cmd_and_writes_to_dir(self, tmp_path):
+        from bot_manager import BotProcess, Config
+        cfg = Config()
+        cfg.profile = True
+        cfg.profile_dir = str(tmp_path / "profiles")   # existiert noch nicht → makedirs
+        bp = BotProcess(callsign="[b0t] Tank You", config=cfg)
+        cmd = self._start_capture_cmd(bp)
+        i = cmd.index("cProfile")
+        assert cmd[i - 1] == "-m" and cmd[i + 1] == "-o"
+        out = cmd[i + 2]
+        assert out.startswith(str(tmp_path / "profiles"))
+        assert out.endswith(".prof")
+        assert os.path.isdir(cfg.profile_dir)
+        # Callsign dateinamen-sicher bereinigt
+        fname = os.path.basename(out)
+        assert " " not in fname and "[" not in fname and "]" not in fname
+        # bzbot.py inkl. aller Bot-Argumente folgt NACH dem cProfile-Teil
+        assert cmd[i + 3].endswith("bzbot.py")
+        assert "--managed" in cmd[i + 3:]
+
+    def test_profile_outfiles_unique_per_botprocess(self, tmp_path):
+        from bot_manager import BotProcess, Config
+        cfg = Config()
+        cfg.profile = True
+        cfg.profile_dir = str(tmp_path)
+        a = BotProcess(callsign="Same", config=cfg)
+        b = BotProcess(callsign="Same", config=cfg)
+        assert a._profile_outfile() != b._profile_outfile()  # id im Namen
+
+
+class TestBotProcessStopStaged:
+    """stop() = SIGINT → SIGTERM → SIGKILL (SIGINT-first für cProfile-Dump)."""
+
+    def _bp_with_proc(self):
+        from bot_manager import BotProcess, Config
+        bp = BotProcess(callsign="X", config=Config())
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 42
+        bp.process = proc
+        return bp, proc
+
+    def test_sigint_suffices(self):
+        import signal as _signal
+        bp, proc = self._bp_with_proc()
+        bp.stop(timeout=0.1)
+        proc.send_signal.assert_called_once_with(_signal.SIGINT)
+        proc.terminate.assert_not_called()
+        proc.kill.assert_not_called()
+        assert bp.process is None
+        assert bp._stopping is True
+
+    def test_sigint_unsupported_falls_back_to_terminate(self):
+        """Windows: Popen.send_signal(SIGINT) wirft ValueError → SIGTERM-Pfad."""
+        bp, proc = self._bp_with_proc()
+        proc.send_signal.side_effect = ValueError("Unsupported signal: 2")
+        bp.stop(timeout=0.1)
+        proc.terminate.assert_called_once()
+        proc.kill.assert_not_called()
+        assert bp.process is None
+
+    def test_sigint_timeout_then_terminate(self):
+        import subprocess as _subprocess
+        bp, proc = self._bp_with_proc()
+        proc.wait.side_effect = [_subprocess.TimeoutExpired("x", 0.1), 0]
+        bp.stop(timeout=0.1)
+        proc.terminate.assert_called_once()
+        proc.kill.assert_not_called()
+        assert bp.process is None
+
+    def test_all_timeouts_end_in_kill(self):
+        import subprocess as _subprocess
+        bp, proc = self._bp_with_proc()
+        proc.wait.side_effect = _subprocess.TimeoutExpired("x", 0.1)
+        bp.stop(timeout=0.1)
+        proc.terminate.assert_called_once()
+        proc.kill.assert_called_once()
+        assert bp.process is None

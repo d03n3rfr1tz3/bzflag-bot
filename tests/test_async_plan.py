@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-import bzbot_ai
+from bot.constants import NAV_ASYNC_MAX_EXPANSIONS, NAV_ASYNC_MAX_MS
 
 
 class _FakeNav:
@@ -38,15 +38,15 @@ def _prep(bot, nav):
 def test_async_spawns_when_sync_exceeds_trigger(bot, monkeypatch):
     nav = _FakeNav([(5.0, 0.0, 0.0)])
     _prep(bot, nav)
-    monkeypatch.setattr(bzbot_ai, "NAV_ASYNC_TRIGGER_MS", -1.0)   # elapsed_ms ≥ 0 → immer triggern
+    monkeypatch.setattr("bot.ai.navigation.NAV_ASYNC_TRIGGER_MS", -1.0)   # elapsed_ms ≥ 0 → immer triggern
     bot._plan_path(5.0, 0.0)
     th = bot._async_plan_thread
     assert th is not None
     th.join(timeout=2.0)
     assert not th.is_alive()
     # Worker rief plan_path mit den großen Hintergrund-Limits auf (letzter Call).
-    assert nav.calls[-1]["max_expansions"] == bzbot_ai.NAV_ASYNC_MAX_EXPANSIONS
-    assert nav.calls[-1]["max_ms"] == bzbot_ai.NAV_ASYNC_MAX_MS
+    assert nav.calls[-1]["max_expansions"] == NAV_ASYNC_MAX_EXPANSIONS
+    assert nav.calls[-1]["max_ms"] == NAV_ASYNC_MAX_MS
     assert bot._async_plan_result is not None
     assert bot._async_plan_result[0] == bot._plan_gen          # gen passend getaggt
 
@@ -54,7 +54,7 @@ def test_async_spawns_when_sync_exceeds_trigger(bot, monkeypatch):
 def test_async_not_spawned_when_sync_fast(bot, monkeypatch):
     nav = _FakeNav([(5.0, 0.0, 0.0)])
     _prep(bot, nav)
-    monkeypatch.setattr(bzbot_ai, "NAV_ASYNC_TRIGGER_MS", 1e9)    # nie triggern
+    monkeypatch.setattr("bot.ai.navigation.NAV_ASYNC_TRIGGER_MS", 1e9)    # nie triggern
     bot._plan_path(5.0, 0.0)
     assert bot._async_plan_thread is None
 

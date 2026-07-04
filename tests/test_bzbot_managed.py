@@ -17,15 +17,15 @@ from bzflag.protocol import MGR_STATUS_PREFIX
 
 
 def _make_bot(managed=True, prefix="[b0t] ", callsigns=None):
-    with patch("bzbot.BZFlagClient"):
-        from bzbot import BZBot
+    with patch("bot.core.BZFlagClient"):
+        from bot.core import BZBot
         return BZBot(host="localhost", port=5154, callsign="[b0t] Zwiebel",
                      bot_name_prefix=prefix, bot_callsigns=callsigns or [],
                      managed=managed)
 
 
 def _add_player(bot, pid, callsign, team=2, is_human=True):
-    from bzbot import PlayerInfo
+    from bot.models import PlayerInfo
     bot.players[pid] = PlayerInfo(callsign=callsign, team=team, is_human=is_human)
 
 

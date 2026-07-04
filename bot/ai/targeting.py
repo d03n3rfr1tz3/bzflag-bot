@@ -1,0 +1,317 @@
+"""Zielwahl: Gegner-Scoring, Ziel-Validierung/Staleness und Flaggen-Route (W4, FABLE-PLAN Teil 3)."""
+
+import math
+import random
+import struct
+import time
+import logging
+
+from bzflag.protocol import MsgGrabFlag
+from bot.constants import *  # noqa: F401,F403
+from bot.util import _angle_diff
+
+logger = logging.getLogger("bzbot")
+
+
+class TargetingMixin:
+    """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
+
+    def _is_foe(self, info: "PlayerInfo", in_sight: bool) -> bool:
+        """Wahrnehmungsbasierte Feind-Erkennung — respektiert CB und MQ wie ein echter Spieler."""
+        my = self.team if self.team not in (0xFFFF, 0xFFFE) else 0
+        if my == 0:
+            return True
+        if self.own_flag == "CB":
+            return True
+        if not in_sight and info.flag == "MQ" and self.own_flag != "SE":
+            return False
+        return my != info.team
+
+    def _genocide_multikill_possible(self) -> bool:
+        """True wenn min. ein Feind-Team > 1 lebenden Spieler hat (G-Flagge lohnt sich)."""
+        team_alive: dict = {}
+        # list()-Snapshot: players/flags werden im Recv-Thread mutiert (Join/Leave,
+        # Flag-Updates), die KI läuft im Game-Loop-Thread → Iterationen über diese
+        # Dicts hier und im Rest der Datei immer über eine Kopie (Konvention s. DEVELOPER.md).
+        for pid, info in list(self.players.items()):
+            if pid == self.player_id or not info.alive:
+                continue
+            if not self._is_foe(info, True):
+                continue
+            team_alive[info.team] = team_alive.get(info.team, 0) + 1
+        return any(c > 1 for c in team_alive.values())
+
+    def _validate_and_find_target(self) -> None:
+        """Validiert target_player (Reichweite/Sicht), sucht neues Ziel falls nötig."""
+        if self.target_player is not None:
+            ep = self._get_enemy_pos(self.target_player)
+            if ep is None:
+                self.target_player = None
+            else:
+                _tx, _ty = ep
+                _d = math.hypot(_tx - self.pos[0], _ty - self.pos[1])
+                _in_r = _d < self._effective_radar_range()
+                _in_s = False
+                # F5: Server-Basiswert (_shotRange) statt Konstante. Bewusst OHNE eigene
+                # Flaggen-Multiplikatoren (_effective_shot_range): das ist ein Sicht-/
+                # Halte-Fenster, kein Waffenwert — Laser (AdVel×1000) würde es sonst
+                # auf die ganze Karte ausdehnen. Deckungsgleich zum Zielwahl-Fenster
+                # in _find_target_player.
+                if _d < self._shot_range:
+                    _ang = math.atan2(_ty - self.pos[1], _tx - self.pos[0])
+                    _in_s = abs(_angle_diff(_ang, self.azimuth)) < self._effective_fov()
+                if not _in_r and not _in_s:
+                    self.target_player = None
+        if self.target_player is None:
+            self.target_player = self._find_target_player()
+
+    def _threat_unseen(self, shooter) -> bool:
+        """IB (Geschoss radar-unsichtbar — auch mit SE) bzw. ST (Tank radar-unsichtbar; SE sieht ihn):
+        solchen Bedrohungen nur ausweichen, wenn der Bot den Schützen wahrnimmt (Radar mit SE, sonst
+        Fenster: FoV + Sicht-LoS)."""
+        if shooter is None:
+            return False
+        if shooter.flag == "ST":
+            return not (self._enemy_visible_radar(shooter)          # = SE → sieht Stealth-Tank
+                        or self._sees_in_window(shooter, *shooter.pos))
+        if shooter.flag == "IB":
+            return not self._sees_in_window(shooter, *shooter.pos)  # Geschoss radar-unsichtbar, SE hilft nicht
+        return False
+
+    def _find_target_player(self):
+        """Wählt das nächste Ziel; None im Passivmodus."""
+        # Kampf ist aktiv, sobald ein Mensch anwesend ist (Mitspieler ODER Zuschauer) — nicht nur
+        # bei zielbaren Menschen. Peer-Bots auf Gegner-Teams sind gültige Ziele, damit die Bots
+        # für Zuschauer lebendig wirken; ohne jeden Menschen (nur eigene Bots) bleibt es passiv.
+        if not self._has_presence():
+            return None
+        best_id = None
+        best_score = float("inf")
+        _now = time.monotonic()
+        for pid, info in list(self.players.items()):
+            if pid == self.player_id or not info.alive:
+                continue
+            if info.paused:                             # pausiert = unverwundbar → kein Neu-Lock
+                continue
+            if _now - info.last_seen > ENEMY_STALE_S:   # zu lange nicht wahrgenommen → kein Re-Lock
+                continue                                # (Gegenstück zu _get_enemy_pos: kein Geist-Lock)
+            d = math.hypot(info.pos[0] - self.pos[0], info.pos[1] - self.pos[1])
+            in_radar = d < self._effective_radar_range() and self._enemy_visible_radar(info)
+            in_sight = False
+            # F5: Server-Basiswert (_shotRange) statt Konstante — Sicht-Zielfenster,
+            # bewusst ohne Flaggen-Multiplikatoren (s. _validate_and_find_target).
+            if d < self._shot_range and self._enemy_visible_window(info):
+                angle_to = math.atan2(
+                    info.pos[1] - self.pos[1], info.pos[0] - self.pos[0])
+                in_sight = (abs(_angle_diff(angle_to, self.azimuth)) < self._effective_fov()
+                            and self._has_los_to_point(info.pos[0], info.pos[1],
+                                                       info.pos[2] + self._tank_height * 0.5))
+            if not in_radar and not in_sight:
+                continue
+            if not self._is_foe(info, in_sight):
+                continue
+            pz_penalty = 5.0 if info.is_phantom_zoned and self.own_flag not in ("SB", "SW") else 1.0
+            st_gm_penalty = ST_GM_PENALTY if self.own_flag == "GM" and info.flag == "ST" else 1.0
+            # Aktuell als unerreichbar gemiedener Gegner: weich deprioritisieren (nicht hart
+            # überspringen) — ein erreichbarer Feind wird bevorzugt, der gemiedene aber weiter
+            # gewählt, falls er der einzige ist.
+            avoid_penalty = UNREACH_AVOID_PENALTY if self._combat_avoid.get(pid, 0.0) > _now else 1.0
+            score = d * (0.8 if info.is_human else 1.0) * pz_penalty * st_gm_penalty * avoid_penalty
+            if score < best_score:
+                best_score = score; best_id = pid
+        return best_id
+
+    def _get_enemy_pos(self, pid: int):
+        """Gibt (x, y) eines lebenden, kürzlich gesehenen Gegners zurück; sonst None."""
+        info = self.players.get(pid)
+        if info is None or not info.alive: return None
+        if info.paused: return (info.pos[0], info.pos[1])  # Pausierte: Position bekannt → kein Geist-Drop
+        if time.monotonic() - info.last_seen > ENEMY_STALE_S: return None
+        return (info.pos[0], info.pos[1])
+
+    def _dist_to_target(self) -> float:
+        """Euklidische Distanz zum aktuellen Wegpunkt; inf wenn kein Wegpunkt."""
+        if not self.target_pos: return float("inf")
+        return math.hypot(self.target_pos[0] - self.pos[0],
+                          self.target_pos[1] - self.pos[1])
+
+    def _flags_on_route_all(self, gx: float, gy: float,
+                            detour: float = 40.0) -> list[tuple[float, float]]:
+        """Wie _flags_on_route, aber ohne good_flags-Filter (alle on-ground Flags).
+        Für flagless-Modus mit breiterem Detour-Radius."""
+        cx, cy = self.pos[0], self.pos[1]
+        dx, dy = gx - cx, gy - cy
+        dist2 = dx * dx + dy * dy
+        if dist2 < 1.0:
+            return []
+        result: list[tuple[float, float, float]] = []
+        for fi in list(self.flags.values()):
+            if fi.status != 1:
+                continue
+            fx, fy = fi.pos[0], fi.pos[1]
+            t = ((fx - cx) * dx + (fy - cy) * dy) / dist2
+            if t <= 0.05 or t >= 0.95:
+                continue
+            proj_x = cx + t * dx
+            proj_y = cy + t * dy
+            if math.hypot(fx - proj_x, fy - proj_y) <= detour:
+                result.append((t, fx, fy))
+        result.sort()
+        return [(fx, fy) for _, fx, fy in result]
+
+    def _new_target(self) -> None:
+        """Setzt Navigationsziel abhängig vom eigenen Flag-Zustand.
+        Kein Flag: nächste on-ground Flag (Typ unbekannt).
+        ID-Flag: gute Flags in IDENTIFY_RANGE bevorzugen, ID ggf. ablegen.
+        Andere Flag: zufälliger Wegpunkt."""
+        self.target_player = None
+
+        # ── Fall A: Bot hat keine Flagge ─────────────────────────────────
+        if self.own_flag == "":
+            best_d: float = float("inf")
+            best_pos = None
+            _dropped = getattr(self, '_dropped_neutrals', ())
+            _recent  = getattr(self, '_recent_flag_targets', ())
+            for fi in list(self.flags.values()):
+                if fi.status != 1:
+                    continue
+                if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
+                    continue
+                if any(fi.abbr == a and math.hypot(fi.pos[0]-dx, fi.pos[1]-dy) < 20.0
+                       for a, dx, dy in _dropped):
+                    continue
+                d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
+                if d < best_d:
+                    best_d = d
+                    best_pos = (fi.pos[0], fi.pos[1], fi.pos[2])
+            if best_pos is not None:
+                self._recent_flag_targets.append((round(best_pos[0]), round(best_pos[1])))
+                via = self._flags_on_route_all(best_pos[0], best_pos[1], detour=40.0)
+                if via:
+                    nav = getattr(self, "_nav_graph", None)
+                    blocked = {k for k, v in self._nav_jump_cooldowns.items()
+                               if v > time.monotonic()}
+                    all_wps: list = []
+                    px, py, pz = self.pos[0], self.pos[1], self.pos[2]
+                    for fx, fy in via:
+                        if nav:
+                            seg = nav.plan_path(px, py, pz, fx, fy,
+                                                blocked_jump_wps=blocked)
+                            if seg:
+                                all_wps.extend(seg)
+                                px, py, pz = seg[-1][0], seg[-1][1], seg[-1][2]
+                    if nav:
+                        seg = nav.plan_path(px, py, pz,
+                                            best_pos[0], best_pos[1],
+                                            blocked_jump_wps=blocked,
+                                            goal_z=best_pos[2])
+                        if seg:
+                            all_wps.extend(seg)
+                    if all_wps:
+                        if len(all_wps) > 1 and not self._is_ahead(all_wps[0][0], all_wps[0][1]):
+                            all_wps.pop(0)
+                        self._nav_path  = all_wps
+                        self._nav_goal  = (best_pos[0], best_pos[1])
+                        self.target_pos = (all_wps[0][0], all_wps[0][1])
+                        self._wp_start_time = time.monotonic()
+                        self._wp_fail_count = 0
+                        self._wp_timeout = (WP_TIMEOUT_BASE
+                                            + math.hypot(all_wps[0][0] - self.pos[0],
+                                                         all_wps[0][1] - self.pos[1])
+                                            * WP_TIMEOUT_SCALE)
+                        return
+                self._plan_path(best_pos[0], best_pos[1], best_pos[2])
+                return
+
+        # ── Fall B: Bot hat ID-Flagge ─────────────────────────────────────
+        elif self.own_flag == "ID":
+            _recent = getattr(self, '_recent_flag_targets', ())
+            best_d_good: float = float("inf")
+            best_pos_good = None
+            for fi in list(self.flags.values()):
+                if fi.status != 1:
+                    continue
+                d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
+                if d < IDENTIFY_RANGE and fi.abbr in self.good_flags and d < best_d_good:
+                    if getattr(self, '_debug_log_flag', False):
+                        logger.debug("[%s] Flagge: ID-B1 – gute Flagge %r d=%.1fu (< %.0fu)",
+                                     self.callsign, fi.abbr, d, IDENTIFY_RANGE)
+                    best_d_good = d
+                    best_pos_good = (fi.pos[0], fi.pos[1])
+                elif fi.abbr:
+                    if getattr(self, '_debug_log_flag', False):
+                        logger.debug("[%s] Flagge: ID-B1 – keine gute Flagge %r d=%.1fu",
+                                     self.callsign, fi.abbr, d)
+            if best_pos_good is not None:
+                d_to_good = math.hypot(best_pos_good[0] - self.pos[0],
+                                       best_pos_good[1] - self.pos[1])
+                if getattr(self, '_debug_log_flag', False):
+                    logger.debug("[%s] Flagge: ID-B1 – Drop-Kandidat (%.0f,%.0f) d=%.1fu cooldown=%.1fs",
+                                 self.callsign, best_pos_good[0], best_pos_good[1], d_to_good,
+                                 time.monotonic() - self._last_drop_attempt)
+                if time.monotonic() - self._last_drop_attempt > 1.0:
+                    self._try_drop_flag()  # ID ablegen, damit gute Flag aufgesammelt werden kann
+                if d_to_good > self._wp_reach_radius():
+                    self._plan_path(best_pos_good[0], best_pos_good[1])
+                # else: bereits am Ziel, warten bis Drop vom Server bestätigt wird
+                return
+            # Keine gute Flag in Erkennungsradius → nächste unbekannte Flag ansteuern
+            if getattr(self, '_debug_log_flag', False):
+                logger.debug("[%s] Flagge: ID-B2 – kein Ziel in %.0fu, scanne %d Flaggen (%d recent)",
+                             self.callsign, IDENTIFY_RANGE, len(self.flags), len(_recent))
+            best_d = float("inf")
+            best_pos = None
+            for fi in list(self.flags.values()):
+                if fi.status != 1:
+                    continue
+                if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
+                    continue
+                d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
+                # Innerhalb IDENTIFY_RANGE bereits als nicht-gut erkannte Flags überspringen
+                if d < IDENTIFY_RANGE and fi.abbr and fi.abbr not in self.good_flags:
+                    continue
+                if d < best_d:
+                    best_d = d
+                    best_pos = (fi.pos[0], fi.pos[1])
+            if best_pos is not None:
+                if getattr(self, '_debug_log_flag', False):
+                    logger.debug("[%s] Flagge: ID-B2 – Ziel (%.0f,%.0f) d=%.1fu",
+                                 self.callsign, best_pos[0], best_pos[1], best_d)
+                self._recent_flag_targets.append((round(best_pos[0]), round(best_pos[1])))
+                if best_d > self._wp_reach_radius():
+                    self._plan_path(best_pos[0], best_pos[1])
+                return
+
+        # ── Fall C: Bot hat andere Flagge — zufälliger Wegpunkt ───────────
+        h = self.world_half * 0.85
+        best_gx = best_gy = 0.0
+        best_score = -2.0
+        for _ in range(5):
+            cx_ = random.uniform(-h, h)
+            cy_ = random.uniform(-h, h)
+            cand_az = math.atan2(cy_ - self.pos[1], cx_ - self.pos[0])
+            score = math.cos(abs(_angle_diff(cand_az, self.azimuth)))
+            if score > best_score:
+                best_score, best_gx, best_gy = score, cx_, cy_
+        self._plan_path(best_gx, best_gy)
+
+    def _check_opportunistic_grab(self, now: float) -> None:
+        """Sendet MsgGrabFlag wenn Bot nah an einer onGround-Flag ist."""
+        if self.own_flag or self.player_id is None: return
+        if now - self._last_grab_attempt < 0.5: return
+        for fi in list(self.flags.values()):
+            if fi.status != 1: continue
+            if abs(fi.pos[2] - self.pos[2]) > 0.5: continue
+            d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
+            if d >= FLAG_GRAB_RADIUS: continue
+            if d > TANK_RADIUS and not self._is_ahead(fi.pos[0], fi.pos[1]): continue
+            self._last_grab_attempt = now
+            self._try_grab_flag(fi.flag_id)
+            return
+
+    def _try_grab_flag(self, flag_id: int) -> None:
+        """Sendet MsgGrabFlag."""
+        if self.player_id is None: return
+        self.client.send(MsgGrabFlag, struct.pack(">H", flag_id))
+        if getattr(self, '_debug_log_flag', False):
+            logger.debug("[%s] Flagge: MsgGrabFlag gesendet (flag_id=%d)", self.callsign, flag_id)

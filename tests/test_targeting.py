@@ -48,7 +48,7 @@ def test_normal_player_in_fov(bot):
 
 def test_player_outside_both(bot):
     """Spieler jenseits RADAR_RANGE, genau rückwärts → weder Radar noch FOV."""
-    from bzbot import RADAR_RANGE
+    from bot.constants import RADAR_RANGE
     bot.pos     = [0.0, 0.0, 0.0]
     bot.azimuth = 0.0   # blickt in +x
     make_player(bot, pid=2, pos=(-(RADAR_RANGE + 10.0), 0.0, 0.0))   # hinter dem Bot, außer Reichweite
@@ -110,7 +110,7 @@ def test_cloaking_outside_radar_not_targetable(bot):
     """CL Spieler jenseits RADAR_RANGE, direkt im Blickfeld → Radar reicht nicht; CL blockiert die
     Fenster-Sicht → kein Ziel. (Das frühere 'nur im FOV, außerhalb Radar'-Regime existiert für
     radar-sichtbare Gegner nicht mehr, da RADAR_RANGE ≥ SHOT_RANGE.)"""
-    from bzbot import RADAR_RANGE
+    from bot.constants import RADAR_RANGE
     bot.pos     = [0.0, 0.0, 0.0]
     bot.azimuth = 0.0   # blickt in +x, direkt auf den Gegner
     make_player(bot, pid=2, pos=(RADAR_RANGE + 10.0, 0.0, 0.0), flag="CL")
@@ -199,12 +199,12 @@ class TestTargetRetention:
     def test_drop_target_beyond_180deg(self, bot):
         """Gegner hinter Bot (>90°) und außerhalb Radar → target_player = None.
         Bot muss in SEEKING sein damit _validate_and_find_target läuft."""
-        from bzbot_ai import AIState
+        from bot.models import AIState
         bot.pos = [0.0, 0.0, 0.0]
         bot.vel = [0.0, 0.0, 0.0]
         bot.alive = True
         bot.human_count = 1
-        from bzbot import RADAR_RANGE
+        from bot.constants import RADAR_RANGE
         # Gegner außerhalb Radar (210u > 200u) UND außerhalb Sichtfeld (Bot schaut weg)
         info = make_player(bot, 99, pos=(RADAR_RANGE + 10, 0.0, 0.0))
         info.vel = [0.0, 0.0, 0.0]
@@ -290,29 +290,29 @@ class TestShouldUpdatePlayer:
         assert bot._should_update_player(info, 50.0, 0.0, 0.0, time.monotonic()) is False
 
     def test_radar_attention_thresholds(self, bot, monkeypatch):
-        import bzbot_ai
+        import random
         bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = math.pi   # Normal außer FoV → Radar-Pfad
         normal = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="")
         cl     = make_player(bot, pid=3, pos=(50.0, 0.0, 0.0), flag="CL")
         now = time.monotonic()
-        monkeypatch.setattr(bzbot_ai.random, "random", lambda: 0.9)   # hoher Wert → Update
+        monkeypatch.setattr(random, "random", lambda: 0.9)   # hoher Wert → Update
         normal.radar_blind_until = 0.0; cl.radar_blind_until = 0.0
         assert bot._should_update_player(normal, 50.0, 0.0, 0.0, now) is True
         assert bot._should_update_player(cl,     50.0, 0.0, 0.0, now) is True
-        monkeypatch.setattr(bzbot_ai.random, "random", lambda: 0.5)   # zwischen 0.33 und 0.66
+        monkeypatch.setattr(random, "random", lambda: 0.5)   # zwischen 0.33 und 0.66
         normal.radar_blind_until = 0.0; cl.radar_blind_until = 0.0
         assert bot._should_update_player(normal, 50.0, 0.0, 0.0, now) is True    # < 0.33 → Update
         assert bot._should_update_player(cl,     50.0, 0.0, 0.0, now) is False   # < 0.66 → Skip
 
     def test_radar_cooldown_blocks_until_expiry(self, bot, monkeypatch):
-        import bzbot_ai
+        import random
         bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = math.pi
         info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="")
         now = time.monotonic()
-        monkeypatch.setattr(bzbot_ai.random, "random", lambda: 0.1)   # niedrig → Skip + Cooldown
+        monkeypatch.setattr(random, "random", lambda: 0.1)   # niedrig → Skip + Cooldown
         assert bot._should_update_player(info, 50.0, 0.0, 0.0, now) is False
         assert info.radar_blind_until > now
-        monkeypatch.setattr(bzbot_ai.random, "random", lambda: 0.9)   # guter Würfel...
+        monkeypatch.setattr(random, "random", lambda: 0.9)   # guter Würfel...
         assert bot._should_update_player(info, 50.0, 0.0, 0.0, now + 0.1) is False  # ...aber Cooldown
         assert bot._should_update_player(info, 50.0, 0.0, 0.0, now + 0.6) is True   # nach Ablauf
 
