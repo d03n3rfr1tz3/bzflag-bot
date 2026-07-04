@@ -13,7 +13,7 @@ from bzflag.client       import BZFlagClient
 from bzflag.shot_physics import (simulate_shot_path,
                                   can_ricochet as _can_ricochet_shot,
                                   build_link_map,
-                                  _segment_hits_obb_3d)
+                                  _segment_hits_obb_3d, _extend_segment)
 from bzflag.world_map import teleporter_solid_boxes
 from bzflag.obstacle_grid import ObstacleGrid, LOS_GRID_PAD
 from bzflag.protocol import (
@@ -261,6 +261,12 @@ class BZBot(BZBotAI):
         self._tank_height        = TANK_HEIGHT         # via MsgSetVar _tankHeight
         self._wall_height        = WALL_HEIGHT_DEFAULT # via MsgSetVar _wallHeight / _tankHeight
         self._shot_radius        = SHOT_RADIUS         # via MsgSetVar _shotRadius
+        # Hit-Detection-Fenster (Teil C): Zeitpunkt und eigene Position des letzten
+        # _resolve_incoming_shots-Laufs — entkoppelt die Schusspfad-Abdeckung vom
+        # 0,1-s-Stall-Clamp der Hauptschleife und trägt die Eigenbewegung in den
+        # Sweep ein (Client-Äquivalent: relativeRay). Reset bei Spawn (_on_alive).
+        self._last_hit_check_t   = time.monotonic()
+        self._last_hit_check_pos: Optional[Tuple[float, float, float]] = None
         self._tiny_factor        = _TINY_FACTOR        # via MsgSetVar _tinyFactor
         self._thief_tiny_factor  = THIEF_TINY_FACTOR   # via MsgSetVar _thiefTinyFactor
         self._thief_vel_ad       = THIEF_VEL_AD        # via MsgSetVar _thiefVelAd
@@ -518,10 +524,12 @@ class BZBot(BZBotAI):
         while self._running and not self._stop_event.is_set():
             now  = time.monotonic()
             # Stall-Clamp (GC, Netz-Hänger, Container-Scheduling): ein ungebremster
-            # Einzelschritt tunnelt per Zielpunkt-Kollision durch dünne Wände,
-            # überdreht das GM-Steering (max_turn = _gm_turn_angle * dt) und lässt
-            # die Hit-Detection lange Segmente überspringen. 0,1s = 6 Nominal-Ticks;
-            # jenseits davon läuft die Simulation lieber kurz „zeitlupig" weiter.
+            # Einzelschritt tunnelt per Zielpunkt-Kollision durch dünne Wände und
+            # überdreht das GM-Steering (max_turn = _gm_turn_angle * dt). 0,1s = 6
+            # Nominal-Ticks; jenseits davon läuft die Simulation lieber kurz
+            # „zeitlupig" weiter. Die Hit-Detection hängt NICHT am Clamp: sie prüft
+            # ihr eigenes echtes Fenster [_last_hit_check_t, now] (lückenlos auch
+            # bei langen Ticks, s. _resolve_incoming_shots).
             dt_r = min(now - last_tick, 0.1)
             last_tick = now
             if not self.client.connected:
@@ -635,6 +643,32 @@ class BZBot(BZBotAI):
         tank_cy = self.pos[1]
         tank_cz = self.pos[2] + self._tank_height / 2
         eff_r   = self._effective_hit_radius()
+        # Teil C: echtes Prüf-Fenster [letzter Check, now] statt des per Stall-Clamp
+        # geklemmten dt — der Segment-Test ist für beliebig lange Segmente exakt,
+        # der Clamp (Hauptschleife :525) würde hier nur Abdeckung abschneiden.
+        # Dazu die Eigenbewegung im Fenster (Relativ-Sweep wie Client-relativeRay):
+        # Schuss-Startpunkt wird in den Tank-Frame von `now` verschoben, die OBB
+        # bleibt bei `now` stehen. Guard: unplausibel großer Sprung (eigener
+        # Teleport) → statisch testen wie bisher.
+        # Mindestens dt zurückschauen UND alles seit dem letzten Check abdecken:
+        # Überlappung ist harmlos (idempotenter Segment-Test), Lücken nicht.
+        win_start = min(self._last_hit_check_t, now - dt)
+        if win_start < now - 60.0:
+            # Sanity-Cap (fremde Zeitbasis/sehr alte Referenz, z.B. Test-Uhren)
+            win_start = now - 60.0
+            self._last_hit_check_pos = None
+        window    = now - win_start
+        inv_window = 1.0 / window if window > 1.0e-6 else 0.0
+        own_dx = own_dy = own_dz = 0.0
+        if self._last_hit_check_pos is not None and inv_window > 0.0:
+            own_dx = self.pos[0] - self._last_hit_check_pos[0]
+            own_dy = self.pos[1] - self._last_hit_check_pos[1]
+            own_dz = self.pos[2] - self._last_hit_check_pos[2]
+            _max_plaus = 2.0 * self._tank_speed * window + 5.0
+            if own_dx*own_dx + own_dy*own_dy + own_dz*own_dz > _max_plaus*_max_plaus:
+                own_dx = own_dy = own_dz = 0.0
+        self._last_hit_check_t   = now
+        self._last_hit_check_pos = (self.pos[0], self.pos[1], self.pos[2])
         with self._shots_lock:
             to_remove = []; hit_shot = None
             for key, shot in self._shots.items():
@@ -699,12 +733,16 @@ class BZBot(BZBotAI):
                                                     shot.pos[0], shot.pos[1], shot.pos[2],
                                                     tank_cx, tank_cy, tank_cz) < eff_r
                     else:
-                        prev_t = max(shot.fire_time, now - min(dt, 0.2))
+                        prev_t = max(shot.fire_time, win_start)
                         _half_len, _half_w, _half_h = self._hitbox_half_dims()
+                        # Teil B: SB-Längskapsel — Segment beidseitig um _shotRadius
+                        # verlängern (Längsreichweite 2×, seitlich unverändert).
+                        _sb_extra = (self._shot_radius
+                                     if shot.flag_abbr == b"SB" else 0.0)
                         segs = self._ricochet_paths.get(
                             (shot.shooter_id, shot.shot_id))
                         if segs:
-                            # Abpraller: gecachte Segmente gegen Tank-OBB prüfen
+                            # Abpraller/Teleporter: gecachte Segmente gegen Tank-OBB prüfen
                             hit = False
                             for _seg_idx, seg in enumerate(segs):
                                 if shot.shooter_id == self.player_id and _seg_idx == 0:
@@ -724,6 +762,15 @@ class BZBot(BZBotAI):
                                 bx = seg.px + (seg.ex - seg.px) * f1
                                 by = seg.py + (seg.ey - seg.py) * f1
                                 bz = seg.pz + (seg.ez - seg.pz) * f1
+                                # Relativ-Sweep: Endpunkt zur Zeit t um die seither
+                                # erfolgte Eigenbewegung mitschieben (linear im Fenster)
+                                _fa = (now - t0) * inv_window
+                                _fb = (now - t1) * inv_window
+                                ax += own_dx * _fa; ay += own_dy * _fa; az += own_dz * _fa
+                                bx += own_dx * _fb; by += own_dy * _fb; bz += own_dz * _fb
+                                if _sb_extra > 0.0:
+                                    ax, ay, az, bx, by, bz = _extend_segment(
+                                        ax, ay, az, bx, by, bz, _sb_extra)
                                 if _segment_hits_obb_3d(
                                         ax, ay, az, bx, by, bz,
                                         tank_cx, tank_cy, tank_cz, self.azimuth,
@@ -735,16 +782,25 @@ class BZBot(BZBotAI):
                                 continue  # Nicht-Rico eigener Schuss kann sich nicht selbst treffen
                             ax, ay, az = shot.position_at(prev_t)
                             bx, by, bz = shot.position_at(now)
+                            # Relativ-Sweep: Startpunkt um die Eigenbewegung seit prev_t
+                            # mitschieben (Endpunkt ist bereits im Tank-Frame von `now`)
+                            _fa = (now - prev_t) * inv_window
+                            ax += own_dx * _fa; ay += own_dy * _fa; az += own_dz * _fa
                             # Skip wenn Schuss sich vom Bot wegbewegt (past closest approach).
                             # Schuss bleibt in _shots — könnte bei Ricochet zurückkommen.
                             # BEIDE Segment-Enden prüfen: entfernt sich nur der Endpunkt,
                             # kann das Segment den Tank in diesem Tick DURCHquert haben —
                             # dann muss der OBB-Test entscheiden (kein Geister-Durchflug).
+                            # Läuft auf den relativkorrigierten Zentren VOR der SB-
+                            # Verlängerung: weg ist weg (auch der SB-Schweif).
                             _rel_bx = bx - tank_cx; _rel_by = by - tank_cy
                             _rel_ax = ax - tank_cx; _rel_ay = ay - tank_cy
                             if (shot.vel[0] * _rel_bx + shot.vel[1] * _rel_by > 0
                                     and shot.vel[0] * _rel_ax + shot.vel[1] * _rel_ay > 0):
                                 continue
+                            if _sb_extra > 0.0:
+                                ax, ay, az, bx, by, bz = _extend_segment(
+                                    ax, ay, az, bx, by, bz, _sb_extra)
                             hit = _segment_hits_obb_3d(ax, ay, az, bx, by, bz,
                                                         tank_cx, tank_cy, tank_cz, self.azimuth,
                                                         _half_len, _half_w, _half_h)
@@ -1240,6 +1296,11 @@ class BZBot(BZBotAI):
         with self._shots_lock:
             self._shots.clear()
             self._ricochet_paths.clear()
+        # Hit-Fenster-Referenz auf den Spawn setzen: sonst würde das gesamte
+        # Totliege-Fenster gegen die NEUE Position getestet (Geister-Treffer)
+        # bzw. der Relativ-Sweep den Spawn-Sprung als Eigenbewegung werten.
+        self._last_hit_check_t   = now
+        self._last_hit_check_pos = (x, y, z)
         self._new_target()
         # Sicherheitsnetz gegen Zähler-Drift: human_count aus der Spielerliste neu ableiten.
         # Driftet er (Add/Remove-Asymmetrie) auf 0, würde der Bot sonst dauerhaft — auch über
@@ -1421,21 +1482,25 @@ class BZBot(BZBotAI):
         # Teleporter transportieren jeden Schuss (auch Nicht-Ricochet) → Pfad auch dann
         # vorberechnen, wenn die Karte Teleporter hat. Sonst landet ein nicht-ricochet
         # Laser/Thief im geraden-Linien-else-Zweig und „sieht" den Teleporter nie.
-        # wand-durchdringende Schüsse (PhantomZone, Super Bullet) bleiben außen
-        # vor — die wandbewusste Simulation würde ihren Pfad fälschlich an Wänden stoppen;
-        # ihr alter Pfad (kein Cache → gerade Linie) ist für sie korrekt.
+        # Wand-durchdringende Schüsse (PhantomZone, Super Bullet) teleportieren
+        # EBENFALLS (makeSegments: Teleporter-Lookup läuft unabhängig vom
+        # ObstacleEffect; live verifiziert) — sie laufen im phase_walls-Modus
+        # durch die Pfad-Sim, der Wände/Weltgrenzen ignoriert, Teleporter nicht.
         _phases_walls = _is_pz or shot.flag_abbr == b"SB"
         # GM bekommt KEINEN Pfad-Cache: die Rakete lenkt, ein vorberechneter
         # gerader Pfad wäre falsch — und _find_incoming_shot würde den GM wegen
         # des Cache-Eintrags im Direkt-Zweig überspringen und stattdessen den
         # falschen Pfad bewerten. Die live nachgeführte shot.pos (Integration
         # in _resolve_incoming_shots + MsgGMUpdate) ist für GM die Wahrheit.
-        _tele_route = (self._world_map is not None
-                       and bool(self._world_map.teleporters)
-                       and not _phases_walls and not shot.is_gm)
+        # SW hat keinen Pfad (Explosion am Ort) → ebenfalls kein Cache.
+        _has_teles = (self._world_map is not None
+                      and bool(self._world_map.teleporters))
+        _tele_route = _has_teles and not _phases_walls and not shot.is_gm
+        _tele_phase = (_has_teles and _phases_walls
+                       and not shot.is_gm and not shot.is_sw)
         path_segs = None
         _tlog = [] if self._debug_log_tele else None
-        if (self._world_map is not None
+        if _tele_phase or (self._world_map is not None
                 and (_tele_route
                      or _can_ricochet_shot(shot.flag_abbr, shot.is_gm, shot.is_sw,
                                            self._server_ricochet, is_phantom_zoned=_is_pz))):
@@ -1449,6 +1514,7 @@ class BZBot(BZBotAI):
                 tele_log=_tlog,
                 solid_obs=self._world_map.solid_obstacles(),
                 obs_grid=self._shot_grid,
+                phase_walls=_tele_phase,
             )
         with self._shots_lock:
             self._shots[(shooter, shot_id)] = shot
