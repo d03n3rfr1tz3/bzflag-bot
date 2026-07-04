@@ -38,7 +38,7 @@ def _prep(bot, nav):
 def test_async_spawns_when_sync_exceeds_trigger(bot, monkeypatch):
     nav = _FakeNav([(5.0, 0.0, 0.0)])
     _prep(bot, nav)
-    monkeypatch.setattr(bzbot_ai, "NAV_ASYNC_TRIGGER_MS", -1.0)   # elapsed_ms ≥ 0 → immer triggern
+    monkeypatch.setattr("bot.ai.navigation.NAV_ASYNC_TRIGGER_MS", -1.0)   # elapsed_ms ≥ 0 → immer triggern
     bot._plan_path(5.0, 0.0)
     th = bot._async_plan_thread
     assert th is not None
@@ -54,7 +54,7 @@ def test_async_spawns_when_sync_exceeds_trigger(bot, monkeypatch):
 def test_async_not_spawned_when_sync_fast(bot, monkeypatch):
     nav = _FakeNav([(5.0, 0.0, 0.0)])
     _prep(bot, nav)
-    monkeypatch.setattr(bzbot_ai, "NAV_ASYNC_TRIGGER_MS", 1e9)    # nie triggern
+    monkeypatch.setattr("bot.ai.navigation.NAV_ASYNC_TRIGGER_MS", 1e9)    # nie triggern
     bot._plan_path(5.0, 0.0)
     assert bot._async_plan_thread is None
 
