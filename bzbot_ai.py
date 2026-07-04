@@ -2162,6 +2162,10 @@ class BZBotAI:
         Gibt (shot, t_threat) zurück; (None, inf) wenn kein Treffer.
         bot_vel: optionales (vx, vy)-Tupel für hypothetische Bot-Velocity (Standard: self.vel).
         Prüft sowohl direkte Schüsse als auch gecachte Ricochet-Pfade."""
+        # N2: Leerlauf-Early-Out — auch der Rico-Zweig verlangt den Schuss in
+        # _shots (Lookup unten), ohne Schüsse kann es also keine Bedrohung geben.
+        if not self._shots:
+            return None, float("inf")
         bvx = self.vel[0] if bot_vel is None else bot_vel[0]
         bvy = self.vel[1] if bot_vel is None else bot_vel[1]
         best = None
