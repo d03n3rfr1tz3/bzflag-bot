@@ -79,6 +79,9 @@ SIMPLE_FLOAT_VARS = [
     ("_thiefTinyFactor",   "_thief_tiny_factor",  0.6),
     ("_thiefVelAd",        "_thief_vel_ad",       1.9),
     ("_narrowHW",          "_narrow_hw",          0.4),
+    # W3/F8: Nachführung neu ergänzt (vorher rechnete der Steamroller-Radius
+    # immer mit dem 0.8-Default)
+    ("_srRadiusMult",      "_sr_radius_mult",     1.2),
 ]
 
 

@@ -87,7 +87,7 @@ THIEF_AD_LIFE       = 0.05   # TH-Flagge: Schuss-Lifetime in Sekunden (via MsgSe
                              # ↔ self._thief_ad_life
 THIEF_AD_RANGE      = 120.0  # TH-Flagge: Reichweite (HIX hw=30→60u Gebäude × 2)
 _NARROW_HW          = 0.30   # N-Flagge: reduzierte Halbbreite ↔ _narrowHW ↔ self._narrow_hw
-SR_RADIUS_MULT      = 0.8    # _srRadiusMult (Nachführung s. _on_set_var)
+SR_RADIUS_MULT      = 0.8    # ↔ _srRadiusMult ↔ self._sr_radius_mult
 
 # ── Schuss-Typ-Multiplikatoren (via _on_set_var überschreibbar) ───────────
 MGUN_AD_RATE        = 10.0     # _mGunAdRate  (reloadTime / MGUN_AD_RATE = MG-Reload) ↔ self._mgun_ad_rate

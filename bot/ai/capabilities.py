@@ -34,13 +34,13 @@ class CapabilityMixin:
         tgt = self.players.get(self.target_player) if self.target_player is not None else None
         if (tgt is not None and tgt.flag == "BU" and tgt.pos[2] < 0.0
                 and self.own_flag not in ("GM", "SW")):
-            return TANK_RADIUS * SR_RADIUS_MULT   # eingegrabener Gegner (z<0): Ramm-Kontaktdistanz
+            return TANK_RADIUS * self._sr_radius_mult   # eingegrabener Gegner (z<0): Ramm-Kontaktdistanz
         if self.own_flag == "MG":
             return 25.0   # MG-Schüsse laufen nach ~87u ab; aggressiver Nahkampf nötig
         if self.own_flag == "SW":
             return 20.0   # SW-Killzone beginnt bei 6u; nahe heranfahren, dann zünden
         if self.own_flag == "SR":
-            return TANK_RADIUS * SR_RADIUS_MULT  # Kontaktdistanz für Ramm-Kill
+            return TANK_RADIUS * self._sr_radius_mult  # Kontaktdistanz für Ramm-Kill
         if self.own_flag == "GM":
             return 85.0
         return OPTIMAL_RANGE

@@ -302,7 +302,7 @@ class HitDetectionMixin:
             dy = info.pos[1] - self.pos[1]
             dz = info.pos[2] - self.pos[2]
             dist = math.sqrt(math.hypot(dx, dy)**2 + (dz * 2.0)**2)
-            if dist < TANK_RADIUS * (1.0 + SR_RADIUS_MULT):
+            if dist < TANK_RADIUS * (1.0 + self._sr_radius_mult):
                 logger.info("[%s] Überrollt von Spieler %d (SR)", self.callsign, pid)
                 self._report_steamrolled(pid)
                 return

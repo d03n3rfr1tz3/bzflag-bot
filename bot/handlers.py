@@ -744,6 +744,85 @@ class HandlersMixin:
         winner_id = payload[0] if payload else 255
         self._begin_round_over("MsgScoreOver (winner=%d)" % winner_id)
 
+    # ── _on_set_var: Dispatch-Tabellen (Track 4/W3) ───────────────────────
+    #
+    # Die Mehrheit der Server-Variablen folgt dem Muster »Float → Attribut mit
+    # Wertebereichs-Guard + optionalem Nachlauf-Hook«; das bildet _SETVAR_VARS
+    # als Tabelle ab: Var-Name → (Attribut, cast, guard, Log-Format, Hook).
+    #   guard: ">0" / ">=0" / "!=0" / None — None = jeder Wert gültig
+    #          (_burrowDepth ist z.B. negativ).
+    #   fmt:   Format des Debug-Logs; None = kein Log (wie bisher _wallHeight).
+    #   hook:  Methodenname, nach der Zuweisung aufgerufen (abgeleitete Größen).
+    # Sonderfälle mit eigener Logik (_worldSize, _updateThrottleRate) stehen in
+    # _SETVAR_SPECIAL. Neue einfache Variablen brauchen nur einen Tabelleneintrag
+    # + Default-Attribut in core._init_server_vars (Zuordnung: bot/constants.py).
+
+    _SETVAR_VARS = {
+        # Server-Var         (Attribut,             cast,  guard,  fmt,    Hook)
+        "_maxShots":         ("_max_shots",          int,   ">0",  "%d",   None),
+        "_reloadTime":       ("_reload_time",        float, ">0",  "%.2f", "_recompute_sw_expand_speed"),
+        "_shotSpeed":        ("_shot_speed",         float, ">0",  "%.1f", "_recompute_shot_derived"),
+        "_shotRange":        ("_shot_range",         float, ">0",  "%.1f", "_recompute_shot_lifetime"),
+        "_shotRadius":       ("_shot_radius",        float, ">=0", "%.2f", None),
+        "_tankSpeed":        ("_tank_speed",         float, ">0",  "%.1f", None),
+        "_tankAngVel":       ("_tank_turn_rate",     float, ">0",  "%.2f", None),
+        "_tankLength":       ("_tank_length",        float, ">0",  "%.2f", None),
+        "_tankWidth":        ("_tank_width",         float, ">0",  "%.2f", None),
+        "_tankHeight":       ("_tank_height",        float, ">0",  "%.2f", "_set_wall_height_from_tank"),
+        "_wallHeight":       ("_wall_height",        float, ">0",  None,   None),
+        "_muzzleHeight":     ("_muzzle_height",      float, ">=0", "%.2f", None),
+        "_muzzleFront":      ("_muzzle_front",       float, ">=0", "%.2f", None),
+        "_jumpVelocity":     ("_jump_velocity",      float, ">0",  "%.1f", "_sync_nav_physics"),
+        "_gravity":          ("_gravity",            float, "!=0", "%.2f", "_sync_nav_physics"),
+        "_wingsGravity":     ("_wings_gravity",      float, "!=0", "%.2f", None),
+        "_wingsJumpVelocity": ("_wings_jump_velocity", float, ">0", "%.1f", None),
+        "_wingsJumpCount":   ("_wings_jump_count",   int,   ">=0", "%d",   None),
+        "_dropBadFlagDelay": ("_drop_bad_flag_delay", float, ">=0", "%.1f", None),
+        "_shockInRadius":    ("_shock_in_radius",    float, ">=0", "%.1f", "_recompute_sw_expand_speed"),
+        "_shockOutRadius":   ("_shock_out_radius",   float, ">0",  "%.1f", "_recompute_sw_expand_speed"),
+        "_shockAdLife":      ("_shock_ad_life",      float, ">0",  "%.2f", "_recompute_sw_expand_speed"),
+        "_gmTurnAngle":      ("_gm_turn_angle",      float, ">0",  "%.4f", None),
+        "_gmActivationTime": ("_gm_activation_time", float, ">=0", "%.2f", "_recompute_gm_min_range"),
+        "_gmAdLife":         ("_gm_ad_life",         float, ">0",  "%.2f", None),
+        "_lockOnAngle":      ("_lock_on_angle",      float, ">0",  "%.4f", None),
+        "_obeseFactor":      ("_obese_factor",       float, ">0",  "%.2f", None),
+        "_tinyFactor":       ("_tiny_factor",        float, ">0",  "%.3f", None),
+        "_narrowHW":         ("_narrow_hw",          float, ">=0", "%.3f", None),
+        "_thiefTinyFactor":  ("_thief_tiny_factor",  float, ">0",  "%.3f", None),
+        "_thiefVelAd":       ("_thief_vel_ad",       float, ">0",  "%.3f", None),
+        "_thiefAdShotVel":   ("_thief_ad_shot_vel",  float, ">0",  "%.1f", None),
+        "_thiefAdLife":      ("_thief_ad_life",      float, ">0",  "%.3f", None),
+        "_flagRadius":       ("_flag_radius",        float, ">0",  "%.2f", None),
+        "_velocityAd":       ("_velocity_ad",        float, ">0",  "%.2f", None),
+        "_agilityAdVel":     ("_agility_ad_vel",     float, ">0",  "%.2f", None),
+        "_lgGravity":        ("_lg_gravity",         float, ">0",  "%.2f", None),
+        "_burrowDepth":      ("_burrow_depth",       float, None,  "%.2f", None),
+        "_burrowSpeedAd":    ("_burrow_speed_ad",    float, ">0",  "%.2f", None),
+        "_burrowAngularAd":  ("_burrow_ang_ad",      float, ">0",  "%.2f", None),
+        "_angularAd":        ("_angular_ad",         float, ">0",  "%.2f", None),
+        "_wideAngleAng":     ("_wide_angle_ang",     float, ">0",  "%.2f", None),
+        "_shieldFlight":     ("_shield_flight",      float, ">=0", "%.2f", None),
+        "_identifyRange":    ("_identify_range",     float, ">=0", "%.1f", None),
+        # W3/F8: _srRadiusMult wurde bisher nicht nachgeführt (Steamroller-
+        # Radius rechnete immer mit dem 0.8-Default) — einzige bewusste
+        # Funktionserweiterung dieses Refactors.
+        "_srRadiusMult":     ("_sr_radius_mult",     float, ">0",  "%.2f", None),
+        "_mGunAdRate":       ("_mgun_ad_rate",       float, ">0",  "%.1f", None),
+        "_mGunAdLife":       ("_mgun_ad_life",       float, ">0",  "%.2f", None),
+        "_mGunAdVel":        ("_mgun_ad_vel",        float, ">0",  "%.3f", None),
+        "_rFireAdRate":      ("_rfire_ad_rate",      float, ">0",  "%.1f", None),
+        "_rFireAdVel":       ("_rfire_ad_vel",       float, ">0",  "%.2f", None),
+        "_rFireAdLife":      ("_rfire_ad_life",      float, ">0",  "%.3f", None),
+        "_laserAdVel":       ("_laser_ad_vel",       float, ">0",  "%.1f", None),
+        "_laserAdRate":      ("_laser_ad_rate",      float, ">0",  "%.2f", None),
+        "_laserAdLife":      ("_laser_ad_life",      float, ">0",  "%.3f", None),
+    }
+
+    _SETVAR_SPECIAL = {
+        "_worldSize":          "_setvar_world_size",
+        "_updateThrottleRate": "_setvar_update_throttle",
+    }
+
     def _on_set_var(self, code: int, payload: bytes) -> None:
         """Liest physikalische Server-Variablen aus MsgSetVar."""
         try:
@@ -758,336 +837,84 @@ class HandlersMixin:
                 vlen = unpack_uint8(payload, off); off += 1
                 if off+vlen > len(payload): break
                 val  = payload[off:off+vlen].decode("utf-8", "?"); off += vlen
-                if name == "_worldSize":
-                    try:
-                        new_half = float(val) / 2.0
-                        old_half = self.world_half
-                        self.world_half = new_half
-                        self.client._world_half_cache = new_half
-                        if self._world_map is not None and abs(new_half - old_half) > 0.1:
-                            from bzflag.nav_graph import invalidate_nav_cache
-                            invalidate_nav_cache(self._world_map.world_hash)
-                            logger.debug("[%s] _worldSize=%.0f → NavGraph-Rebuild (vorher %.0fu, jetzt %.0fu)",
-                                        self.callsign, float(val), old_half, new_half)
-                            self.client._deliver_world()
-                    except ValueError: pass
-                elif name == "_maxShots":
-                    try:
-                        ms = int(float(val))
-                        if ms > 0:
-                            self._max_shots = ms
-                            logger.debug("[%s] _maxShots=%d", self.callsign, ms)
-                    except ValueError: pass
-                elif name == "_reloadTime":
-                    try:
-                        rt = float(val)
-                        if rt > 0:
-                            self._reload_time = rt
-                            self._sw_expand_speed = (self._shock_out_radius - self._shock_in_radius) / (self._reload_time * self._shock_ad_life)
-                            logger.debug("[%s] _reloadTime=%.2f", self.callsign, rt)
-                    except ValueError: pass
-                elif name == "_shotSpeed":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._shot_speed = v
-                            self._shot_lifetime = self._shot_range / v
-                            self._recompute_gm_min_range()
-                            logger.debug("[%s] _shotSpeed=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_shotRange":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._shot_range = v
-                            self._shot_lifetime = v / self._shot_speed
-                            logger.debug("[%s] _shotRange=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_tankSpeed":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._tank_speed = v
-                            logger.debug("[%s] _tankSpeed=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_tankAngVel":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._tank_turn_rate = v
-                            logger.debug("[%s] _tankAngVel=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_jumpVelocity":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._jump_velocity = v
-                            self._sync_nav_physics()
-                            logger.debug("[%s] _jumpVelocity=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_updateThrottleRate":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._server_update_interval = max(1.0 / SERVER_UPDATE_RATE_HZ, 1.0 / v)
-                            logger.debug("[%s] _updateThrottleRate=%.1f → Intervall=%.3fs",
-                                        self.callsign, v, self._server_update_interval)
-                    except ValueError: pass
-                elif name == "_gravity":
-                    try:
-                        v = float(val)
-                        if v != 0:
-                            self._gravity = v
-                            self._sync_nav_physics()
-                            logger.debug("[%s] _gravity=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_wingsGravity":
-                    try:
-                        v = float(val)
-                        if v != 0:
-                            self._wings_gravity = v
-                            logger.debug("[%s] _wingsGravity=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_wingsJumpVelocity":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._wings_jump_velocity = v
-                            logger.debug("[%s] _wingsJumpVelocity=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_dropBadFlagDelay":
-                    try:
-                        v = float(val)
-                        if v >= 0:
-                            self._drop_bad_flag_delay = v
-                            logger.debug("[%s] _dropBadFlagDelay=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_shockInRadius":
-                    try:
-                        v = float(val)
-                        if v >= 0:
-                            self._shock_in_radius = v
-                            self._sw_expand_speed = (self._shock_out_radius - self._shock_in_radius) / (self._reload_time * self._shock_ad_life)
-                            logger.debug("[%s] _shockInRadius=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_shockOutRadius":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._shock_out_radius = v
-                            self._sw_expand_speed = (self._shock_out_radius - self._shock_in_radius) / (self._reload_time * self._shock_ad_life)
-                            logger.debug("[%s] _shockOutRadius=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_shockAdLife":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._shock_ad_life = v
-                            self._sw_expand_speed = (self._shock_out_radius - self._shock_in_radius) / (self._reload_time * self._shock_ad_life)
-                            logger.debug("[%s] _shockAdLife=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_gmTurnAngle":
-                    try:
-                        v = float(val)
-                        if v > 0: self._gm_turn_angle = v; logger.debug("[%s] _gmTurnAngle=%.4f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_gmActivationTime":
-                    try:
-                        v = float(val)
-                        if v >= 0:
-                            self._gm_activation_time = v
-                            self._recompute_gm_min_range()
-                            logger.debug("[%s] _gmActivationTime=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_gmAdLife":
-                    try:
-                        v = float(val)
-                        if v > 0: self._gm_ad_life = v; logger.debug("[%s] _gmAdLife=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_lockOnAngle":
-                    try:
-                        v = float(val)
-                        if v > 0: self._lock_on_angle = v; logger.debug("[%s] _lockOnAngle=%.4f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_obeseFactor":
-                    try:
-                        v = float(val)
-                        if v > 0: self._obese_factor = v; logger.debug("[%s] _obeseFactor=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_flagRadius":
-                    try:
-                        v = float(val)
-                        if v > 0: self._flag_radius = v; logger.debug("[%s] _flagRadius=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_velocityAd":
-                    try:
-                        v = float(val)
-                        if v > 0: self._velocity_ad = v; logger.debug("[%s] _velocityAd=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_agilityAdVel":
-                    try:
-                        v = float(val)
-                        if v > 0: self._agility_ad_vel = v; logger.debug("[%s] _agilityAdVel=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_lgGravity":
-                    try:
-                        v = float(val)
-                        if v > 0: self._lg_gravity = v; logger.debug("[%s] _lgGravity=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_burrowDepth":
-                    try:
-                        v = float(val)
-                        self._burrow_depth = v; logger.debug("[%s] _burrowDepth=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_burrowSpeedAd":
-                    try:
-                        v = float(val)
-                        if v > 0: self._burrow_speed_ad = v; logger.debug("[%s] _burrowSpeedAd=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_burrowAngularAd":
-                    try:
-                        v = float(val)
-                        if v > 0: self._burrow_ang_ad = v; logger.debug("[%s] _burrowAngularAd=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_angularAd":
-                    try:
-                        v = float(val)
-                        if v > 0: self._angular_ad = v; logger.debug("[%s] _angularAd=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_wideAngleAng":
-                    try:
-                        v = float(val)
-                        if v > 0: self._wide_angle_ang = v; logger.debug("[%s] _wideAngleAng=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_shieldFlight":
-                    try:
-                        v = float(val)
-                        if v >= 0: self._shield_flight = v; logger.debug("[%s] _shieldFlight=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_identifyRange":
-                    try:
-                        v = float(val)
-                        if v >= 0: self._identify_range = v; logger.debug("[%s] _identifyRange=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_mGunAdRate":
-                    try:
-                        v = float(val)
-                        if v > 0: self._mgun_ad_rate = v; logger.debug("[%s] _mGunAdRate=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_mGunAdLife":
-                    try:
-                        v = float(val)
-                        if v > 0: self._mgun_ad_life = v; logger.debug("[%s] _mGunAdLife=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_mGunAdVel":
-                    try:
-                        v = float(val)
-                        if v > 0: self._mgun_ad_vel = v; logger.debug("[%s] _mGunAdVel=%.3f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_rFireAdRate":
-                    try:
-                        v = float(val)
-                        if v > 0: self._rfire_ad_rate = v; logger.debug("[%s] _rFireAdRate=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_rFireAdVel":
-                    try:
-                        v = float(val)
-                        if v > 0: self._rfire_ad_vel = v; logger.debug("[%s] _rFireAdVel=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_rFireAdLife":
-                    try:
-                        v = float(val)
-                        if v > 0: self._rfire_ad_life = v; logger.debug("[%s] _rFireAdLife=%.3f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_laserAdVel":
-                    try:
-                        v = float(val)
-                        if v > 0: self._laser_ad_vel = v; logger.debug("[%s] _laserAdVel=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_laserAdRate":
-                    try:
-                        v = float(val)
-                        if v > 0: self._laser_ad_rate = v; logger.debug("[%s] _laserAdRate=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_laserAdLife":
-                    try:
-                        v = float(val)
-                        if v > 0: self._laser_ad_life = v; logger.debug("[%s] _laserAdLife=%.3f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_thiefAdShotVel":
-                    try:
-                        v = float(val)
-                        if v > 0: self._thief_ad_shot_vel = v; logger.debug("[%s] _thiefAdShotVel=%.1f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_thiefAdLife":
-                    try:
-                        v = float(val)
-                        if v > 0: self._thief_ad_life = v; logger.debug("[%s] _thiefAdLife=%.3f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_wingsJumpCount":
-                    try:
-                        v = int(float(val))
-                        if v >= 0: self._wings_jump_count = v; logger.debug("[%s] _wingsJumpCount=%d", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_muzzleHeight":
-                    try:
-                        v = float(val)
-                        if v >= 0: self._muzzle_height = v; logger.debug("[%s] _muzzleHeight=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_muzzleFront":
-                    try:
-                        v = float(val)
-                        if v >= 0: self._muzzle_front = v; logger.debug("[%s] _muzzleFront=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_tankLength":
-                    try:
-                        v = float(val)
-                        if v > 0: self._tank_length = v; logger.debug("[%s] _tankLength=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_tankWidth":
-                    try:
-                        v = float(val)
-                        if v > 0: self._tank_width = v; logger.debug("[%s] _tankWidth=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_tankHeight":
-                    try:
-                        v = float(val)
-                        if v > 0:
-                            self._tank_height = v
-                            self._wall_height = 3.0 * v
-                            logger.debug("[%s] _tankHeight=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_wallHeight":
-                    try:
-                        v = float(val)
-                        if v > 0: self._wall_height = v
-                    except ValueError: pass
-                elif name == "_shotRadius":
-                    try:
-                        v = float(val)
-                        if v >= 0: self._shot_radius = v; logger.debug("[%s] _shotRadius=%.2f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_tinyFactor":
-                    try:
-                        v = float(val)
-                        if v > 0: self._tiny_factor = v; logger.debug("[%s] _tinyFactor=%.3f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_thiefTinyFactor":
-                    try:
-                        v = float(val)
-                        if v > 0: self._thief_tiny_factor = v; logger.debug("[%s] _thiefTinyFactor=%.3f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_thiefVelAd":
-                    try:
-                        v = float(val)
-                        if v > 0: self._thief_vel_ad = v; logger.debug("[%s] _thiefVelAd=%.3f", self.callsign, v)
-                    except ValueError: pass
-                elif name == "_narrowHW":
-                    try:
-                        v = float(val)
-                        if v >= 0: self._narrow_hw = v; logger.debug("[%s] _narrowHW=%.3f", self.callsign, v)
-                    except ValueError: pass
+                self._apply_set_var(name, val)
         except Exception: pass
+
+    def _apply_set_var(self, name: str, val: str) -> None:
+        """Wendet EINE Server-Variable per Tabellen-Dispatch an (s. _SETVAR_VARS)."""
+        special = self._SETVAR_SPECIAL.get(name)
+        if special is not None:
+            getattr(self, special)(val)
+            return
+        entry = self._SETVAR_VARS.get(name)
+        if entry is None:
+            return
+        attr, cast, guard, fmt, hook = entry
+        try:
+            v = float(val)
+        except ValueError:
+            return
+        if cast is int:
+            v = int(v)
+        if guard == ">0":
+            if not v > 0: return
+        elif guard == ">=0":
+            if not v >= 0: return
+        elif guard == "!=0":
+            if v == 0: return
+        setattr(self, attr, v)
+        if hook is not None:
+            getattr(self, hook)()
+        if fmt is not None:
+            logger.debug("[%s] " + name + "=" + fmt, self.callsign, v)
+
+    # ── Nachlauf-Hooks für abgeleitete Größen ─────────────────────────────
+
+    def _recompute_sw_expand_speed(self) -> None:
+        """SW-Front-Geschwindigkeit aus Shock-Radien, Reload und _shockAdLife."""
+        self._sw_expand_speed = ((self._shock_out_radius - self._shock_in_radius)
+                                 / (self._reload_time * self._shock_ad_life))
+
+    def _recompute_shot_lifetime(self) -> None:
+        """Schuss-Lifetime = _shotRange / _shotSpeed (beide nachgeführt)."""
+        self._shot_lifetime = self._shot_range / self._shot_speed
+
+    def _recompute_shot_derived(self) -> None:
+        """_shotSpeed ändert Lifetime UND GM-Homing-Grenze."""
+        self._recompute_shot_lifetime()
+        self._recompute_gm_min_range()
+
+    def _set_wall_height_from_tank(self) -> None:
+        """BZFlag-Kopplung _wallHeight = 3·_tankHeight (global.cxx); eine danach
+        eintreffende explizite _wallHeight-Variable überschreibt den Wert wieder."""
+        self._wall_height = 3.0 * self._tank_height
+
+    def _setvar_world_size(self, val: str) -> None:
+        """_worldSize: world_half nachführen; bei echter Änderung NavGraph neu bauen."""
+        try:
+            new_half = float(val) / 2.0
+        except ValueError:
+            return
+        old_half = self.world_half
+        self.world_half = new_half
+        self.client._world_half_cache = new_half
+        if self._world_map is not None and abs(new_half - old_half) > 0.1:
+            from bzflag.nav_graph import invalidate_nav_cache
+            invalidate_nav_cache(self._world_map.world_hash)
+            logger.debug("[%s] _worldSize=%.0f → NavGraph-Rebuild (vorher %.0fu, jetzt %.0fu)",
+                        self.callsign, float(val), old_half, new_half)
+            self.client._deliver_world()
+
+    def _setvar_update_throttle(self, val: str) -> None:
+        """_updateThrottleRate: Sende-Intervall, auf die 30-Hz-Spec-Obergrenze geklemmt."""
+        try:
+            v = float(val)
+        except ValueError:
+            return
+        if v > 0:
+            self._server_update_interval = max(1.0 / SERVER_UPDATE_RATE_HZ, 1.0 / v)
+            logger.debug("[%s] _updateThrottleRate=%.1f → Intervall=%.3fs",
+                        self.callsign, v, self._server_update_interval)
 
     def _on_disconnect(self, code: int, payload: bytes) -> None:
         """Stoppt Spielschleife bei Verbindungsverlust."""

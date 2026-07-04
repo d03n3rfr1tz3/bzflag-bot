@@ -156,6 +156,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
 
         # Flaggen-Physik (via MsgSetVar)
         self._obese_factor    = OBESITY_FACTOR
+        self._sr_radius_mult  = SR_RADIUS_MULT   # via MsgSetVar _srRadiusMult (W3/F8)
         self._flag_radius     = FLAG_RADIUS
         self._velocity_ad     = VELOCITY_AD
         self._agility_ad_vel  = AGILITY_AD_VEL
