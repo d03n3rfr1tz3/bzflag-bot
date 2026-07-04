@@ -92,13 +92,15 @@ Schon im 2-Minuten-Lokallauf auf HIX sind das 468k+484k Ray-Tests — **der grö
 **Lösung (falls nach P1 noch nötig):** Zweistufiger Sweep — 3°-Raster (27 Sims), dann ±1° Verfeinerung um Treffer (≤6 Sims) ≈ 60% weniger Simulationen.
 **Potenzial:** 2–3× auf dem Sweep. **Risiko:** **Mittel** — schmale Abprall-Korridore (1–2° breit) können im Grobraster durchrutschen → Bot findet gelegentlich einen Rico-Schuss nicht, den er heute findet. Das ist eine echte (milde) Verhaltensänderung. Deshalb: nur nach Messung, hinter Vergleichstest (Trefferquote alt vs. neu über randomisierte Szenarien, Abweichung dokumentieren).
 
-### P9 — NumPy/Cython/mypyc (letzte Eskalationsstufe) — ⛔ nicht nötig (Server-Messung 2026-07-04: Compute ist nach P1 nicht mehr dominant — `sendto` ist es; s. Teil 1b)
+### P9 — NumPy/Cython/mypyc (letzte Eskalationsstufe) — 🗄️ Track 5, nach Track 4 + manuellem Testlauf (Nachmessung tmp4: nach N1 ist das flache Python-Profil der größte Posten)
 
 Vom User erwähnt (Kandidaten: `ray_pyramid_hit`, `ray_box_hit`, `_time_ray_hits_plane`, `_ray_orig_box_hit`, `simulate_shot_path`). Einschätzung:
 - **Erst P1/P5/P6 umsetzen** — sie reduzieren die Aufrufzahlen algorithmisch; Compile-Beschleunigung auf einen linearen Scan wäre Symptombekämpfung.
 - Wenn danach noch nötig: **mypyc oder Cython auf das komplette Modul `shot_physics.py`** (reine Funktionen, keine dynamischen Tricks → idealer Kandidat, 5–20× auf der Narrow-Phase). mypyc zuerst versuchen: kompiliert die unveränderte .py-Quelle → kein zweiter Code-Pfad, Fallback = Interpreter. Docker: Multi-Stage-Build (Build-Stage kompiliert Wheel).
 - **NumPy nicht empfohlen**: der Bounce-Loop ist verzweigungslastig und sequentiell (jeder Bounce hängt vom vorigen ab); Vektorisierung über die Sweep-Winkel wäre ein invasiver Umbau mit echtem Regressionsrisiko.
 **Risiko:** mypyc/Cython niedrig fürs Verhalten (gleiche Quelle), mittel für Build/Deployment. **Verifikation:** komplette Suite gegen kompilierte Variante.
+
+**Update Nachmessung tmp4 (2026-07-04):** Das ⛔-Argument („sendto dominiert") ist mit N1a/N1b weggefallen — jetzt IST das flache Python-Profil der größte Posten (Builtins + nav_graph + bzbot_ai + bzbot ≈ 75–80% der aktiven CPU, kein Einzelposten >7%). Kandidaten: `nav_graph.py`, `obstacle_grid.py`, `shot_physics.py` (reine Compute-Module ohne Netz/Threads); mypyc bevorzugt, Cython Fallback. Erwartung: 2–4× auf ~50–60% der aktiven CPU → docker ~15–17% → **~11–13%**. Klarstellung: .pyc-Vorkompilierung ist KEIN Hebel (betrifft nur die Startzeit, nicht die Laufzeit). Zeitpunkt bewusst NACH Track 4, weil Kompilierung Modulgrenzen einfriert — erst die Struktur sauber ziehen, dann kompilieren (→ Roadmap Track 5).
 
 ### Messmethodik (Voraussetzung für Erfolgskontrolle)
 
@@ -120,7 +122,7 @@ Vom User erwähnt (Kandidaten: `ray_pyramid_hit`, `ray_box_hit`, `_time_ray_hits
 | P6 ⛔ | Pyramiden-Normalen vorberechnen | ⭐⭐ | ⭐ | niedrig | mittel |
 | P7 🗄️ | Sichtbarkeits-LoS-TTL pro Spieler | ⭐⭐ (viele Spieler) | ○ | niedrig | klein |
 | P8 ⛔ | Sweep-Raster vergröbern | ⭐ | ⭐ | **mittel** (Verhalten) | klein |
-| P9 ⛔ | mypyc/Cython shot_physics | ⭐⭐ | ⭐ | niedrig/mittel (Build) | mittel–groß |
+| P9 🗄️ | mypyc/Cython Compute-Module (Track 5, nach Track 4) | ⭐⭐ | ⭐ | niedrig/mittel (Build) | mittel–groß |
 
 (⛔/🗄️ = Entscheidung aus der Server-Messung 2026-07-04, Details in den Überschriften und in Teil 1b.)
 
@@ -132,29 +134,37 @@ Die in Track 2 vorgesehene Server-Messung liegt vor: cProfile-Dumps aus dem Live
 
 **Kernbefund: `sendto` dominiert beide Sessions — 46,6% (IDLE) bzw. 41,8% (KAMPF) der aktiven CPU**, ~57 Pakete/s à 1,27ms. Zwei unabhängige, verifizierte Ursachen (N1a, N1b). Alles andere ist dagegen klein: Empfangspfad der Peer-Updates ≈1%/Bot (halbiert sich mit N1a von selbst, ebenso die bzfs-Relay-Last), Idle-Nav ≈2–3%/Bot (Wander-Verhalten + einmaliger `_vn_cache`-Warm-up — bewusst NICHT anfassen, Drosselung wäre sichtbare Verhaltensänderung).
 
-### N1a — 30-Hz-Update-Kadenz reparieren (Kadenz-Bug) ⭐ — ✅ umgesetzt (Branch `perf/idle-baseline`, Commit `72b4ee8`; `_maybe_send_server_update` mit Stall-Klemme + Kadenz-Anker vor der Schleife, tests/test_update_cadence.py)
+### N1a — 30-Hz-Update-Kadenz reparieren (Kadenz-Bug) ⭐ — ✅ umgesetzt (Branch `perf/idle-baseline`, Commit `72b4ee8`; `_maybe_send_server_update` mit Stall-Klemme + Kadenz-Anker vor der Schleife, tests/test_update_cadence.py) — ✅ live verifiziert (Nachmessung tmp4: ~29 Sends/s)
 
 **Problem (verifizierter Bug):** `self._next_server_update = 0.0` (bzbot.py `__init__`) wird in `_run_game_loop` gegen `time.monotonic()` (= System-Uptime, auf dem Server riesig) verglichen → die Kadenz-Prüfung ist anfangs IMMER wahr. Der Catch-up `+= _server_update_interval` holt das Start-Defizit nur mit 1s/s auf → **der Bot sendet so lange mit Tick-Rate (~57–60 Hz) statt 30 Hz, wie der Host beim Bot-Start schon lief** — auf dem Server faktisch für immer. Beweis im Profil: `_send_update`-ncalls == Tick-Anzahl. Zum Vergleich: der echte Client sendet per Dead-Reckoning nur bei Prediction-Fehler, hart gedrosselt auf `_updateThrottleRate` (Default 30) — 30 Hz ist also die obere Grenze des Spec-Konformen (`Player.cxx:isDeadReckoningWrong`; `_on_set_var` trackt `_updateThrottleRate` bereits korrekt).
 **Fix:** `_next_server_update = time.monotonic()` unmittelbar vor der Schleife; Kadenz-Block als testbare Methode `_maybe_send_server_update(now)` mit Stall-Klemme (nach Stall neu aufsetzen statt Burst-Nachholen).
 **Potenzial:** Paketrate −47%; zusätzlich halbieren sich Peer-Empfangslast ALLER Bots und bzfs-Relay-Last (jedes Update geht an N−1 Clients). **Risiko:** Null — stellt das dokumentierte Soll-Verhalten (30 Hz) her. **Verifikation:** tests/test_update_cadence.py (Kadenz ~30/s trotz großem monotonic-Offset; kein Burst nach Stall; `_updateThrottleRate` respektiert).
 
-### N1b — UDP-Zieladresse einmal auflösen (DNS pro Paket) ⭐ — ✅ umgesetzt (Branch `perf/idle-baseline`, Commit `2538f5b`; `_server_addr` = getpeername()-IP, beide sendto-Stellen umgestellt, tests/test_client_udp_addr.py)
+### N1b — UDP-Zieladresse einmal auflösen (DNS pro Paket) ⭐ — ✅ umgesetzt (Branch `perf/idle-baseline`, Commit `2538f5b`; `_server_addr` = getpeername()-IP, beide sendto-Stellen umgestellt, tests/test_client_udp_addr.py) — ✅ live verifiziert (Nachmessung tmp4: 0,12ms/sendto)
 
 **Problem (verifiziert):** `self._udp_sock.sendto(data, (self.host, self.port))` (client.py) — bei einem Hostnamen (Docker-Servicename, auch „localhost") macht CPython **pro Paket ein getaddrinfo** im C-Code von `sendto` (für cProfile unsichtbar → landet im sendto-tottime). Lokal gemessen: 2,6µs/Paket (IP-Tupel) vs. 90,4µs (Hostname-Tupel); im Container mit Docker-Embedded-DNS (127.0.0.11) erklärt das die 1,27ms vollständig. Nebeneffekt: `sendto` läuft im Game-Loop-Thread → blockierte bisher ~7% der Wall-Time der 60-Hz-Schleife (Tick-Jitter).
 **Fix:** Nach erfolgreichem TCP-Connect die tatsächliche Server-IP cachen (`self._udp_addr = (sock.getpeername()[0], self.port)` — garantiert dieselbe IP wie TCP) und beide sendto-Stellen darauf umstellen. Numerisches IP-Tupel → inet_pton-Fastpath, kein getaddrinfo. Bewusst KEIN `udp.connect()` (würde Empfangsfilterung/ICMP-Fehlersemantik ändern; als Option dokumentiert, nicht nötig).
 **Potenzial:** sendto ~7,2% absolut/Bot → ~0,1%. **Risiko:** Null (gleiche Pakete, gleiches Ziel). **Verifikation:** Client-Test mit gemocktem Socket (nach `connect()` ist `_udp_addr` die getpeername-IP; sendto erhält das gecachte Tupel).
 
-### N2 — Leerlauf-Early-Outs (offen, trivial)
+### N2 — Leerlauf-Early-Outs (jetzt dran, trivial — Nachmessung tmp4: ~2–2,5% der aktiven CPU)
 
 `_resolve_incoming_shots`, `_cleanup_shots` und `_find_incoming_shot` laufen 60 Hz auch bei komplett leeren Shot-Dicts durch Lock/Iterations-Overhead (~0,2–0,5%/Bot im Idle). Früher `if not self._shots and not self._ricochet_paths: return` (GIL-sicherer Lesezugriff, kein Lock nötig). **Risiko:** Null. **Verifikation:** bestehende test_hit_detection.py.
 
-### N3 — Tick-Wait verschlanken (Schublade)
+### N3 — Tick-Wait verschlanken (offen — Gate erfüllt)
 
-`Event.wait(timeout)` pro Tick kostet ~0,4%/Bot (Condition-Objekt + Lock-Maschinerie). `time.sleep` wäre billiger, verzögert aber `stop()` um bis zu 16ms. **Nur angehen, falls die Nachmessung nach N1a/N1b immer noch >10% zeigt.**
+`Event.wait(timeout)` pro Tick kostet ~0,4%/Bot (Condition-Objekt + Lock-Maschinerie). `time.sleep` wäre billiger, verzögert aber `stop()` um bis zu 16ms. Das ursprüngliche Gate („nur falls Nachmessung >10%") ist erfüllt (tmp4: 15–17% docker). Nachmessung tmp4: Event.wait-Maschinerie ≈7% der aktiven CPU PLUS ~230 Futex-Wakeups/s, deren Kernel-Anteil cProfile nicht sieht — der Punkt wirkt also doppelt. Umsetzungsentscheid (`time.sleep` vs. Event mit gröberem Timeout; stop-Latenz ≤16ms akzeptabel) bei der Implementierung.
 
-### Erwartung Nachmessung
+### Nachmessung (2026-07-04, tmp4) — ✅ N1 wirkt
 
-Rechnerisch pro Bot (IDLE): ~20% → **~8–10%** (sendto-Posten praktisch weg, eigener Sendepfad + Peer-Empfang halbiert); im neuen Profil erwartbar: sendto-Anteil <5% der aktiven CPU, ~30 `_send_update`-Calls/s. Abnahme: Redeploy, `docker stats` über ~10min Idle, optional neue cProfile-Runde.
+cProfile-Dumps aus dem Live-Container (4 Bots, je ~2min, Idle); Deploy verifiziert (Zeilennummern = HEAD `4f16ccd`). Ergebnis:
+
+- **N1a bestätigt:** `_send_update` ~29×/s (vorher ~57×/s), `_maybe_send_server_update` läuft wie vorgesehen jeden Tick.
+- **N1b bestätigt:** sendto ~0,12ms/Call (vorher 1,38ms, Faktor 10); sendto-Anteil 46,6% → ~5% der aktiven CPU.
+- **Aktive CPU/Bot: 15,1% → ~6–7%** (cProfile, ohne Blocking) — die Erwartung „~8–10%" übertroffen. `docker stats`: ~20% → 15–17% (4 Bots).
+- **Warum docker weniger stark fiel als die Python-CPU:** Der Rest ist überwiegend Prozess-Floor, den cProfile nicht sieht — Kernel-/Syscall-Zeit aus ~230 Futex-Wakeups/s (`lock.acquire`), ~85 recv-Syscalls/s und den 60-Hz-Tick-Wakeups, das Ganze ×4 separate Interpreter. Der Vergleich mit Quake3/CS-1.6-Servern (<10%, meist ~5%) ist strukturell schief: C-Engines, 1 Prozess, ereignisgetrieben. ~4%/Bot ≈ 2–3% Python-Aktiv + 1–2% Kernel/Wakeups.
+- **Restprofil flach** (kein Posten >7% der aktiven CPU): Builtins (`max`/`abs`/`min`/`dict.get`/`deque.append`, je 0,6–1,4M Calls) ≈30% — Interpreter-Call-Overhead, den nur AOT-Kompilierung frisst (→ P9/Track 5); `nav_graph.py` ≈22–27% (Idle-Wander: `_compute_vertical_edges`-Subtree = laufender `_vn_cache`-Warm-up, weil der Wander ständig neue Zellen der 41k-Knoten-Karte betritt — kein Bug, bewusstes Verhalten); `bzbot_ai.py` ≈16–20%; `bzbot.py` ≈12%; `threading.py` (Event.wait-Maschinerie) ≈7% (→ N3); `_resolve_incoming_shots` bei leeren Shot-Dicts ≈2–2,5% (→ N2). Einmal-Posten NavGraph-Init (`_precompute_thin_wall_blocked`, 114k Calls) ist kein Dauerläufer.
+
+**Neues realistisches Ziel: <10–12% docker mit N2+N3.** Darunter geht es nur strukturell — Track 5: AOT-Kompilierung (P9) und/oder Ein-Prozess-Multi-Bot (s. Roadmap).
 
 ---
 
@@ -386,9 +396,10 @@ Die Tracks spiegeln die Themen-Priorität (Performance → Fehlerpotenzial → W
 
 1. **Track 1 — Sofort-Bugfixes (klein, hohes Server-Potenzial; F3 ist faktisch auch eine Performance-Maßnahme):** F3 (Rico-Leak, 2 Zeilen) → F2 (Dict-Snapshots) → F1 (GM-Dodge) → F4 (dt-Clamp).
 2. **Track 2 — Performance:** P2 → P3 → P4a → W6 (ObstacleGrid-Split, aus dem Struktur-Track vorgezogen) → P1 (Grid in simulate_shot_path) → **Server-Messung** → danach je nach Befund P5, P6, P7, P4b, P8, P9. — ✅ P2/P3/P4a/W6/P1 umgesetzt (Branch `perf/track2`); ✅ Server-Messung 2026-07-04 erfolgt (cProfile IDLE + KAMPF aus dem Live-Container) → Ergebnis: P4b/P5/P6/P8/P9 ⛔, P7 🗄️ — stattdessen **Track N (Teil 1b)**.
-2b. **Track N — Idle-Baseline (aus der Server-Messung, Teil 1b):** N1a (30-Hz-Kadenz-Fix) → N1b (UDP-Adress-Cache) → Nachmessung (User; Ziel <10% Idle) → danach ggf. N2 (Leerlauf-Early-Outs), N3 (Schublade). — ✅ N1a+N1b umgesetzt (Branch `perf/idle-baseline`); **nächster Schritt: Nachmessung (User)**.
+2b. **Track N — Idle-Baseline (aus der Server-Messung, Teil 1b):** N1a (30-Hz-Kadenz-Fix) → N1b (UDP-Adress-Cache) → Nachmessung → N2 (Leerlauf-Early-Outs) → N3 (Tick-Wait) → erneute Nachmessung (Ziel <10–12% docker). — ✅ N1a+N1b umgesetzt und live verifiziert (Nachmessung tmp4 2026-07-04: docker ~20% → 15–17% bei 4 Bots, aktive CPU/Bot 15,1% → ~6–7%); **nächste Schritte: N2 → N3 → Nachmessung**.
 3. **Track 3 — Konsistenz (restliches Fehlerpotenzial; bewusst VOR dem Struktur-Track, weil die Fixes Grep-basiert über den heutigen Dateistand laufen):** F5 → F6 (Radar an `world_half` koppeln, halbe Weltgröße bleibt) → F7 → F9 (= W9; Helper wandern später beim Split als Einheit mit) → F8 (distanzabhängiges Feuer-Gate als eigener PR + Doku-Punkte). — ✅ komplett umgesetzt (Branch `consistency/track3`).
-4. **Track 4 — Struktur (Wartbarkeit, zuletzt):** W1 (constants.py, zusammen mit W8-Tabelle) → W2 (models/util) → W4 (Mixin-Split, 9 Einzel-Commits) → W5 (bzbot.py dünn) → W7 → W3 (_on_set_var-Tabelle, mit Snapshot-Test). Zu diesem Zeitpunkt sind alle P/F-Punkte abgeschlossen → keine Referenz-Entwertung; sollte doch ein Punkt offen sein, gilt Regel 4 aus „Wechselwirkungen" (Referenzen im Plan pro W-PR nachziehen, Landkarten-Tabelle nutzen).
+4. **Track 4 — Struktur (Wartbarkeit):** W1 (constants.py, zusammen mit W8-Tabelle) → W2 (models/util) → W4 (Mixin-Split, 9 Einzel-Commits) → W5 (bzbot.py dünn) → W7 → W3 (_on_set_var-Tabelle, mit Snapshot-Test). Zu diesem Zeitpunkt sind alle P/F-Punkte abgeschlossen → keine Referenz-Entwertung; sollte doch ein Punkt offen sein, gilt Regel 4 aus „Wechselwirkungen" (Referenzen im Plan pro W-PR nachziehen, Landkarten-Tabelle nutzen). Track 4 bleibt reine Wartbarkeit/Struktur **ohne Funktionsänderung**, damit gut testbar.
+5. **Track 5 — Letzte Performance-Stufe (nach Track 4 + weiterem manuellen Testlauf):** P9 (mypyc/Cython-AOT der Compute-Module, erwartet ~11–13% docker) und/oder Ein-Prozess-Multi-Bot (geteilte World/NavGraph/ObstacleGrid — wird derzeit 4× identisch geladen — und 1 Tick-Loop; einziger Hebel gegen den Prozess-Floor und der einzige Weg Richtung ~5% docker).
 
 ## Verifikation (gesamt)
 
