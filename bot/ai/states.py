@@ -1,0 +1,584 @@
+"""State-Machine: Zustandsuebergaenge, 60-Hz-Dispatch und alle _tick_*-Zustaende ausser COMBAT (W4, FABLE-PLAN Teil 3)."""
+
+import math
+import time
+import logging
+
+from bot.constants import *  # noqa: F401,F403
+from bot.util import _angle_diff, _wrap
+from bot.models import AIState
+
+logger = logging.getLogger("bzbot")
+
+
+class StateMachineMixin:
+    """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
+
+    def _transition_to(self, state: AIState) -> None:
+        """Setzt neuen AI-State; loggt den Übergang."""
+        if self._ai_state == state:
+            return
+        _clear_on_exit = {AIState.COMBAT, AIState.SEEKING, AIState.IDLE}
+        if (self._ai_state in _clear_on_exit
+                and state in (AIState.SEEKING, AIState.IDLE)):
+            self._nav_path = []
+            self._nav_goal = None
+        logger.info("[%s] State: %s → %s", self.callsign,
+                    self._ai_state.name, state.name)
+        self._ai_state = state
+
+    def _ground_state(self) -> AIState:
+        """Realer Boden-State je nach Lage: COMBAT (Ziel + Mensch da), sonst SEEKING/IDLE.
+
+        Dient als sicherer Return-State, damit NAV_JUMP/NAV_JUMP_ALIGN nie auf sich selbst
+        „aussteigen" (sonst No-Op-Transition in _transition_to → Endlosfalle)."""
+        if self.target_player is not None and self._has_presence():
+            return AIState.COMBAT
+        if self._has_presence():
+            return AIState.SEEKING
+        return AIState.IDLE
+
+    def _update_movement(self, dt: float, now: float, ai_tick: bool = True) -> None:
+        """Bewegungs-Wrapper (60 Hz): State-Dispatch + zentraler Teleporter-Querungs-Check.
+
+        Der Crossing-Check läuft pathing-unabhängig in JEDEM Tick und für JEDEN State (wie die
+        Hitbox-Detection) — auch wenn _dispatch_movement früh `return`t. So wird ein Teleporter
+        auch per Direktpfad, Bounce oder TactJump-Sprung-Arc korrekt durchquert (P3-NAV-02)."""
+        old = (self.pos[0], self.pos[1], self.pos[2])
+        self._dispatch_movement(dt, now, ai_tick)
+        self._check_teleport_crossing(old, now)
+
+    def _turn_toward(self, target_az: float, dt: float) -> float:
+        """Dreht azimuth mit _tank_turn_rate Richtung target_az und setzt ang_vel
+        konsistent (geklemmt, damit das gesendete PlayerUpdate zur realen Drehung
+        passt). Gibt den Winkelabstand VOR der Drehung zurück (Aufrufer nutzen
+        ihn für Speed-/Erreicht-Entscheidungen). F9: einzige Quelle für das
+        vorher 5× duplizierte Dreh-Snippet; Varianten mit effektiver Drehrate
+        (_eff_turn) oder Winkel-Cap (_compute_dodge_dir) bleiben bewusst eigen."""
+        diff = _angle_diff(target_az, self.azimuth)
+        self.ang_vel = math.copysign(
+            min(abs(diff / max(dt, 1e-6)), self._tank_turn_rate), diff)
+        self.azimuth = _wrap(
+            self.azimuth + math.copysign(min(abs(diff), self._tank_turn_rate * dt), diff))
+        return diff
+
+    def _dispatch_movement(self, dt: float, now: float, ai_tick: bool = True) -> None:
+        """Physik (60 Hz) + KI (10 Hz): State-Machine-Dispatch."""
+        half = self.world_half
+
+        # Grundphysik läuft immer
+        self._run_physics(dt, now)
+
+        # FALLING-Erkennung: Bodenstates merken nicht dass sie vom Dach gefallen sind.
+        # Nur beim Abwärts-Fallen (vel[2] < -0.1) und tatsächlich in der Luft.
+        _GROUND_STATES = (AIState.COMBAT, AIState.SEEKING, AIState.IDLE,
+                          AIState.EVADING, AIState.LANDING_SHOT)
+        if (self._ai_state in _GROUND_STATES
+                and not self._jumping
+                and self.vel[2] < -0.1
+                and self.pos[2] > self._get_floor_z() + 0.5):
+            self._pre_fall_state = self._ai_state
+            self._jump_ang_vel = self.ang_vel   # Boden-Drehrate in Fall-Physik übertragen
+            self._jumping = True   # verhindert Schwerkraft-Dopplung in _run_physics
+            self._transition_to(AIState.FALLING)
+            return  # diese Tick: Physik fertig, nächster Tick übernimmt _tick_falling
+
+        if self._ai_state in (AIState.JUMPING, AIState.DODGE_JUMP):
+            self._tick_jumping(dt, now)
+            return
+
+        if self._ai_state == AIState.NAV_JUMP:
+            self._tick_nav_jump(dt, now)
+            return
+
+        if self._ai_state == AIState.NAV_JUMP_ALIGN:
+            self._tick_nav_jump_align(dt, now)
+            return
+
+        if self._ai_state == AIState.NAV_TELE:
+            self._tick_nav_tele(dt, now)
+            return
+
+        if self._ai_state == AIState.Z_ATTACK:
+            self._tick_z_attack(dt, now)
+            return
+
+        if self._ai_state == AIState.FALLING:
+            self._tick_falling(dt, now)
+            return
+
+        if self._ai_state in (AIState.EVADING, AIState.JUMP_WINDUP):
+            self._tick_committed(dt, now)
+            return
+
+        if self._ai_state == AIState.LANDING_SHOT:
+            if ai_tick:
+                self._tick_landing_shot(now)
+            if not self._jumping:
+                # Position halten; aktiv auf Landepunkt drehen
+                self.vel[0] = 0.0
+                self.vel[1] = 0.0
+                if self._landing_aim_pos is not None:
+                    ax, ay = self._landing_aim_pos
+                    self._turn_toward(
+                        math.atan2(ay - self.pos[1], ax - self.pos[0]), dt)
+                else:
+                    self.ang_vel = 0.0
+            return
+
+        # IDLE / SEEKING / COMBAT (10 Hz KI-Tick)
+        if ai_tick:
+            # Fertige Async-Vollsuche (P4-INF-01) vor dem State-Tick übernehmen — nur in
+            # navigierbaren Bodenstates (NAV_JUMP/NAV_TELE/FALLING returnen vorher).
+            self._poll_async_plan()
+            if self._ai_state == AIState.IDLE:
+                self._tick_idle(now)
+            elif self._ai_state == AIState.SEEKING:
+                self._tick_seeking(now)
+            elif self._ai_state == AIState.COMBAT:
+                self._tick_combat(now)
+
+        # 60 Hz Bewegung
+        if not self._jumping:
+            if self._ai_state == AIState.COMBAT:
+                self._execute_combat_move(dt, half, now)
+            elif self._ai_state not in (AIState.JUMP_WINDUP, AIState.EVADING,
+                                        AIState.JUMPING, AIState.DODGE_JUMP,
+                                        AIState.LANDING_SHOT, AIState.NAV_JUMP_ALIGN):
+                self._move_to_target(dt, half)
+
+    def _tick_jumping(self, dt: float, now: float) -> None:
+        """Sprungphysik (BZFlag: in der Luft keine Steuerung). LocalPlayer.cxx Z. 364-368."""
+        self.vel[2] += self._gravity * dt
+        self.pos[2] += self.vel[2] * dt
+        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
+        if not self._can_drive_through_obstacles():
+            self._apply_obstacle_bounds(dt)
+        self.pos[0] += self.vel[0] * dt
+        self.pos[1] += self.vel[1] * dt
+        # Weltgrenzen-Clamp (kein Bounce im Sprung)
+        half = self.world_half
+        self.pos[0] = max(-half, min(half, self.pos[0]))
+        self.pos[1] = max(-half, min(half, self.pos[1]))
+
+        # WG: zusätzlicher Luftsprung beim Abwärtsbogen. Faithful zu doJump(): im Fallen wird die
+        # Velocity nur additiv angehoben (v + vz, hier vz<0), kein voller neuer Bogen.
+        if self.own_flag == "WG" and self.vel[2] < 0 and self._can_jump(now):
+            self.vel[2] = self._jump_launch_vz(self.vel[2])
+            self._wings_jumps_used += 1
+
+        if self._is_landed():
+            self.pos[2] = self._get_floor_z()
+            self.vel[2] = 0.0
+            self._jumping = False
+            self._wings_jumps_used = 0
+            self._last_jump_at = now
+            self.ang_vel = 0.0
+            if self.target_player is not None and self._has_presence():
+                self._transition_to(AIState.COMBAT)
+            elif self._has_presence():
+                self._transition_to(AIState.SEEKING)
+            else:
+                self._transition_to(AIState.IDLE)
+
+    def _tick_explosion(self, dt: float) -> None:
+        """Integriert den Explosions-Bogen des Wracks (tot, PS_EXPLODING) — spiegelt explodeTank:
+        Aufwärts-Velocity unter Schwerkraft, Horizontal-Momentum bleibt; bei Bodenkontakt liegen
+        bleiben (vel[2]=0). Die Explosion läuft optisch bis _exploding_until weiter."""
+        floor_z = self._get_floor_z()
+        self.vel[2] += self._gravity * dt
+        self.pos[2] = max(self.pos[2] + self.vel[2] * dt, floor_z)
+        if self.pos[2] <= floor_z + 1e-6:
+            self.pos[2] = floor_z
+            self.vel[2] = 0.0
+        self.pos[0] += self.vel[0] * dt
+        self.pos[1] += self.vel[1] * dt
+        half = self.world_half
+        self.pos[0] = max(-half, min(half, self.pos[0]))
+        self.pos[1] = max(-half, min(half, self.pos[1]))
+
+    def _tick_nav_jump(self, dt: float, now: float) -> None:
+        """Navigationssprung-Physik. Landet auf Ziel-Etage → return_state."""
+        self.vel[2] += self._gravity * dt
+        self.pos[2] += self.vel[2] * dt
+        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)   # Lande-Drehung (am Absprung fixiert)
+        if not self._can_drive_through_obstacles():
+            self._apply_obstacle_bounds(dt)
+        self.pos[0] += self.vel[0] * dt
+        self.pos[1] += self.vel[1] * dt
+        half = self.world_half
+        self.pos[0] = max(-half, min(half, self.pos[0]))
+        self.pos[1] = max(-half, min(half, self.pos[1]))
+
+        if self._is_landed():
+            floor_z = self._get_floor_z()
+            self.pos[2] = floor_z
+            self.vel[2] = 0.0
+            self._jumping = False
+            self._wings_jumps_used = 0
+            self._last_jump_at = now
+            self.ang_vel = 0.0
+            ret = getattr(self, "_nav_jump_return_state", AIState.SEEKING)
+            if ret in (AIState.NAV_JUMP, AIState.NAV_JUMP_ALIGN):
+                ret = self._ground_state()   # nie auf sich selbst zurück (Endlosfalle)
+            if abs(floor_z - getattr(self, "_nav_jump_target_z", floor_z)) > 1.5:
+                # Falsche Etage gelandet → Route verwerfen und neu planen
+                self._nav_path = []
+                self._nav_goal = None
+                self._transition_to(ret)
+                self._new_target()
+                return
+            self._transition_to(ret)
+            self._advance_path()
+
+    def _tick_nav_jump_align(self, dt: float, now: float) -> None:
+        """Richtet Bot auf Sprungziel-Azimuth aus; wechselt dann zu NAV_JUMP."""
+        wp  = getattr(self, '_nav_jump_align_wp', None)
+        ret = getattr(self, '_nav_jump_align_return_state', AIState.SEEKING)
+        if ret in (AIState.NAV_JUMP, AIState.NAV_JUMP_ALIGN):
+            ret = self._ground_state()   # nie auf sich selbst zurück (Endlosfalle)
+        if wp is None:
+            self._transition_to(ret)
+            return
+        if now - getattr(self, '_nav_jump_align_start', now) > 5.0:
+            wp_key = (round(wp[0]), round(wp[1]), wp[2])
+            self._nav_jump_cooldowns[wp_key] = now + 30.0
+            self._nav_jump_cooldowns = {k: v for k, v in self._nav_jump_cooldowns.items() if v > now}
+            self._nav_path = []
+            self._nav_goal = None
+            self.target_pos = None
+            self._transition_to(ret)
+            return
+        az_to_wp = math.atan2(wp[1] - self.pos[1], wp[0] - self.pos[0])
+        diff = self._turn_toward(az_to_wp, dt)
+        self.vel[0] = 0.0
+        self.vel[1] = 0.0
+        if abs(diff) <= math.pi / 36:
+            self._initiate_nav_jump(wp)
+
+    def _tick_nav_tele(self, dt: float, now: float) -> None:
+        """Fährt das letzte kurze Stück direkt in die Teleporter-Mitte, bis der zentrale
+        _check_teleport_crossing (im _update_movement-Wrapper, nach diesem Tick) quert — oder
+        bis Timeout/Revert. Ersetzt das Anfahren des mittenseitigen Austritts-WP, an dem der Bot
+        sonst (Reichweite erreicht) davor stehen blieb."""
+        ret = getattr(self, "_nav_tele_return_state", None) or self._ground_state()
+        if ret in (AIState.NAV_TELE, AIState.NAV_JUMP, AIState.NAV_JUMP_ALIGN):
+            ret = self._ground_state()
+        center = getattr(self, "_nav_tele_center", None)
+        # Erfolg: der Wrapper-Crossing-Check hat im vorherigen Tick gewarpt (→ _teleporting_until).
+        if now < getattr(self, "_teleporting_until", 0.0):
+            logger.info("[%s] NAV_TELE: Querung erfolgreich → %s", self.callsign, ret.name)
+            self._nav_tele_center = None
+            self._transition_to(ret)
+            return
+        # Abbruch: Timeout deckt auch den Revert ab (bei _is_inside_obstacle setzt der Crossing-
+        # Check _teleporting_until NICHT → kein Erfolg → nach ≤NAV_TELE_TIMEOUT Abbruch).
+        if center is None or now - getattr(self, "_nav_tele_start", now) > NAV_TELE_TIMEOUT:
+            if center is not None:
+                self._nav_tele_cooldowns[(round(center[0]), round(center[1]))] = now + NAV_TELE_COOLDOWN
+            logger.info("[%s] NAV_TELE: Abbruch (Timeout/blockiert) → Cooldown + Replan", self.callsign)
+            self._nav_tele_center = None
+            self._nav_path = []
+            self._nav_goal = None
+            self.target_pos = None
+            self._transition_to(ret)
+            return
+        # Direktfahrt: auf Mitte + Overshoot zielen (Overshoot → dünne Tor-Ebene sicher queren).
+        cx, cy = center
+        ddx, ddy = cx - self.pos[0], cy - self.pos[1]
+        d = math.hypot(ddx, ddy) or 1.0
+        aim_x = cx + (ddx / d) * NAV_TELE_OVERSHOOT
+        aim_y = cy + (ddy / d) * NAV_TELE_OVERSHOOT
+        target_az = math.atan2(aim_y - self.pos[1], aim_x - self.pos[0])
+        diff = self._turn_toward(target_az, dt)
+        speed = self._effective_tank_speed() if abs(diff) < math.pi / 2 else 0.0
+        self.vel[0] = math.cos(self.azimuth) * speed
+        self.vel[1] = math.sin(self.azimuth) * speed
+        self._apply_bounds(dt, self.world_half)
+        if getattr(self, "_debug_log_tele", False):
+            _t = time.monotonic()
+            if _t - getattr(self, "_debug_nav_tele_t", 0.0) > 0.25:
+                self._debug_nav_tele_t = _t
+                logger.debug(
+                    "[%s] NAV_TELE: pos=(%.1f,%.1f,%.1f) →Mitte(%.1f,%.1f) dist=%.1fu "
+                    "spd=%.1f az=%.0f° innen=%s",
+                    self.callsign, self.pos[0], self.pos[1], self.pos[2], cx, cy, d,
+                    speed, math.degrees(self.azimuth), self._is_inside_obstacle())
+
+    def _tick_z_attack(self, dt: float, now: float) -> None:
+        """ZJ1-Sprungphysik. Nur aus COMBAT erreichbar; Landung → immer COMBAT."""
+        self.vel[2] += self._gravity * dt
+        self.pos[2] += self.vel[2] * dt
+        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
+        if not self._can_drive_through_obstacles():
+            self._apply_obstacle_bounds(dt)
+        self.pos[0] += self.vel[0] * dt
+        self.pos[1] += self.vel[1] * dt
+        half = self.world_half
+        self.pos[0] = max(-half, min(half, self.pos[0]))
+        self.pos[1] = max(-half, min(half, self.pos[1]))
+
+        if self._z_attack_mode:
+            if abs(self.pos[2] - self._z_attack_fire_z) < 1.5:
+                if self._next_shoot <= now and self._next_slot_ready(now):
+                    _shoot = True
+                    if self.target_player is not None:
+                        _ep = self._get_enemy_pos(self.target_player)
+                        if _ep is not None:
+                            _az_to_enemy = math.atan2(_ep[1] - self.pos[1], _ep[0] - self.pos[0])
+                            if abs(_angle_diff(self.azimuth, _az_to_enemy)) > math.radians(15):
+                                _shoot = False
+                    if _shoot and self._can_shoot():
+                        self._send_shot(now, self.azimuth)
+                        self._set_next_shoot_after_fire(now)
+                        self._z_attack_mode = False  # nur nach gefeuertem Schuss deaktivieren
+                    # schlechter Winkel → nächster Tick versucht erneut (Modus bleibt aktiv)
+
+        if self._is_landed():
+            self.pos[2] = self._get_floor_z()
+            self.vel[2] = 0.0
+            self._jumping = False
+            self._wings_jumps_used = 0
+            self._last_jump_at = now
+            self._z_attack_mode = False
+            self.ang_vel = 0.0
+            self._transition_to(AIState.COMBAT)
+
+    def _tick_falling(self, dt: float, now: float) -> None:
+        """Fall-Physik für unkontrollierten Fall vom Dach (analog _tick_jumping).
+        Kein Lenken: vel[0]/vel[1] und azimuth bleiben committed.
+        _jump_ang_vel wird nicht zurückgesetzt — bestehende Drehbewegung bleibt."""
+        self.vel[2] += self._gravity * dt
+        self.pos[2] += self.vel[2] * dt
+        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
+        if not self._can_drive_through_obstacles():
+            self._apply_obstacle_bounds(dt)
+        self.pos[0] += self.vel[0] * dt
+        self.pos[1] += self.vel[1] * dt
+        half = self.world_half
+        self.pos[0] = max(-half, min(half, self.pos[0]))
+        self.pos[1] = max(-half, min(half, self.pos[1]))
+
+        if self._is_landed():
+            self.pos[2] = self._get_floor_z()
+            self.vel[2] = 0.0
+            self._jumping = False
+            self._wings_jumps_used = 0
+            # _last_jump_at nicht setzen — kein echter Sprung, kein Cooldown
+            self.ang_vel = 0.0
+            self._transition_to(self._pre_fall_state)
+
+    def _tick_committed(self, dt: float, now: float) -> None:
+        """Führt aktiven Dodge aus. Keine neuen KI-Entscheidungen.
+
+        JUMP_WINDUP: kein Abbruch bei Bedrohung. Nur Notschuss möglich,
+        Sprung wird trotzdem ausgeführt (Entscheidung steht)."""
+        half = self.world_half
+
+        if self._ai_state == AIState.JUMP_WINDUP:
+            incoming, _ = self._find_incoming_shot(now)
+            if incoming is not None:
+                t_impact = incoming.time_to_closest(self.pos[0], self.pos[1])
+                if t_impact < 0.1 and self.client.udp_active and self.player_id is not None:
+                    self._send_shot(now, self.azimuth)
+                    if getattr(self, '_debug_log_shot', False):
+                        logger.debug("[%s] Schuss: Notschuss während Wind-Up (t=%.2fs)",
+                                     self.callsign, t_impact)
+
+        # Fix E1/EV1: EVADING früh beenden nur wenn Schuss auch für alle typischen
+        # Bewegungsrichtungen ungefährlich ist (verhindert Fehlausstieg durch Dodge-Velocity).
+        if self._ai_state == AIState.EVADING:
+            fwd_vx = math.cos(self.azimuth) * self._tank_speed
+            fwd_vy = math.sin(self.azimuth) * self._tank_speed
+            if (self._find_incoming_shot(now)[0] is None
+                    and self._find_incoming_shot(now, bot_vel=(0.0, 0.0))[0] is None
+                    and self._find_incoming_shot(now, bot_vel=(fwd_vx, fwd_vy))[0] is None
+                    and self._find_incoming_shot(now, bot_vel=(-fwd_vx, -fwd_vy))[0] is None):
+                self._dodging = False
+                self._dodge_forward = False
+                self._dodge_reverse = False
+                
+                # Fix EV2: Per-Schuss-Grace — denselben Schuss 1 s ignorieren damit nach
+                # dem Early-Exit weder EVADING noch DODGE_JUMP neu ausgelöst werden.
+                if self._last_threat_id is not None:
+                    self._evade_cleared_shots[self._last_threat_id] = now + EVADE_CLEAR_GRACE
+                self._last_threat_id = None
+                
+                if getattr(self, '_debug_log_dodge', False):
+                    logger.debug("[%s] Ausweichen: Bedrohung vorbei – frühzeitiger EVADING-Exit", self.callsign)
+                if self.target_player is not None and self._has_presence():
+                    self._transition_to(AIState.COMBAT)
+                elif self._has_presence():
+                    self._transition_to(AIState.SEEKING)
+                else:
+                    self._transition_to(AIState.IDLE)
+                return
+
+        if self._dodging and now < self._dodge_until:
+            if self._dodge_reverse:
+                if self.own_flag == "OO" and self._is_inside_obstacle(include_oo=True):
+                    speed = 0.0
+                else:
+                    self.ang_vel = 0.0
+                    speed = -self._tank_speed * 0.5
+            elif self._dodge_forward:
+                self.ang_vel = 0.0
+                speed = self._tank_speed
+            else:
+                self._turn_toward(self._dodge_dir, dt)
+                speed = self._tank_speed
+            self.vel[0] = math.cos(self.azimuth) * speed
+            self.vel[1] = math.sin(self.azimuth) * speed
+            self._apply_bounds(dt, half)
+            return
+
+        # Timer abgelaufen
+        self._dodging = False
+        self._dodge_forward = False
+        self._dodge_reverse = False
+
+        # Fix EV2: Per-Schuss-Grace — denselben Schuss 1 s ignorieren damit nach
+        # dem Early-Exit weder EVADING noch DODGE_JUMP neu ausgelöst werden.
+        if self._last_threat_id is not None:
+            self._evade_cleared_shots[self._last_threat_id] = now + EVADE_CLEAR_GRACE
+        self._last_threat_id = None
+        
+        if self._ai_state == AIState.JUMP_WINDUP:
+            if self._jump_pending:
+                self._execute_jump()
+        else:
+            if self.target_player is not None and self._has_presence():
+                self._transition_to(AIState.COMBAT)
+            elif self._has_presence():
+                self._transition_to(AIState.SEEKING)
+            else:
+                self._transition_to(AIState.IDLE)
+
+    def _tick_landing_shot(self, now: float) -> None:
+        """KI während LANDING_SHOT: Azimuth auf Landepunkt; nur Bedrohung von anderen prüfen.
+        Bewegung (vel=0) und Azimuth-Drehung werden in _update_movement (60Hz) gehandhabt."""
+        if now > self._landing_shot_until:
+            self._transition_to(
+                AIState.COMBAT if self.target_player is not None else AIState.SEEKING)
+            return
+        info = (self.players.get(self.target_player)
+                if self.target_player is not None else None)
+        # Proaktiver Fire-Trigger: selbst feuern, sobald die Restfallzeit des Gegners ≈ Flugzeit
+        # des Schusses ist. Feuern aus dem eigenen Tick (analog Z_ATTACK) hält den Schuss komplett
+        # im LANDING_SHOT-Zustand → der Z-Block in _maybe_shoot_* wird nicht durchlaufen, und die
+        # COMBAT-Bewegung stört das Aiming nicht.
+        if (info is not None and info.is_airborne and info.pos[2] > 0.1
+                and self._landing_aim_pos is not None):
+            _g = self._gravity
+            _dz = info.pos[2] - self._landing_hit_z   # Fallhöhe bis Interzeptionshöhe (Fix 2)
+            _disc = info.vel[2] ** 2 - 2.0 * _g * _dz
+            if _disc >= 0:
+                _t_rem = (-info.vel[2] - math.sqrt(_disc)) / _g
+                if _t_rem > 0:
+                    _dist_aim = math.hypot(
+                        self._landing_aim_pos[0] - self.pos[0],
+                        self._landing_aim_pos[1] - self.pos[1])
+                    _tof = _dist_aim / max(self._effective_shot_speed(), 1.0)
+                    if _t_rem <= _tof + 0.15:
+                        _target_az = math.atan2(
+                            self._landing_aim_pos[1] - self.pos[1],
+                            self._landing_aim_pos[0] - self.pos[0])
+                        _aligned = abs(_angle_diff(_target_az, self.azimuth)) <= math.radians(25)
+                        if (_aligned and self._can_shoot()
+                                and now >= self._next_shoot and self._next_slot_ready(now)):
+                            self._send_shot(now, self.azimuth)
+                            self._set_next_shoot_after_fire(now)
+                            if getattr(self, '_debug_log_shot', False):
+                                logger.debug("[%s] Schuss: LANDING_SHOT (t_rem=%.2fs tof=%.2fs)",
+                                             self.callsign, _t_rem, _tof)
+                            self._transition_to(
+                                AIState.COMBAT if self.target_player is not None
+                                else AIState.SEEKING)
+                            return
+                        if _t_rem <= _tof:
+                            # Fenster verstrichen (Reload/nicht ausgerichtet) → ohne Schuss aufgeben
+                            self._transition_to(
+                                AIState.COMBAT if self.target_player is not None
+                                else AIState.SEEKING)
+                            return
+                        # sonst: noch im 0.15s-Puffer → nächster Tick versucht erneut
+        if info is None or not info.is_airborne:
+            self._transition_to(
+                AIState.COMBAT if self.target_player is not None else AIState.SEEKING)
+            return
+        # Bedrohung von ANDEREM Gegner
+        threat, threat_t = self._find_incoming_shot(now)
+        if threat is not None and threat.shooter_id != self.target_player:
+            t_impact = threat.time_to_closest(self.pos[0], self.pos[1])
+            if (threat.shooter_id, threat.shot_id) in self._ricochet_paths:
+                t_impact = threat_t
+            if t_impact < 0.4:
+                _sh = self.players.get(threat.shooter_id)
+                if self._threat_unseen(_sh):
+                    self._last_threat_id = None    # IB/ST ohne Sicht: ignorieren
+                    return
+                threat_key = (threat.shooter_id, threat.shot_id)
+                if self._last_threat_id != threat_key:
+                    self._last_threat_id = threat_key
+                    self._threat_detected_at = now
+                _react = DODGE_REACT_DELAY
+                if _sh and _sh.flag == "IB":
+                    _react = DODGE_REACT_DELAY * IB_REACT_MULTIPLIER
+                elif _sh and _sh.flag == "M":
+                    _react = DODGE_REACT_DELAY * M_REACT_MULTIPLIER
+                elif _sh and _sh.flag == "CS":
+                    _react = DODGE_REACT_DELAY * CS_REACT_MULTIPLIER
+                if now - self._threat_detected_at >= _react:
+                    dodge_dir, orig_diff = self._compute_dodge_dir(threat, now)
+                    self._setup_dodge(threat, now, t_impact, dodge_dir, orig_diff)
+                    self._transition_to(AIState.EVADING)
+                    return
+
+    def _tick_idle(self, now: float) -> None:
+        """IDLE: Passiv-Wegpunkte + Übergang zu SEEKING wenn Menschen da.
+        Bedrohungen werden auch im Passiv-Modus erkannt (Schuss kann jederzeit kommen)."""
+        if self._handle_threat(now):
+            return
+        if self._has_presence():
+            self._transition_to(AIState.SEEKING)
+            return  # _tick_seeking übernimmt Navigation im nächsten Tick
+        # Passiv-Modus: Stuck-Erkennung und Wegpunkte
+        if now - self._last_pos_check_time >= STUCK_WINDOW:
+            d = math.hypot(self.pos[0] - self._last_pos_check[0],
+                           self.pos[1] - self._last_pos_check[1])
+            if d < STUCK_MIN_DIST and self.target_pos is not None:
+                self._new_target()
+            self._last_pos_check_time = now
+            self._last_pos_check = [self.pos[0], self.pos[1]]
+        self._move_reverse = False
+        if self.target_pos is None:
+            self._new_target()
+
+    def _tick_seeking(self, now: float) -> None:
+        """SEEKING: Ziel suchen, Bedrohungen prüfen, zu COMBAT/IDLE wechseln."""
+        if not self._has_presence():
+            self._transition_to(AIState.IDLE)
+            self._move_reverse = False
+            if self.target_pos is None:
+                self._new_target()
+            return
+        if self._handle_threat(now):
+            return
+        if now - self._last_pos_check_time >= STUCK_WINDOW:
+            d = math.hypot(self.pos[0] - self._last_pos_check[0],
+                           self.pos[1] - self._last_pos_check[1])
+            if d < STUCK_MIN_DIST and self.target_pos is not None:
+                self._new_target()
+            self._last_pos_check_time = now
+            self._last_pos_check = [self.pos[0], self.pos[1]]
+        self._check_opportunistic_grab(now)
+        _prev = self.target_player
+        self._validate_and_find_target()
+        if self._active_gm is not None and self.target_player != _prev:
+            self._gm_need_update = True
+        if self.target_player is not None:
+            self._transition_to(AIState.COMBAT)
+            return
+        self._move_reverse = False
+        if self.target_pos is None:
+            self._new_target()
