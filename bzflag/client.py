@@ -397,12 +397,15 @@ class BZFlagClient:
             try:
                 data = self._sock.recv(8192)
                 if not data:
-                    logger.info("Server hat TCP-Verbindung geschlossen")
+                    logger.warning("Server hat TCP-Verbindung geschlossen")
                     break
                 buf += data
             except socket.timeout:
                 continue
-            except OSError:
+            except OSError as exc:
+                # Socket-Fehler (z.B. ECONNRESET) NICHT verschlucken – das ist oft der
+                # einzige konkrete Grund eines Verbindungsverlusts.
+                logger.warning("[recv] TCP-Verbindung abgebrochen: %s", exc)
                 break
 
             # TCP ist ein Byte-Strom: ein recv() kann halbe Pakete liefern → Puffer zusammensetzen

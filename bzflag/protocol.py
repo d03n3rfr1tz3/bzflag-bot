@@ -102,6 +102,13 @@ BOT_EXIT_REJECTED = 2
 # neuer Zeit-Countdown). Eindeutig von Reject (2) und echtem Crash (1) unterscheidbar.
 BOT_EXIT_ROUND_OVER = 3
 
+# Prozess-Exit-Code für einen unerwarteten Verbindungsverlust NACH erfolgreichem Beitritt
+# (Server schließt/resettet die TCP-Verbindung, MsgSuperKill o.ä.) — kein Absturz, sondern
+# ein Netz-/Server-Ereignis. So kann der Manager es sauber beschriften (statt "abgestürzt")
+# und trotzdem den Ausgabe-Tail mit dem konkreten Grund zeigen. Ein echter Fehlerpfad
+# (Exception) bleibt Exit-Code 1 mit Traceback → weiterhin als Absturz erkennbar.
+BOT_EXIT_CONN_LOST = 4
+
 # Pause (Sekunden) zwischen "alle Bots getrennt" und "Bots verbinden wieder" beim Rundenende.
 # Gibt dem Server Zeit, die Trennungen zu registrieren und count()==0 zu erreichen, sodass
 # checkGameOn() beim ersten Rejoin einen neuen Zeit-Countdown startet. Genutzt vom Manager

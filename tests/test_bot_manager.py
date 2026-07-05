@@ -285,6 +285,21 @@ class TestLogOutputRejectVisible:
         assert bp.last_rc == BOT_EXIT_REJECTED
         assert seen == [BOT_EXIT_REJECTED]
 
+    def test_conn_lost_exit_is_not_crash_but_shows_tail(self, caplog):
+        """Exit-Code BOT_EXIT_CONN_LOST ⇒ kein Absturz, aber der Grund (Tail) bleibt sichtbar."""
+        import logging
+        from bzflag.protocol import BOT_EXIT_CONN_LOST
+        records = self._run(caplog, [
+            "12:00:00 [bzbot] WARNING: [Bot] Server-Nachricht: You were kicked\n",
+            "12:00:00 [bzbot] WARNING: [Bot] Verbindung verloren nach 59s\n",
+        ], returncode=BOT_EXIT_CONN_LOST)
+        # Nicht als "unerwartet beendet" (=Absturz) markiert …
+        assert not any("unerwartet beendet" in r.getMessage() for r in records)
+        # … aber ein Verbindungsverlust-Hinweis inkl. Tail (Kick-Grund) ist da.
+        dump = [r for r in records
+                if "Verbindung verloren" in r.getMessage() and "You were kicked" in r.getMessage()]
+        assert len(dump) == 1
+
 
 # ---------------------------------------------------------------------------
 # IPC: Bot→Manager-Status (@@BZMGR@@) und Manager→Bot-Kommandos (stdin)
@@ -610,7 +625,30 @@ class TestStopAndCrashClassification:
         mgr.bots = [bot]
         with caplog.at_level(logging.DEBUG, logger="bot_manager"):
             mgr._restart_crashed_bots()
-        assert any(r.levelno == logging.WARNING and "abgestürzt" in r.getMessage()
+        recs = [r for r in caplog.records
+                if r.levelno == logging.WARNING and "abgestürzt" in r.getMessage()]
+        assert recs
+        assert "Exit-Code 1" in recs[0].getMessage()   # Exit-Code immer sichtbar
+
+    def test_restart_crashed_classifies_conn_lost_as_info(self, caplog):
+        """Exit-Code BOT_EXIT_CONN_LOST ⇒ Verbindungsverlust (INFO), NICHT 'abgestürzt'."""
+        import logging
+        from bot_manager import BotManager, Config, BotProcess
+        from bzflag.protocol import BOT_EXIT_CONN_LOST
+        mgr = BotManager(Config())
+        mgr.config.min_bots = 0
+        mgr.config.max_bots = 0          # kein Nachstarten (keine echten Subprozesse)
+        bot = MagicMock(spec=BotProcess)
+        bot.is_alive = False
+        bot._stopping = False
+        bot.last_rc = BOT_EXIT_CONN_LOST
+        bot.callsign = "Lost"
+        mgr.bots = [bot]
+        with caplog.at_level(logging.DEBUG, logger="bot_manager"):
+            mgr._restart_crashed_bots()
+        assert bot not in mgr.bots
+        assert not any("abgestürzt" in r.getMessage() for r in caplog.records)
+        assert any(r.levelno == logging.INFO and "Verbindung verloren" in r.getMessage()
                    for r in caplog.records)
 
 

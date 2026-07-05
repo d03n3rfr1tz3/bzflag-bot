@@ -32,7 +32,7 @@ from bzflag.protocol import (
     MsgSuperKill,
     unpack_uint8, unpack_uint16, unpack_string,
     CallSignLen, MGR_STATUS_PREFIX, BOT_EXIT_REJECTED,
-    BOT_EXIT_ROUND_OVER, ROUND_RESTART_GAP_S,
+    BOT_EXIT_ROUND_OVER, BOT_EXIT_CONN_LOST, ROUND_RESTART_GAP_S,
 )
 
 logger = logging.getLogger("bot_manager")
@@ -449,6 +449,15 @@ class BotProcess:
                 "Bot '%s' bei Rundenende beendet – Manager koordiniert Rejoin",
                 self.callsign,
             )
+        elif rc == BOT_EXIT_CONN_LOST:
+            # Unerwarteter Verbindungsverlust nach erfolgreichem Join – KEIN Absturz, aber
+            # der Grund (Server-Nachricht/Socket-Fehler) steht in den letzten Zeilen → Tail
+            # mit ausgeben, damit die Ursache sichtbar ist.
+            tail = "\n".join(recent)
+            bot_logger.warning(
+                "Bot '%s' hat die Verbindung verloren (kein Absturz). Letzte Ausgabe:\n%s",
+                self.callsign, tail,
+            )
         else:
             tail = "\n".join(recent)
             bot_logger.warning(
@@ -854,8 +863,12 @@ class BotManager:
                 logger.debug("Bot '%s' wurde bewusst gestoppt – entfernt", bot.callsign)
             elif bot.last_rc == BOT_EXIT_REJECTED:
                 logger.info("Bot '%s' vom Server abgelehnt – entfernt (kein Absturz)", bot.callsign)
+            elif bot.last_rc == BOT_EXIT_CONN_LOST:
+                logger.info("Bot '%s' hat die Verbindung verloren – entfernt (kein Absturz)",
+                            bot.callsign)
             else:
-                logger.warning("Bot '%s' war abgestürzt – entfernt", bot.callsign)
+                logger.warning("Bot '%s' war abgestürzt (Exit-Code %s) – entfernt",
+                               bot.callsign, bot.last_rc)
 
         active = sum(1 for b in self.bots if b.is_alive)
         if active < desired:
