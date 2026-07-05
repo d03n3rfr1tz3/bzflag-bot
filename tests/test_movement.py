@@ -1273,6 +1273,41 @@ class TestSkipNavCondition:
         assert nav_wp_called
 
 
+# ── COMBAT-Optimaldistanz-Deadzone ───────────────────────────────────────────
+
+class TestCombatDeadzone:
+    """_execute_combat_move: ±COMBAT_DIST_DEADZONE um die Optimaldistanz nicht regeln,
+    sonst zittern zwei distanzgleiche Bots. Direktmodus (kein NavGraph → _has_los=True)."""
+
+    def _setup(self, bot, dist):
+        p = make_player(bot, 2, pos=(dist, 0.0, 0.0))
+        p.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 2
+        bot.pos = [0.0, 0.0, 0.0]
+        bot.vel = [0.0, 0.0, 0.0]
+        bot.azimuth = 0.0
+        bot._nav_path = []
+        bot._nav_goal = None
+
+    def test_deadzone_holds_at_optimal(self, bot):
+        from bot.constants import OPTIMAL_RANGE
+        self._setup(bot, dist=OPTIMAL_RANGE)          # exakt Optimaldistanz
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
+
+    def test_reverse_just_below_deadzone(self, bot):
+        from bot.constants import OPTIMAL_RANGE
+        self._setup(bot, dist=OPTIMAL_RANGE - 2.0)    # 58u → rückwärts
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot.vel[0] < 0.0
+
+    def test_forward_just_above_deadzone(self, bot):
+        from bot.constants import OPTIMAL_RANGE
+        self._setup(bot, dist=OPTIMAL_RANGE + 2.0)    # 62u → langsam vorwärts
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot.vel[0] > 0.0
+
+
 # ── _has_los_to_enemy ─────────────────────────────────────────────────────────
 
 class TestHasLos:

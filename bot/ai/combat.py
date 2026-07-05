@@ -257,7 +257,7 @@ class CombatMixin:
             if _tan is not None:
                 target_az = _tan
         self._turn_toward(target_az, dt)
-        if dist < _opt:
+        if dist < _opt - COMBAT_DIST_DEADZONE:
             speed = -self._tank_speed * 0.5
             _nav = getattr(self, "_nav_graph", None)
             if _nav is not None and self._get_floor_z() > 0.5:
@@ -267,8 +267,10 @@ class CombatMixin:
                     speed = 0.0
         elif dist > _opt * 2:
             speed = self._tank_speed
-        else:
+        elif dist > _opt + COMBAT_DIST_DEADZONE:
             speed = self._tank_speed * 0.15
+        else:
+            speed = 0.0   # Deadzone um die Optimaldistanz: kein Zittern bei minimalen Distanzänderungen
         if speed > 0 and abs(self.ang_vel) > self._tank_turn_rate * 0.5:
             _nav = getattr(self, "_nav_graph", None)
             if _nav is not None and self._get_floor_z() > 0.5:
