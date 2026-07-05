@@ -142,6 +142,17 @@ NAV_WALL_STEEP_DEG    = 60.0   # Einfallswinkel zur Wandfläche darüber = "stei
 STUCK_WINDOW          = 1.5
 STUCK_MIN_DIST        = 2.0
 
+# COMBAT-Stall-Watchdog: Direktmodus ohne Sicht (dünne Wand, kein Ricochet-Pfad) darf nicht ewig
+# stehen. RANDOMISIERTES Fenster, damit zwei Bots sich nicht spiegeln und synchron festfrieren.
+COMBAT_STALL_WIN_MIN  = 10.0   # s, Untergrenze des zufälligen Beobachtungsfensters
+COMBAT_STALL_WIN_MAX  = 15.0   # s, Obergrenze
+COMBAT_STALL_MIN_DIST = 2.0    # u, weniger Netto-Bewegung im Fenster = Stall
+COMBAT_STALL_REV_MIN  = 10.0   # u, minimale Rückwärts-Distanz des Unstick-Manövers
+COMBAT_STALL_REV_MAX  = 15.0   # u, maximale Rückwärts-Distanz
+COMBAT_STALL_WP_MIN   = 5      # min. WP-Distanz des Zufallspunkt-Manövers (× NAV_CELL_SIZE)
+COMBAT_STALL_WP_MAX   = 10     # max. WP-Distanz (× NAV_CELL_SIZE = 4 → 20–40 u)
+COMBAT_STALL_TIMEOUT  = 8.0    # s, Sicherheits-Timeout je Unstick-Manöver
+
 # COMBAT-Eskalation, wenn ein per Sprung unerreichbarer (zu hoher) Gegner ohne A*-Pfad
 # verfolgt wird — verhindert blindes Rammen der Wand und Einfrieren (Zyklus mit Früh-Ausstieg).
 COMBAT_REPLAN_RETRY   = 1.0    # s, gedrosselter Hintergrund-Replan-Versuch zum Gegner
@@ -153,6 +164,11 @@ UNREACH_REPOS_TIMEOUT = 8.0    # s, Sicherheits-Timeout fürs Abfahren der Repos
 
 # ── Kampf, Ausweichen & Schießen ─────────────────────────────────────────
 OPTIMAL_RANGE  = 60.0
+
+# COMBAT-Optimaldistanz-Deadzone (Controller-Deadzone-Analogie): innerhalb ±dieser Spanne um die
+# Optimaldistanz NICHT vor/zurück regeln, sonst zittern zwei exakt distanzgleiche Bots umeinander.
+COMBAT_DIST_DEADZONE  = 1.0    # u
+
 JUMP_COOLDOWN  = 4.0
 TACT_JUMP_CLEARANCE  = 1.5   # TactJump muss so weit tragen, dass der Bot 1.5× hinter dem Gegner landet
 TACT_JUMP_REACTION_S = 0.5   # Reaktionszeit des GEGNERS auf den Sprung (nicht DODGE_REACT_DELAY, das ist
