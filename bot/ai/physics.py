@@ -5,6 +5,7 @@ import random
 
 from bot.constants import *  # noqa: F401,F403
 from bot.models import AIState
+from bzflag.intersect import rect_rect_overlap
 
 
 class PhysicsMixin:
@@ -157,17 +158,28 @@ class PhysicsMixin:
                 continue
             nx = px + vx * dt
             ny = py + vy * dt
+            # Tank als orientierte Box (physische Maße, ohne Schussradius): HL zählt, damit die
+            # lange Achse nicht durch dünne Wände ragt (Kern des Bugfixes). Gate exakt (OBB-OBB,
+            # wie bzfs testRectRect) → kein Über-Blocken an schrägen Durchfahrten.
+            HL = self._tank_length / 2.0
+            HW = self._effective_half_width()
+            if not rect_rect_overlap(obs.cx, obs.cy, obs.angle, obs.half_w, obs.half_d,
+                                     nx, ny, self.azimuth, HL, HW):
+                continue
             cos_a = obs.cos_a
             sin_a = obs.sin_a
             dx, dy = nx - obs.cx, ny - obs.cy
             lnx = dx * cos_a + dy * sin_a
             lny = -dx * sin_a + dy * cos_a
-            hw = obs.half_w + self._effective_half_width()
-            hd = obs.half_d + self._effective_half_width()
-            if abs(lnx) >= hw or abs(lny) >= hd:
-                continue
             lvx = vx * cos_a + vy * sin_a
             lvy = -vx * sin_a + vy * cos_a
+            # Glide-Achse ISOTROP wählen (Trennachse aus der Obstacle-Geometrie, nicht aus der
+            # Tank-Orientierung): kleineres Overlap = Trennachse. Beim OBB-Gate steht das Zentrum an
+            # der dünnen Achse ggf. schon außerhalb (Overlap negativ) — die Min-Auswahl trifft dann
+            # weiterhin korrekt die Wand-Normale. NUR die Achsen-Wahl ist isotrop; das Eindringen
+            # verhindert der OBB-Gate oben (Tank-Länge zählt).
+            hw = obs.half_w + HW
+            hd = obs.half_d + HW
             overlap_x = hw - abs(lnx)
             overlap_y = hd - abs(lny)
             # Kleineres Overlap = Trennungsachse: Geschwindigkeit entlang dieser Achse auf 0
