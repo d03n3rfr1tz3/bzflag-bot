@@ -354,6 +354,32 @@ def test_ceiling_no_stop_outside_xy(bot):
     assert bot.vel[2] == pytest.approx(initial_vz)
 
 
+def test_ceiling_obb_nose_under_platform_stops(bot):
+    """OBB-Decke: das Zentrum liegt neben der Platform, aber die zur Platform zeigende Tank-NASE
+    (halbe Länge 3,0) ragt unter den Rand → Kopf-Anstoß. Der alte Kreis-Test (Radius 1,4) hätte
+    das verpasst (Zentrum 4u entfernt > 2+1,4)."""
+    obs = _make_box_obstacle(cx=0.0, cy=0.0, bottom_z=7.0, half_w=2.0, half_d=2.0, height=2.0)
+    _give_bot_world_with_box(bot, obs)
+    bot.pos = [4.0, 0.0, 5.5]         # Zentrum 4u vom Platform-Rand (x=2); bot_top=7.55>7
+    bot.azimuth = math.pi             # Nase zeigt in -x unter die Platform (x=4-3=1 < 2)
+    bot.vel[2] = 10.0
+    assert 4.0 > 2.0 + 1.4            # Kreis-Test hätte NICHT gestoppt
+    bot._apply_obstacle_bounds(0.02)
+    assert bot.vel[2] == pytest.approx(0.0)
+
+
+def test_ceiling_obb_beyond_nose_no_stop(bot):
+    """Kein Über-Blocken: liegt die Platform jenseits der Tank-Nase (Zentrum 6u, Nase erreicht x=3
+    < Rand 2), bleibt der Aufstieg frei — der exakte OBB-Gate hält NUR die reale Tank-OBB fern."""
+    obs = _make_box_obstacle(cx=0.0, cy=0.0, bottom_z=7.0, half_w=2.0, half_d=2.0, height=2.0)
+    _give_bot_world_with_box(bot, obs)
+    bot.pos = [6.0, 0.0, 5.5]
+    bot.azimuth = math.pi
+    bot.vel[2] = 10.0
+    bot._apply_obstacle_bounds(0.02)
+    assert bot.vel[2] == pytest.approx(10.0)
+
+
 def test_is_airborne_set_from_ps_falling(bot):
     """PS_FALLING-Bit setzt is_airborne=True im PlayerInfo."""
     from conftest import make_player

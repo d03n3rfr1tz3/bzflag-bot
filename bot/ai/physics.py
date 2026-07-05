@@ -131,13 +131,11 @@ class PhysicsMixin:
             # pz < obs.bottom_z: Bot ist unterhalb — nicht bereits darin (OO-Flagge etc.)
             if not (pz < obs.bottom_z <= bot_top):
                 continue
-            cos_a = obs.cos_a; sin_a = obs.sin_a
-            dx, dy = px - obs.cx, py - obs.cy
-            lx = dx * cos_a + dy * sin_a
-            ly = -dx * sin_a + dy * cos_a
-            hw = obs.half_w + self._effective_half_width()
-            hd = obs.half_d + self._effective_half_width()
-            if abs(lx) < hw and abs(ly) < hd:
+            # Horizontaler Footprint als OBB (einheitliches Form-Modell): die Tank-NASE unter einem
+            # Plattform-Rand löst den Kopf-Anstoß korrekt aus statt erst die Mitte.
+            if rect_rect_overlap(obs.cx, obs.cy, obs.angle, obs.half_w, obs.half_d,
+                                 px, py, self.azimuth,
+                                 self._tank_length / 2.0, self._effective_half_width()):
                 self.vel[2] = 0.0
                 _floor_z = self._burrow_depth if self.own_flag == "BU" else self._get_floor_z()
                 self.pos[2] = max(obs.bottom_z - self._tank_height, _floor_z)
