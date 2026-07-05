@@ -40,7 +40,7 @@ class CapabilityMixin:
         if self.own_flag == "SW":
             return 20.0   # SW-Killzone beginnt bei 6u; nahe heranfahren, dann zünden
         if self.own_flag == "SR":
-            return TANK_RADIUS * self._sr_radius_mult  # Kontaktdistanz für Ramm-Kill
+            return TANK_RADIUS / 2 * self._sr_radius_mult  # Kontaktdistanz für Ramm-Kill
         if self.own_flag == "GM":
             return 85.0
         return OPTIMAL_RANGE

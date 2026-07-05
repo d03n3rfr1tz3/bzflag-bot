@@ -443,7 +443,10 @@ class CombatMixin:
                 self._stall_end()
                 return False
             # KEIN Klippen-Guard: Absturz ist hier gewollt (bricht den Spiegel-Stall).
-            speed = -self._tank_speed
+            # Rückwärts-Cap 0,5× der FLAGGEN-effektiven Speed (wie _navigate_wp): BZFlag klemmt
+            # fracOfMaxSpeed clientseitig auf -0,5×maxSpeed (LocalPlayer.cxx) — maxSpeed enthält
+            # den Flaggen-Modifikator (V/TH/A/BU). Volle Speed triggert den Server-Speedcheck.
+            speed = -self._effective_tank_speed() * 0.5
             self.ang_vel = 0.0
             speed, self.ang_vel = self._apply_movement_caps(speed, self.ang_vel)
             self.vel[0] = math.cos(self.azimuth) * speed

@@ -140,18 +140,18 @@ NAV_WALL_PROBE_DIST   = 20.0   # u Vorausschau entlang der Fahrtrichtung
 NAV_WALL_STEEP_DEG    = 60.0   # Einfallswinkel zur Wandfläche darüber = "steil" → kein Gleiten mehr
 
 STUCK_WINDOW          = 1.5
-STUCK_MIN_DIST        = 2.0
+STUCK_MIN_DIST        = 3.0
 
 # COMBAT-Stall-Watchdog: Direktmodus ohne Sicht (dünne Wand, kein Ricochet-Pfad) darf nicht ewig
 # stehen. RANDOMISIERTES Fenster, damit zwei Bots sich nicht spiegeln und synchron festfrieren.
-COMBAT_STALL_WIN_MIN  = 10.0   # s, Untergrenze des zufälligen Beobachtungsfensters
-COMBAT_STALL_WIN_MAX  = 15.0   # s, Obergrenze
-COMBAT_STALL_MIN_DIST = 2.0    # u, weniger Netto-Bewegung im Fenster = Stall
-COMBAT_STALL_REV_MIN  = 10.0   # u, minimale Rückwärts-Distanz des Unstick-Manövers
-COMBAT_STALL_REV_MAX  = 15.0   # u, maximale Rückwärts-Distanz
-COMBAT_STALL_WP_MIN   = 5      # min. WP-Distanz des Zufallspunkt-Manövers (× NAV_CELL_SIZE)
-COMBAT_STALL_WP_MAX   = 10     # max. WP-Distanz (× NAV_CELL_SIZE = 4 → 20–40 u)
-COMBAT_STALL_TIMEOUT  = 8.0    # s, Sicherheits-Timeout je Unstick-Manöver
+COMBAT_STALL_WIN_MIN  = 5.0    # s, Untergrenze des zufälligen Beobachtungsfensters
+COMBAT_STALL_WIN_MAX  = 10.0   # s, Obergrenze
+COMBAT_STALL_MIN_DIST = 5.0    # u, weniger Netto-Bewegung im Fenster = Stall
+COMBAT_STALL_REV_MIN  = 20.0   # u, minimale Rückwärts-Distanz des Unstick-Manövers
+COMBAT_STALL_REV_MAX  = 60.0   # u, maximale Rückwärts-Distanz
+COMBAT_STALL_WP_MIN   = 10     # min. WP-Distanz des Zufallspunkt-Manövers (× NAV_CELL_SIZE)
+COMBAT_STALL_WP_MAX   = 20     # max. WP-Distanz (× NAV_CELL_SIZE = 4 → 20–40 u)
+COMBAT_STALL_TIMEOUT  = 5.0    # s, Sicherheits-Timeout je Unstick-Manöver
 
 # COMBAT-Eskalation, wenn ein per Sprung unerreichbarer (zu hoher) Gegner ohne A*-Pfad
 # verfolgt wird — verhindert blindes Rammen der Wand und Einfrieren (Zyklus mit Früh-Ausstieg).

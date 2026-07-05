@@ -2143,10 +2143,11 @@ class TestCombatStallWatchdog:
         return p
 
     def test_arms_without_los(self, bot):
+        from bot.constants import COMBAT_STALL_WIN_MIN, COMBAT_STALL_WIN_MAX
         self._stalled_bot(bot)
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
         assert bot._stall_check_at is not None
-        assert 1010.0 <= bot._stall_check_at <= 1015.0
+        assert 1000.0 + COMBAT_STALL_WIN_MIN <= bot._stall_check_at <= 1000.0 + COMBAT_STALL_WIN_MAX
 
     def test_no_arm_with_los(self, bot):
         self._stalled_bot(bot, wall=False)            # freie Sicht → nicht armieren
@@ -2163,10 +2164,11 @@ class TestCombatStallWatchdog:
         self._stalled_bot(bot)
         bot._stall_check_at = 999.0                    # Fenster bereits abgelaufen
         bot._stall_anchor = [0.0, 0.0]                 # keine Bewegung seit Armierung
+        from bot.constants import COMBAT_STALL_REV_MIN, COMBAT_STALL_REV_MAX
         with patch("bot.ai.combat.random.choice", return_value="REV"):
             bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
         assert bot._stall_mode == "REV"
-        assert 10.0 <= bot._stall_rev_dist <= 15.0
+        assert COMBAT_STALL_REV_MIN <= bot._stall_rev_dist <= COMBAT_STALL_REV_MAX
 
     def test_fires_path(self, bot):
         self._stalled_bot(bot)
@@ -2221,15 +2223,17 @@ class TestCombatStallWatchdog:
 
     def test_window_is_randomized(self, bot):
         # Spiegel-Symmetrie-Sanity: zwei frische Armierungen ziehen unabhängige Fenster im
-        # Bereich [10,15]. Zwei reale Bots ziehen zudem unabhängige Manöver (REV-Distanz/PATH-
+        # Konstanten-Bereich. Zwei reale Bots ziehen zudem unabhängige Manöver (REV-Distanz/PATH-
         # Winkel) → identisches synchrones Wieder-Einrasten ist praktisch ausgeschlossen.
+        from bot.constants import COMBAT_STALL_WIN_MIN, COMBAT_STALL_WIN_MAX
         self._stalled_bot(bot)
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
         w1 = bot._stall_check_at - 1000.0
         bot._stall_check_at = None
         bot._execute_combat_move(0.02, bot.world_half, now=2000.0)
         w2 = bot._stall_check_at - 2000.0
-        assert 10.0 <= w1 <= 15.0 and 10.0 <= w2 <= 15.0
+        assert COMBAT_STALL_WIN_MIN <= w1 <= COMBAT_STALL_WIN_MAX
+        assert COMBAT_STALL_WIN_MIN <= w2 <= COMBAT_STALL_WIN_MAX
 
 
 # ── Gegner höher + kein LoS (T2): Pfad erzwingen, sonst Watchdog fängt Fallthrough ──
