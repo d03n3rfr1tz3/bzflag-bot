@@ -616,14 +616,34 @@ Standbild auf z=30"-Bugs).
 
 **COMBAT-spezifische Invarianten:**
 - Max. 8 WPs in `_nav_path` (nach jedem Replan auf 8 begrenzt, ≈40u bei CELL_SIZE=5u)
-- `_skip_nav`-Bedingung (Direktziel-Modus): `_check1 = bot_z + TANK_HEIGHT > enemy_z` (Gegner nicht
-  deutlich höher) **und** `dist < _dist_thresh`, wobei `_dist_thresh = SHOT_RANGE` bei freier LOS,
-  sonst `optimal_range × 1.5`. Ist `_skip_nav` True → nav_path ignorieren, Direktanflug.
+- `_skip_nav`-Bedingung (Direktziel-Modus): `_not_below_enemy = bot_z + TANK_HEIGHT > enemy_z`
+  (Gegner nicht deutlich höher) **und** `dist < _dist_thresh`, wobei `_dist_thresh = SHOT_RANGE` bei
+  freier LOS, sonst `optimal_range × 1.5`. Ist `_skip_nav` True → nav_path ignorieren, Direktanflug.
 - `_skip_nav` wird **vor** dem Replan bestimmt: im Direktmodus läuft **keine** A\*-Planung
   (`_plan_path` würde sonst ungenutzte Pfade berechnen und „Pfad: N WPs"-Logs erzeugen). Dabei
   werden `_nav_path`/`_nav_goal` invalidiert, sodass beim Verlassen des Direktmodus frisch geplant
   wird (kein Folgen veralteter Pfade). `_too_high` (Gegner ≥ `max_jump_h` höher) impliziert
-  `_check1` False → `_skip_nav` False, kollidiert also nie mit dem Eskalations-Zweig.
+  `_not_below_enemy` False → `_skip_nav` False, kollidiert also nie mit dem Eskalations-Zweig.
+- **Distanz-Deadzone**: die distanzbasierte Vor-/Zurück-Regelung im Direktmodus hat ein neutrales
+  Band `±COMBAT_DIST_DEADZONE` um die Optimaldistanz (Speed 0). Ohne dieses Band kippt der Speed bei
+  exakt Optimaldistanz zwischen Rückwärts (0,5×) und Langsam-Vorwärts (0,15×) — zwei distanzgleiche
+  Bots zittern dann sichtbar umeinander.
+
+**COMBAT-Stall-Watchdog (`_stall_watchdog`/`_stall_maneuver_tick`)**: Zwei gleich starke Bots frieren
+bei Optimaldistanz ohne Sicht und ohne Abpraller-Schuss ein (Spiegel-Stall, typisch an der dünnen
+diagonalen Trennwand der z=15-Plattformen): Feuer wird gehalten, `_skip_nav` bleibt True, und die
+proaktive Wand-Vorausschau `_steep_wall_ahead` greift dort nicht (Wand > 20u Probe entfernt bzw.
+flacher Einfallswinkel an der Diagonalen → korrektes `None`). Der Watchdog läuft nur im sichtlosen
+Direktsteuerungs-Zweig: er armiert ein **randomisiertes** Fenster (`COMBAT_STALL_WIN_MIN..MAX`), misst
+die Netto-Bewegung ab dem Anker und startet bei < `COMBAT_STALL_MIN_DIST` ein zufällig gewähltes
+Unstick-Manöver — **REV** (Rückwärtsstück `COMBAT_STALL_REV_MIN..MAX`, **bewusst ohne Klippen-Guard**:
+ein Sturz von der Plattform löst den Stall) oder **PATH** (A\*-Pfad zu einem Zufallspunkt
+`NAV_CELL_SIZE × COMBAT_STALL_WP_MIN..MAX` entfernt; scheitert die Planung, fällt es auf REV zurück).
+Jedes Manöver ist per `COMBAT_STALL_TIMEOUT` gedeckelt; danach re-armiert der Watchdog frisch. Die
+Randomisierung ist essenziell: mit festen Timern würden sich zwei deterministische Bots spiegeln und
+synchron erneut festfahren. Der Episode-Zustand liegt in den `_stall_*`-Feldern (Muster analog den
+`_unreach_*`-Feldern der Eskalation), **kein** eigener `AIState` — LANDING_SHOT/EVADING/DODGE_JUMP
+sind eigene States, die `_execute_combat_move` gar nicht erreichen.
 
 **Eskalation bei unerreichbar hohem Gegner (`_combat_escalate`, P3-NAV-12)**: Steht der Gegner
 per Sprung unerreichbar hoch (`enemy_z - bot_z ≥ _effective_jump_height()` — WG/LG-bewusst, siehe
