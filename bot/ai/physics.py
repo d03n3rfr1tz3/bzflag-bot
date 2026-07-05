@@ -95,13 +95,13 @@ class PhysicsMixin:
             # Mit strikt `>` würde das als "innen" gewertet und der Teleport revertiert (Bot steckt fest).
             if tank_top <= obs.bottom_z or pz >= obs.bottom_z + obs.height - ON_TOP_EPS:
                 continue
-            dx = px - obs.cx
-            dy = py - obs.cy
-            cos_a = obs.cos_a
-            sin_a = obs.sin_a
-            lx = dx * cos_a + dy * sin_a
-            ly = -dx * sin_a + dy * cos_a
-            if abs(lx) <= obs.half_w and abs(ly) <= obs.half_d:
+            # OBB-Overlap (einheitliches Form-Modell): „irgendein Teil des Tanks steckt im Gebäude".
+            # Mit der OBB-Wandkollision (W3) ist das im Normalbetrieb nie wahr (Berühren = strikt
+            # nicht-innen) → nur nach Teleport/Spawn/Durchdringung, genau das wollen die Aufrufer
+            # (Teleport-Exit-Revert, OO-Gate). Physische Halbmaße, linearer Scan (nicht hot).
+            if rect_rect_overlap(obs.cx, obs.cy, obs.angle, obs.half_w, obs.half_d,
+                                 px, py, self.azimuth,
+                                 self._tank_length / 2.0, self._effective_half_width()):
                 return True
         return False
 

@@ -209,6 +209,20 @@ def test_is_inside_obstacle_oo_bypasses(bot):
     assert bot._is_inside_obstacle() is False
 
 
+def test_is_inside_obstacle_obb_nose_pokes_in(bot):
+    """OBB-Form-Modell: Zentrum knapp AUSSERHALB der Box, aber die Tank-Nase (halbe Länge 3,0)
+    ragt hinein → True. Der alte Punkt-in-Box-Test (nur Zentrum) hätte False geliefert."""
+    import math
+    box = _make_box(0.0, 0.0, 2.0, 2.0, 10.0)     # Box-Rand bei x=±2
+    _make_nav(bot, [box], world_hash="cap_obb_nose")
+    bot.own_flag = ""
+    bot.pos = [4.0, 0.0, 0.0]                       # Zentrum 4u > Rand 2 → Punkt-Test wäre False
+    bot.azimuth = math.pi                           # Nase in -x → erreicht x=1 (in der Box)
+    assert bot._is_inside_obstacle() is True
+    bot.azimuth = math.pi / 2                       # Nase quer → nur Halb-Breite 1,4 in x → außen
+    assert bot._is_inside_obstacle() is False
+
+
 def test_is_inside_obstacle_on_top_is_outside(bot):
     """Fix 2: Bot-Basis bündig AUF der Box-Oberkante (pz == bottom_z+height) gilt als 'nicht innen'
     (er steht darauf), knapp darunter weiterhin als 'innen'. Sichert die Fahr-Teleporter-Durchfahrt:
