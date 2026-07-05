@@ -342,6 +342,14 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._last_pos_check_time = 0.0
         self._last_pos_check      = [0.0, 0.0]
 
+        # COMBAT-Stall-Watchdog: None = nicht scharf
+        self._stall_check_at: Optional[float] = None   # Deadline des Beobachtungsfensters
+        self._stall_anchor: list = [0.0, 0.0]          # Position beim Armieren
+        self._stall_mode: Optional[str] = None         # aktives Manöver: "REV" | "PATH" | None
+        self._stall_until: float = 0.0                 # Sicherheits-Deadline des Manövers
+        self._stall_rev_start: list = [0.0, 0.0]       # Startposition des Rückwärts-Manövers
+        self._stall_rev_dist: float = 0.0              # Soll-Rückwärtsdistanz (10–15 u)
+
         # State Machine
         self._ai_state: AIState = AIState.IDLE
         self._landing_shot_until: float = 0.0
