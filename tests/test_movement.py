@@ -2263,3 +2263,25 @@ class TestHigherEnemyNoLos:
         with patch.object(bot, "_update_indirect_hold", return_value=False):
             bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
         assert bot._stall_check_at is not None
+
+
+# ── T1: dünnste HIX-Wand (1u) verdeckt LoS zuverlässig ───────────────────────
+
+class TestThinWallLos:
+    """Regression: die dünnste reale HIX-Wand (half_w=0.5 → 1u dick, Basis z=14, Höhe 16, also
+    z-Spanne [14,30]) blockt LoS exakt; Strahlen darüber/darunter bleiben frei. Die echte Wand
+    steht auf 135° — hier achsparallel für die Assertion-Geometrie, dünnster Wert unverändert."""
+
+    def test_thin_hix_wall_blocks_los(self, bot):
+        _build_nav(bot, [(0.0, 0.0, 14.0, 0.0, 0.5, 150.0, 16.0)])
+        bot.pos = [-30.0, 0.0, 15.0]                  # auf der z=15-Plattform
+        make_player(bot, 2, pos=(30.0, 0.0, 15.0))
+        eye = 15.0 + bot._tank_height * 0.5
+        assert not bot._segment_clear(-30.0, 0.0, eye, 30.0, 0.0, eye)   # dünne Wand blockt
+        assert not bot._has_los_to_enemy(2)
+
+    def test_ray_above_and_below_thin_hix_wall_clear(self, bot):
+        _build_nav(bot, [(0.0, 0.0, 14.0, 0.0, 0.5, 150.0, 16.0)])
+        bot.pos = [-30.0, 0.0, 15.0]
+        assert bot._segment_clear(-30.0, 0.0, 31.0, 30.0, 0.0, 31.0)    # über der Wand (>z=30)
+        assert bot._segment_clear(-30.0, 0.0, 13.0, 30.0, 0.0, 13.0)    # unter der Basis (<z=14)
