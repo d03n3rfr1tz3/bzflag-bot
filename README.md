@@ -54,7 +54,13 @@ python bzbot.py --host mein-server.de --callsign "Robo"
 | `world_half`      | `400.0`     | Halbe Weltgröße in Einheiten (Standard-Map = 800x800)                        |
 | `check_interval`  | `5.0`       | Sekunden zwischen Rebalance-Prüfungen                                        |
 | `reconnect_delay` | `10.0`      | Sekunden vor Reconnect des Fallback-Observers nach Verbindungsabbruch        |
+| `good_flags`      | eingebaute Liste | Flaggen-Kürzel, die die Bots behalten und nutzen                        |
+| `bad_flags`       | eingebaute Liste | Flaggen-Kürzel, die die Bots sofort ablegen                             |
+| `bot_lifetime_min` | `900`      | Minimale Bot-Lebensdauer in Sekunden; danach Ersatz durch neuen Bot (Namens-/Statistik-Rotation) |
+| `bot_lifetime_max` | `7200`     | Maximale Bot-Lebensdauer in Sekunden                                         |
 | `log_level`       | `INFO`      | `DEBUG` / `INFO` / `WARNING` / `ERROR`                                       |
+| `profile`         | `false`     | Bots unter cProfile starten; Profil wird beim regulären Bot-Ende (Stop/Rotation/Rundenende) als `.prof` geschrieben |
+| `profile_dir`     | `/tmp`      | Zielordner für die `.prof`-Dateien (Auswertung: `python -m pstats …`)        |
 
 ## Kommandozeilenargumente
 
@@ -76,6 +82,8 @@ python bot_manager.py [Optionen]
   --token TOKEN           Auth-Token
   --world_half FLOAT      Halbe Weltgröße
   --check_interval S      Rebalance-Intervall in Sekunden
+  --good_flags FLAGS      Kommagetrennte Flaggen-Kürzel, die die Bots behalten
+  --bad_flags FLAGS       Kommagetrennte Flaggen-Kürzel, die die Bots ablegen
   --log_level LEVEL       Log-Level (DEBUG/INFO/WARNING/ERROR)
 ```
 
@@ -107,6 +115,9 @@ python bzbot.py [Optionen]
                           Layer + Obstacle-Liste (Diagnose) und läuft normal weiter.
   --dump-raw PFAD         Schreibt die rohen Weltdaten als <PFAD>.bin + <PFAD>.meta
                           (für Karten-Test-Fixtures, siehe DEVELOPER.md).
+  --managed               Intern: aktiviert die IPC-Kopplung an bot_manager.py
+                          (Status via stdout, Kommandos via stdin); nicht für
+                          den manuellen Start gedacht.
 ```
 
 > Hinweis: Bei Rundenende (Zeit- oder Score-Limit) trennt der Bot und verbindet sich
@@ -122,6 +133,7 @@ bzflag-bot/
 │   ├── client.py              – TCP/UDP-Client mit Handshake und Message-Dispatch
 │   ├── world_parser.py        – MsgGetWorld-Parser: zlib-Dekomprimierung, Obstacle-Parsing
 │   ├── world_map.py           – Datenklassen: BoxObstacle, WorldMap, FlagInfo
+│   ├── obstacle_grid.py       – ObstacleGrid: Broad-Phase-Beschleunigung (Zellen-Grid, DDA-Ray)
 │   ├── shot_physics.py        – Schuss-Physik: simulate_shot_path (Bounce-Simulation), _segment_hits_obb_3d
 │   └── nav_graph.py           – NavGraph: A*-Pfadsuche, Layer-Verwaltung, Sprung-/Fall-Kanten
 ├── tests/                     – Unit-Tests (kein Server nötig; `pytest tests/ -v`)
@@ -130,18 +142,29 @@ bzflag-bot/
 │   ├── test_kill_payloads.py  – MsgKilled-Payload für alle Waffenarten
 │   ├── test_shot_parsing.py   – MsgShotBegin-Parsing, SW/Laser/Thief-Sofortcheck
 │   ├── test_hit_detection.py  – Hit-Detection (SW, GM, Laser, SR, Obesity, Narrow-OBB)
+│   ├── test_sb_hit.py         – SB-Treffer: Wand-Phasing, Längskapsel, Hit-Fenster
 │   ├── test_shooting.py       – Schieß-Logik: GM-Targeting, Ricochet-Aim, Burst-Intervalle
-│   ├── test_targeting.py      – Zielauswahl (Radar/FOV, Stealth, Cloaking, Team)
+│   ├── test_targeting.py      – Zielauswahl (Radar/FOV, Stealth, Cloaking, Team, LoS-Cache)
 │   ├── test_movement.py       – Bewegung (Waypoints, Schwerkraft, BY-Flag)
 │   ├── test_dodge_and_jump.py – Ausweichen und Sprung-Fallback
 │   ├── test_tactics.py        – Taktische Sprünge, Z-Attack, Landing-Shot, State-Machine
 │   ├── test_flags.py          – Flag-Strategie (Grab/Drop, Klassifizierung, Effektiv-Stats)
 │   ├── test_capability_checks.py – Flag-Fähigkeiten (FO/RO/LT/RT, NJ, OO, …)
+│   ├── test_pause.py          – Pause-Behandlung (MsgPause: nicht beschießen, warten)
 │   ├── test_protocol.py       – MsgSetVar/GameSettings-Parsing, Limited-Flags
+│   ├── test_setvar_snapshot.py – Snapshot-Test: alle Server-Variablen → Attribute
+│   ├── test_update_cadence.py – 30-Hz-Kadenz der Positions-Updates (Anker, Stall)
+│   ├── test_client_udp_addr.py – UDP-Zieladresse (gecachte IP statt Hostname)
+│   ├── test_client_join.py    – Join-Handshake (Accept/Reject-Auswertung)
+│   ├── test_idle_early_out.py – Leerlauf-Early-Outs bei leeren Shot-Dicts
+│   ├── test_tick_memo.py      – Per-Tick-Memo (LoS/FloorZ/Muzzle)
 │   ├── test_world_parser.py   – MsgGetWorld-Parsing (zlib, Obstacles)
 │   ├── test_nav_graph.py      – NavGraph A*/Layer (Karten-Fixtures, ggf. übersprungen)
+│   ├── test_async_plan.py     – Asynchrones Pathfinding (Worker, Prefix-Resync)
+│   ├── test_teleporter.py     – Teleporter (Querung, Pfad-Resync, NAV_TELE)
 │   ├── test_shot_physics.py   – Ricochet-Pfad-Simulation (Bounce, Normalen)
-│   ├── test_bot_manager.py    – Bot-Manager (Rebalancing, Observer-Zählung)
+│   ├── test_bot_manager.py    – Bot-Manager (Rebalancing, Observer-Zählung, Profiling)
+│   ├── test_bzbot_managed.py  – Managed-Modus (IPC-Statuszeilen, stdin-Kommandos)
 │   └── test_performance.py    – Performance-/Timing-Checks (`pytest -m perf -s`)
 ├── bzbot.py                   – Einzelner Bot (direkt startbar; Entry-Point)
 ├── bot/                       – Bot-Logik als Paket

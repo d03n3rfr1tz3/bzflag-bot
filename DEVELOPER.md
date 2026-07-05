@@ -31,6 +31,12 @@ Manager und Bots sind separate Prozesse, nicht Threads. Die Spielerzahl kommt pr
 von den laufenden Bots (IPC über stdin/stdout); ein Observer ist nur Fallback. Der
 Manager hat keinen eigenen Tank und sendet keine `MsgPlayerUpdate`-Pakete.
 
+**Profiling-Modus** (`profile: true` in config.yaml): Der Manager startet jeden Bot als
+`python -m cProfile -o <profile_dir>/bzbot_<name>_<id>_<zeit>.prof bzbot.py …`. Das Profil
+wird nur bei regulärem Prozessende geschrieben — deshalb stoppt `BotProcess.stop()`
+gestaffelt SIGINT → SIGTERM → SIGKILL (SIGINT löst `KeyboardInterrupt` aus und lässt
+`main()` regulär auslaufen; SIGTERM würde den Interpreter ohne `-o`-Dump töten).
+
 ### Modul-Landkarte (Stand nach Struktur-Track 4)
 
 Die frühere Zweiteilung `bzbot.py`/`bzbot_ai.py` ist in das Paket `bot/` zerlegt;
@@ -112,6 +118,19 @@ Die KI läuft mit 10 Hz weil State-Machine-Entscheidungen bei 60 Hz zu viel Chao
 (Zielwechsel, Path-Replanning, Shoot-Checks alle 20ms) und es keine spielerische Relevanz
 hat — menschliche Reaktionszeiten sind 150+ ms.
 
+Die 30-Hz-Drosselung übernimmt `_maybe_send_server_update(now)` (N1a im FABLE-PLAN).
+Wichtig ist der **Kadenz-Anker**: `_next_server_update` wird unmittelbar vor Schleifenstart
+auf `time.monotonic()` gesetzt. Der frühere Startwert `0.0` lag um die komplette
+System-Uptime in der Vergangenheit; der `+= interval`-Catch-up holte das nie auf, und der
+Bot sendete faktisch mit Tick-Rate (~60 Hz) statt 30 Hz — auf einem lange laufenden Host
+dauerhaft. Nach einem Stall setzt die Methode den Anker neu auf, statt Pakete
+nachzuholen (Stall-Klemme, kein Burst); Tests: `test_update_cadence.py`.
+
+Der Tick-Wait selbst ist ein `time.sleep` statt `Event.wait` (N3): ein einzelner Syscall
+statt Condition/Lock-Maschinerie (~7% der aktiven CPU plus Futex-Wakeups). `stop()` greift
+dadurch erst am nächsten Schleifenkopf — Latenz maximal eine Tick-Dauer (~16ms), bewusst
+akzeptiert. Nur der einmalige 0,5s-Pre-Spawn-Wait bleibt unterbrechbar auf `Event.wait`.
+
 ### `dt`, `now`, `ai_tick`
 
 ```python
@@ -129,6 +148,15 @@ dt deutlich größer als 20ms sein. Alle Physik-Berechnungen benutzen `dt`, kein
 `dt_r` ist zentral auf **0,1s geklemmt** (F4): bei Stalls (GC, Container-Scheduling,
 Netz-Hänger) läuft die Simulation kurz verlangsamt weiter, statt in einem Riesenschritt
 durch Wände zu tunneln oder das GM-Steering zu überdrehen.
+
+### Per-Tick-Memo (P4a)
+
+`_has_los_to_enemy(pid)`, `_get_floor_z()` und `_muzzle_clear(az)` werden innerhalb
+eines Ticks mehrfach mit identischen Eingaben aufgerufen (Combat-Move + Shoot-Check).
+Die Ergebnisse sind pro Tick memoisiert; der Memo-Key von `_get_floor_z` enthält
+zusätzlich die **Position**, damit Aufrufe nach einer `self.pos`-Mutation im selben Tick
+(z.B. `_tick_jumping`) nicht den alten Wert sehen — dadurch ist das Memo ein reiner
+Funktions-Cache und garantiert verhaltensidentisch. Tests: `test_tick_memo.py`.
 
 ### Server-Zeitstempel
 
@@ -754,6 +782,25 @@ den A*-Margin). Wird für Debug-Logging genutzt. Gibt `False` zurück wenn OO ak
 | `TANK_WIDTH` | 2.8u | Tankbreite für Wall-Sliding |
 | `_effective_half_width()` | Normal=1.4u, T=0.56u, N=0.3u | Flag-abhängige Kollisionsbreite |
 
+### Broad-Phase-Grids (ObstacleGrid)
+
+Alle heißen Geometrie-Abfragen laufen über `bzflag/obstacle_grid.py` (W6-Split aus
+nav_graph.py, damit auch shot_physics es ohne Importzyklus nutzen kann). Ein
+`ObstacleGrid` ist ein 2D-Zellen-Index über die Obstacle-AABBs; drei Instanzen:
+
+| Grid | Abfrage | Nutzer |
+|---|---|---|
+| Solid-Grid | Zellen-Lookup | `_get_floor_z`, `_apply_obstacle_bounds` (Kollision) |
+| LoS-Grid | `query_ray` (DDA, Amanatides-Woo) | `_segment_clear` → alle LoS-/Sicht-Checks |
+| Shot-Grid | `query_ray` pro Bounce | `simulate_shot_path` (`obs_grid`-Parameter, P1) |
+
+Kerninvariante: Das Grid verkleinert nur die **Kandidatenmenge** — die Narrow-Phase
+(exakte Ray-Tests, min-über-Kandidaten) bleibt unverändert, das Ergebnis ist deshalb
+exakt identisch zum linearen Scan. Das Zellen-`pad` garantiert, dass kein Kandidat
+verloren geht (keine False Negatives); abgesichert durch Äquivalenztests
+(`TestGetFloorZGridEquivalence`, `TestLosRayGridEquivalence`, P1-Fuzz „0 Mismatch").
+Ohne Grid (Tests, Fallback) läuft überall weiterhin der lineare Pfad.
+
 ---
 
 ## 7. Hit-Detection
@@ -766,6 +813,15 @@ dann `MsgKilled`. Der Server vertraut dieser Meldung und broadcastet den Tod an 
 Das bedeutet: Ein Bot der `_resolve_incoming_shots` nie aufruft, stirbt nie — er kann dauerhaft
 getroffen werden ohne es zu merken. Ebenso kann ein falsches `_resolve_incoming_shots` den Bot
 unbeabsichtigt sterben lassen.
+
+**Leerlauf und Lock-Disziplin:** `_resolve_incoming_shots`, `_cleanup_shots` und
+`_find_incoming_shot` steigen bei komplett leeren Shot-Dicts sofort aus (N2 — der Check
+ist ein GIL-sicherer Lesezugriff, dafür braucht es kein Lock; 60 Hz × leere Iteration
+plus Lock-Overhead waren messbarer Idle-Posten). Und `_on_shot_begin` führt die
+Schusspfad-Simulation (`simulate_shot_path`, bis zu 100 Bounces) **vor** dem
+`_shots_lock` aus (P3): sie liest nur unveränderliche Weltdaten; gelockt wird nur das
+gemeinsame Eintragen von Shot + Ricochet-Pfad (Atomicität bleibt, Haltezeit µs statt ms —
+sonst blockiert der Recv-Thread die 60-Hz-Schleife bei Schuss-Bursts).
 
 ### Schuss-Segment und Normschuss
 
@@ -1198,6 +1254,14 @@ Sicht-Prädikate kapseln die Flaggen-Logik: `_enemy_visible_radar` (nur **ST** r
 **JM** = Radar tot; eigenes **SE** sieht alles) und `_enemy_visible_window` (nur **CL** fenster-unsichtbar;
 eigenes **B** = blind; **SE** sieht alles). Ablauf:
 - **Fenster-Sichtkontakt** (`_sees_in_window` = Flagge + FOV + LoS) → Update immer.
+  Der LoS-Raycast ist dabei pro Spieler für `PLAYER_LOS_TTL_S` (1,5s) gecacht (P7):
+  `_should_update_player` läuft pro eingehendem `MsgPlayerUpdate` (30 Hz × Spieler) im
+  Recv-Thread — ohne Cache ein Raycast pro Paket. Nur dieser Update-Pfad übergibt `now`
+  und aktiviert den Cache; Flag- und FOV-Check bleiben exakt (billig, drehen sich mit dem
+  Bot), und Targeting-Aufrufer von `_sees_in_window` (ohne `now`) rechnen weiterhin exakt.
+  Die Staleness wirkt praktisch nur auf ST-Träger — radar-sichtbare Gegner laufen bei
+  LoS-Fehlschlag über den Radar-Pfad weiter. Design analog zur Radar-Aufmerksamkeit,
+  TTL bewusst länger (User-Entscheid 1–2s statt 0,1s-Originalvorschlag).
 - Sonst nur **Radar** → **Radar-Aufmerksamkeit**: pro Tick fällt der „Radar-Blick" mit `RADAR_SKIP_DEFAULT`
   (CL `RADAR_SKIP_CL`) aus; bei Fehlschlag für `RADAR_COOLDOWN_DEFAULT` (0.25s) / `RADAR_COOLDOWN_CL`
   (0.5s) ganz weggeschaut (`info.radar_blind_until`). Modelliert, dass man nicht ständig aufs Radar starrt.
@@ -1285,12 +1349,20 @@ Bot sendet:     MsgPlayerUpdate   → UDP (unzuverlässig aber schnell)
 Bot empfängt:   alle anderen Msgs ← TCP (zuverlässig, Server broadcastet TCP)
 ```
 
-Das ist absichtlich so. `MsgPlayerUpdate` sendet der Bot 50× pro Sekunde. Verlust
-einzelner Pakete ist akzeptabel — das nächste kommt in 20ms. Alle anderen Nachrichten
-(Shot-Events, Player-Events, Kills) müssen zuverlässig ankommen → TCP.
+Das ist absichtlich so. `MsgPlayerUpdate` sendet der Bot mit 30 Hz
+(`_maybe_send_server_update`, Sektion 2). Verlust einzelner Pakete ist akzeptabel — das
+nächste kommt in ~33ms. Alle anderen Nachrichten (Shot-Events, Player-Events, Kills)
+müssen zuverlässig ankommen → TCP.
+
+**UDP-Zieladresse (N1b):** Nach erfolgreichem TCP-Connect cached der Client die
+Server-IP (`getpeername()`) und sendet alle UDP-Pakete an dieses numerische IP-Tupel.
+Mit einem Hostnamen im Tupel macht CPython sonst **pro Paket** ein getaddrinfo im
+C-Code von `sendto` (für cProfile unsichtbar; im Container mit Docker-DNS ~1,3ms/Paket
+statt ~0,1ms). Bewusst kein `udp.connect()` — das würde Empfangsfilterung und
+ICMP-Fehlersemantik ändern. Tests: `test_client_udp_addr.py`.
 
 Eine vollständige bidirektionale UDP-Implementierung wäre komplizierter ohne signifikant
-bessere Spielbarkeit. Phase 3 könnte das evaluieren.
+bessere Spielbarkeit — als P4-PRO-01 auf der Roadmap (FSD).
 
 ### Welt-Download-Flow
 
@@ -1335,21 +1407,22 @@ ignoriert Server-Konfiguration — das ist ein Bug.
 | Kern-Physik | `_tankSpeed`, `_tankAngVel`, `_jumpVelocity`, `_gravity`, `_maxShots`, `_reloadTime` | `_update_movement`, `_run_physics`, `_maybe_shoot` |
 | Schuss-Physik | `_shotSpeed`, `_shotRange`, `_gmTurnAngle`, `_gmActivationTime`, `_gmAdLife`, `_lockOnAngle` | `_resolve_incoming_shots`, GM-Tracking |
 | Shockwave | `_shockInRadius`, `_shockOutRadius`, `_shockAdLife` | SW-Donut in `_resolve_incoming_shots` |
-| Flag-Physik | `_obeseFactor`, `_agilityAdVel`, `_lgGravity`, `_burrowDepth/_speedAd/_angularAd`, `_shieldFlight`, `_identifyRange` | Hitbox-Skalierung, Radar-Radius |
+| Flag-Physik | `_obeseFactor`, `_agilityAdVel`, `_lgGravity`, `_burrowDepth/_speedAd/_angularAd`, `_shieldFlight`, `_identifyRange`, `_srRadiusMult` | Hitbox-Skalierung, Radar-Radius, Steamroller-Check |
 | Waffen-Rate | `_mGunAdRate/_AdLife/_AdVel`, `_rFireAdRate/_AdVel` | `_effective_reload_time()` |
-| Welt | `_worldSize`, `_dropBadFlagDelay`, `_flagRadius` | NavGraph-Rebuild, Flag-Drop-Timing |
+| Welt | `_worldSize`, `_dropBadFlagDelay`, `_flagRadius` | NavGraph-Rebuild, Flag-Drop-Timing, Radar-Reichweite (halbe Weltgröße, F6) |
+| Netz/Timing | `_updateThrottleRate` | `_maybe_send_server_update` (30-Hz-Kadenz, Sektion 2) |
 
 **MsgSetVar vs. MsgGameSettings:**
 - `MsgGameSettings` kommt einmalig beim Connect: enthält `shakeTimeout`,
   `linearAcceleration`, `angularAcceleration` (letztere noch nicht in
-  Bewegungssimulation aktiv, → P3-MOV-02)
+  Bewegungssimulation aktiv, → P4-MOV-02)
 - `MsgSetVar` kommt nach Welt-Download und kann wiederholt kommen
   (Server-Admin ändert Werte live)
 - Einzige MsgSetVar-Variable mit Seiteneffekt auf den NavGraph: `_worldSize`
   (→ `_worldSize`-Timing-Problem oben)
 - `MsgGameSettings`-Felder: `worldSize` (Offset 0), `gameOptions` (Offset 6 — Bit `0x0020` =
   RicochetGameStyle → `self._server_ricochet`), `maxShots` (Offset 10),
-  `linear/angularAcceleration` (14/18, noch ungenutzt → P3-MOV-02), `shakeTimeout` (Offset 22,
+  `linear/angularAcceleration` (14/18, noch ungenutzt → P4-MOV-02), `shakeTimeout` (Offset 22,
   1/10 s → `_drop_bad_flag_delay`).
 
 ### Rundenende und Reconnect
@@ -1408,18 +1481,30 @@ Verbindung und Server-Kommunikation passieren in Tests nie.
 | `test_kill_payloads.py` | `MsgKilled`-Payload-Aufbau für alle Waffentypen |
 | `test_shot_parsing.py` | `MsgShotBegin`-Parsing, SW/Laser/Thief Sofort-Check bei Spawn |
 | `test_hit_detection.py` | `_resolve_incoming_shots` für SW, GM, Laser, SR, Obesity, Narrow-OBB |
-| `test_targeting.py` | `_find_target_player` mit Radar/FOV, Stealth, Cloaking, Team |
+| `test_sb_hit.py` | SB-Treffer: Wand-Phasing (phase_walls), Längskapsel, Hit-Fenster |
+| `test_targeting.py` | `_find_target_player` mit Radar/FOV, Stealth, Cloaking, Team; P7-LoS-Cache |
 | `test_movement.py` | Waypoint-Navigation, Schwerkraft, BY-Flag, `_is_landed` |
 | `test_dodge_and_jump.py` | EVADING-Trigger, DODGE_JUMP, Grace Period (EV2) |
 | `test_tactics.py` | Taktische Sprünge, Z_ATTACK, LANDING_SHOT, State-Übergänge |
 | `test_shooting.py` | GM-Targeting, Ricochet-Aim, Warnschuss, Burst/Slot-Reload |
 | `test_flags.py` | Flag-Strategie (Grab/Drop, Klassifizierung, Effektiv-Stats) |
 | `test_capability_checks.py` | Flag-Fähigkeiten (FO/RO/LT/RT, NJ, OO, …) |
+| `test_pause.py` | MsgPause: pausierte Ziele nicht beschießen, `PAUSE_WAIT_S`-Wartefenster |
 | `test_protocol.py` | MsgSetVar/GameSettings-Parsing, `_limited_flags`, `_updateThrottleRate`, `_wingsJumpCount` |
+| `test_setvar_snapshot.py` | Snapshot: alle `_on_set_var`-Variablen → resultierende Attribute (W3-Absicherung) |
+| `test_update_cadence.py` | 30-Hz-Kadenz von `_maybe_send_server_update` (Anker, Stall-Klemme, N1a) |
+| `test_client_udp_addr.py` | Gecachte UDP-Zieladresse nach TCP-Connect (N1b) |
+| `test_client_join.py` | `join_game`: Accept-/Reject-Auswertung (`_ev_rejected` vor `_ev_accepted`) |
+| `test_idle_early_out.py` | Leerlauf-Early-Outs bei leeren Shot-Dicts (N2) |
+| `test_tick_memo.py` | Per-Tick-Memo für LoS/FloorZ/Muzzle (P4a) |
 | `test_world_parser.py` | `parse_world` (zlib, BoxObstacle/Pyramid/Teleporter) |
 | `test_nav_graph.py` | NavGraph A*/Layer; Karten-Fixtures (ggf. via `pytest.skip`) |
-| `test_shot_physics.py` | `simulate_shot_path` (Bounce, Box-/Pyramid-Normalen) |
-| `test_bot_manager.py` | Rebalancing-Formel, Observer-/Menschen-Zählung |
+| `test_async_plan.py` | Asynchrones Pathfinding: Worker, Relevanz-Gates, Prefix-Resync (P4-INF-01) |
+| `test_teleporter.py` | Teleporter-Querung, Pfad-Resync, NAV_TELE |
+| `test_shot_physics.py` | `simulate_shot_path` (Bounce, Box-/Pyramid-Normalen, Grid-Äquivalenz) |
+| `test_bot_manager.py` | Rebalancing-Formel, Observer-/Menschen-Zählung, Profiling-Start/-Stop |
+| `test_bzbot_managed.py` | Managed-Modus: `@@BZMGR@@`-Status, stdin-Kommandos |
+| `test_performance.py` | Perf-/Timing-Ausgaben (`pytest -m perf -s`, kein Assert) |
 
 ### Was Tests NICHT prüfen
 
