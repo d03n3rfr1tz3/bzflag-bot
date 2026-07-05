@@ -48,11 +48,24 @@ class PerceptionMixin:
         if self.own_flag == "B":  return False     # blind
         return info.flag != "CL"
 
-    def _sees_in_window(self, info, x: float, y: float, z: float) -> bool:
-        """Voller Fenster-Sichtkontakt: Flagge erlaubt Fenster-Sicht UND im FoV UND unverdeckt (LoS)."""
-        return (self._enemy_visible_window(info)
-                and self._in_fov(x, y)
-                and self._has_los_to_point(x, y, z + self._tank_height * 0.5))
+    def _sees_in_window(self, info, x: float, y: float, z: float, now: Optional[float] = None) -> bool:
+        """Voller Fenster-Sichtkontakt: Flagge erlaubt Fenster-Sicht UND im FoV UND unverdeckt (LoS).
+
+        now: nur der heiße Update-Pfad (_should_update_player, pro MsgPlayerUpdate im Recv-Thread)
+        übergibt now und cached damit den LoS-Raycast pro Spieler für PLAYER_LOS_TTL_S (P7).
+        Das ist ein reines Wahrnehmungs-Gate — Staleness analog zur Radar-Aufmerksamkeit, nur
+        länger; Flag- und FoV-Check bleiben exakt (billig, drehen sich mit dem Bot). Ohne now
+        (Targeting/Game-Loop) wird exakt gerechnet und der Cache weder gelesen noch geschrieben.
+        Thread-Sicherheit: einfache Attribut-Zuweisungen auf info, GIL-atomar — kein Lock nötig."""
+        if not (self._enemy_visible_window(info) and self._in_fov(x, y)):
+            return False
+        if now is not None and now < info.los_cache_until:
+            return info.los_cache
+        los = self._has_los_to_point(x, y, z + self._tank_height * 0.5)
+        if now is not None:
+            info.los_cache_until = now + PLAYER_LOS_TTL_S
+            info.los_cache = los
+        return los
 
     # Schuss-Sichtbarkeit = Spiegelbild der Tank-Sichtbarkeit (SE betrifft nur Tanks, nicht Schüsse).
     def _shot_visible_radar(self, shooter) -> bool:
@@ -73,13 +86,14 @@ class PerceptionMixin:
     def _should_update_player(self, info, px: float, py: float, pz: float, now: float) -> bool:
         """Übernimmt der Bot diese Gegnerposition jetzt?
         - Direkter Sichtkontakt (Fenster: FoV+LoS) → immer aktuell (man schaut ihn an).
+          Der LoS-Raycast ist hier pro Spieler für PLAYER_LOS_TTL_S gecacht (P7, s. _sees_in_window).
         - Nur Radar → Radar-Aufmerksamkeit: pro EINGEHENDEM MsgPlayerUpdate mit (1-skip)
           hinschauen; bei Fehlschlag für einen Cooldown ganz wegschauen (CL stärker).
           Achtung (F8, dokumentiert): der Würfelwurf hängt damit an der Server-Update-Rate
           (Standard 30 Hz × Spieler) — bei abweichender Rate verschiebt sich die effektive
           Aufmerksamkeit; der Cooldown (zeitbasiert) dämpft das. Bewusst so belassen.
         - Weder Fenster noch Radar (ST/eigenes JM) → nie."""
-        if self._sees_in_window(info, px, py, pz):
+        if self._sees_in_window(info, px, py, pz, now):   # now → LoS-Cache aktiv (P7)
             return True
         if not self._enemy_visible_radar(info):
             return False

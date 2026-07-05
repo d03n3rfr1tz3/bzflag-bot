@@ -133,6 +133,7 @@ ID-Spalte trägt dann einen ID-Bereich).
 | P1-MGR-02 | Dynamische Bot-Anzahl: hält `max_bots − Menschen` zwischen Min/Max | ✅ | — |
 | P1-MGR-03 | Bots als eigenständige Subprozesse starten/stoppen/überwachen | ✅ | — |
 | P1-MGR-04 | Konfiguration per YAML-Datei mit CLI-Override | ✅ | — |
+| P1-MGR-05 | Optionales Laufzeit-Profiling je Bot (Diagnose); Profil wird beim regulären Bot-Ende geschrieben | ✅ | P1-MGR-03 |
 
 **Bot-Kern (P1-BOT)**
 
@@ -159,8 +160,8 @@ ID-Spalte trägt dann einen ID-Bereich).
 
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
-| P1-TGT-01 | Radar-Sichtweite (150u, richtungsunabhängig) | ✅ | — |
-| P1-TGT-02 | FOV-Sichtweite (Sichtkegel 75°, bis 350u) | ✅ | — |
+| P1-TGT-01 | Radar-Sichtweite: halbe Weltgröße (Standard 400u, folgt der Server-Weltgröße), richtungsunabhängig — bewusstes Fairness-Limit | ✅ | — |
+| P1-TGT-02 | FOV-Sichtweite (Sichtkegel 75°, bis zur Server-Schussreichweite, Standard 350u) | ✅ | — |
 | P1-TGT-03 | Stealth (ST): nur per Sicht erfassbar, nicht auf Radar | ✅ | — |
 | P1-TGT-04 | Cloak (CL): nur per Radar erfassbar, nicht per Sicht | ✅ | — |
 | P1-TGT-05 | Mensch-Bevorzugung in der Zielwahl | ✅ | — |
@@ -169,7 +170,7 @@ ID-Spalte trägt dann einen ID-Bereich).
 
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
-| P1-SHT-01 | Schuss erst innerhalb der Ausrichtungstoleranz (~25°) | ✅ | — |
+| P1-SHT-01 | Schuss erst innerhalb der Ausrichtungstoleranz; distanzabhängig: ~25° im Nahbereich, mit der Zieldistanz enger bis ~5° auf große Distanz | ✅ | — |
 | P1-SHT-02 | Zufallsschüsse ohne Ziel (Passivmodus) | ✅ | — |
 | P1-SHT-03 | Reload-Zeit nach Server-Vorgabe | ✅ | — |
 | P1-SHT-04 | TR-Flag: Dauerfeuer (Rapid-Fire) | ✅ | — |
@@ -407,7 +408,7 @@ als Gegner-Effekt auf den Bot. Server-Variablen können die Werte überschreiben
 | GM | good | Optimaldistanz ~85u; nach kurzer Aktivierungszeit lenkt der Bot die Rakete auf das Ziel; gegen Stealth-Ziele nur mit Sichtlinie und enger Ausrichtung (kein Homing); höhenunabhängig |
 | L | good | Laser, als Sofort-Treffer modelliert (kein Vorhalt); enge Ausrichtung; blockiert bei größerem Höhenunterschied; ohne Sichtlinie Abpraller-Zielen, falls Ricochet aktiv |
 | SW | good | Flächen-Schockwelle; feuert im Nahbereich (bis ~60u, 3D); keine Sichtlinien-/Höhenbeschränkung; radiale Killzone (auch Gegner auf/in Gebäuden) |
-| SB | good | Schießt durch Wände (keine Sichtlinie); tötet auch PhantomZone-Gegner |
+| SB | good | Schießt durch Wände (keine Sichtlinie); tötet auch PhantomZone-Gegner. *Als Gegner-Effekt:* anfliegende SB-Schüsse werden auch durch Wände und Teleporter hindurch als Bedrohung erkannt |
 | MG | good | Kurze Reichweite, schnelles Nachladen; Optimaldistanz ~25u |
 | F | good | Schnelleres Dauerfeuer |
 | TR | **bad** | Tank schießt unkontrolliert weiter (Dauerfeuer ohne Zielprüfung) |
@@ -472,14 +473,14 @@ als Gegner-Effekt auf den Bot. Server-Variablen können die Werte überschreiben
 
 | Flag | Aim-Toleranz | Sichtlinie nötig | Höhen-Block | Spezialwirkung | Opt.-Distanz |
 |---|---|---|---|---|---|
-| Standard | 25° | nein (Abpraller-Fallback) | bei großem Höhenunterschied | Vorhalt (tangential) | 60u |
+| Standard | 25° nah → 5° fern (distanzabhängig) | nein (Abpraller-Fallback) | bei großem Höhenunterschied | Vorhalt (tangential) | 60u |
 | SW | — (Flächenwaffe) | nein | nein | radiale Killzone, feuert 6–60u (3D) | 20u |
 | GM | eng (enger im Nahbereich; gegen Stealth strenger) | nur gegen Stealth-Ziel | nein | Lenkung der Rakete | 85u |
 | L | sehr eng | nein (Abpraller-Fallback) | bei kleinem Höhenunterschied | Sofort-Treffer | 60u |
 | TH | eng | nein (Abpraller-Fallback) | bei kleinem Höhenunterschied | Sofort, kein Kill → Diebstahl, nur ≤120u | — |
-| SB | 25° | **nein (durch Wände)** | wie Standard | durchschlägt Wände, kein Abpraller | 60u |
+| SB | wie Standard (distanzabhängig) | **nein (durch Wände)** | wie Standard | durchschlägt Wände, kein Abpraller | 60u |
 | TR | keine | nein | nein | Dauerfeuer (slot-getaktet) | — |
-| WA | 25° (+Streuung) | wie Standard | wie Standard | weiteres Sichtfeld | 60u |
+| WA | wie Standard (+Streuung) | wie Standard | wie Standard | weiteres Sichtfeld | 60u |
 
 Im Z-Höhenangriff und Landing-Shot gilt die jeweils eigene Feuerlogik. Ohne Ziel/im Passivmodus
 fallen Schüsse auf das Zufalls-Intervall zurück; gute und limitierte Flaggen unterdrücken

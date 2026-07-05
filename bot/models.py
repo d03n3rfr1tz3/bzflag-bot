@@ -71,6 +71,8 @@ class PlayerInfo:
     last_seen:  float = 0.0
     last_order: int   = -1
     radar_blind_until: float = 0.0   # Radar-Aufmerksamkeit: bis dahin keine Radar-Updates (Cooldown)
+    los_cache_until: float = 0.0     # P7: bis dahin gilt das gecachte LoS-Ergebnis (nur Update-Pfad)
+    los_cache:       bool  = False   # P7: letztes LoS-Ergebnis zu diesem Spieler
     is_phantom_zoned: bool = False
     paused:     bool  = False  # aus MsgPause: pausiert = unverwundbar, nicht beschießen
     last_teleport: Optional[Tuple[float, int, int]] = None  # (zeit, from_face, to_face), letzter Teleport
