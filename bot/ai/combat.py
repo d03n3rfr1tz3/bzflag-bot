@@ -164,6 +164,9 @@ class CombatMixin:
         dist = math.hypot(dx, dy)
         if dist < 1e-6:
             return
+        # Aktives Unstick-Manöver (Stall-Watchdog) steuert den Tick allein
+        if self._stall_maneuver_tick(dt, half, now):
+            return
         # Fix A: Vorhaltepunkt mit Radialgeschwindigkeits-Korrektur
         if info is not None:
             rdx, rdy = dx / dist, dy / dist
@@ -240,6 +243,10 @@ class CombatMixin:
                 self._navigate_wp(dt, half, reverse=self._should_reverse_to_wp())
                 return
             # sonst: Direktmodus (Prio 2) fällt unten durch
+        # Stall-Watchdog: Direktsteuerung ohne Sicht (auch der Fall "kein A*-Pfad, Gegner höher aber
+        # springbar") darf nicht dauerhaft auf der Stelle stehen (Spiegel-Stall an dünner Wand).
+        if self._stall_watchdog(now, _los_clear, _hold_indirect, _stuck_active):
+            return
         # Direktziel-Modus: distanzbasiert (Rückwärts / langsam / voll)
         target_az = math.atan2(aim_y - self.pos[1], aim_x - self.pos[0])
         _cache = self._rico_aim_cache
@@ -366,6 +373,96 @@ class CombatMixin:
         ry = self.pos[1] + math.sin(ang) * UNREACH_REPOS_RADIUS
         _m = self.world_half - 5.0
         return (max(-_m, min(_m, rx)), max(-_m, min(_m, ry)))
+
+    # ── COMBAT-Stall-Watchdog ────────────────────────────────────────────────
+    # Zwei gleich starke Bots frieren bei Optimaldistanz ohne Sicht/Ricochet ein (Spiegel-Stall,
+    # v.a. an dünnen Trennwänden). Der Watchdog erkennt Null-Bewegung im Direktmodus und löst mit
+    # einem RANDOMISIERTEN Manöver auf — Randomisierung, damit sich zwei Bots nicht spiegeln.
+
+    def _stall_watchdog(self, now: float, los_clear: bool, hold_indirect: bool,
+                        stuck_active: bool) -> bool:
+        """Armiert ein ZUFÄLLIGES Fenster (10–15 s), misst Netto-Bewegung und startet bei < 2 u
+        ein zufälliges Unstick-Manöver. True = Manöver gestartet (Caller soll return)."""
+        if los_clear or hold_indirect or stuck_active:
+            self._stall_check_at = None          # legitime Halte-Situation → entschärfen
+            return False
+        if self._stall_check_at is None:         # frisch armieren
+            self._stall_check_at = now + random.uniform(COMBAT_STALL_WIN_MIN, COMBAT_STALL_WIN_MAX)
+            self._stall_anchor = [self.pos[0], self.pos[1]]
+            return False
+        if now < self._stall_check_at:
+            return False
+        moved = math.hypot(self.pos[0] - self._stall_anchor[0], self.pos[1] - self._stall_anchor[1])
+        if moved >= COMBAT_STALL_MIN_DIST:       # Fortschritt → frisches Fenster, kein Stall
+            self._stall_check_at = now + random.uniform(COMBAT_STALL_WIN_MIN, COMBAT_STALL_WIN_MAX)
+            self._stall_anchor = [self.pos[0], self.pos[1]]
+            return False
+        self._stall_check_at = None              # Stall → Manöver (re-armiert nach dessen Ende)
+        return self._stall_fire(now)
+
+    def _stall_fire(self, now: float) -> bool:
+        """Startet zufällig REV oder PATH; scheitert PATH, wird REV genommen (REV gelingt immer)."""
+        first = random.choice(("REV", "PATH"))
+        for mode in (first, "PATH" if first == "REV" else "REV"):
+            if mode == "REV" and self._stall_try_rev(now):
+                return True
+            if mode == "PATH" and self._stall_try_path(now):
+                return True
+        return False
+
+    def _stall_try_rev(self, now: float) -> bool:
+        # KEIN Klippen-Check: von der Plattform zu fallen löst den Stall (erwünscht).
+        self._stall_mode = "REV"
+        self._stall_rev_dist = random.uniform(COMBAT_STALL_REV_MIN, COMBAT_STALL_REV_MAX)
+        self._stall_rev_start = [self.pos[0], self.pos[1]]
+        self._stall_until = now + COMBAT_STALL_TIMEOUT
+        return True
+
+    def _stall_try_path(self, now: float) -> bool:
+        ang = random.uniform(0.0, 2.0 * math.pi)
+        r = NAV_CELL_SIZE * random.uniform(COMBAT_STALL_WP_MIN, COMBAT_STALL_WP_MAX)
+        _m = self.world_half - 5.0
+        rx = max(-_m, min(_m, self.pos[0] + math.cos(ang) * r))
+        ry = max(-_m, min(_m, self.pos[1] + math.sin(ang) * r))
+        self._plan_path(rx, ry, cap_wps=COMBAT_STALL_WP_MAX)
+        if not getattr(self, "_nav_path", []):
+            return False                          # kein Pfad → Fallback auf REV (s. _stall_fire)
+        self._stall_mode = "PATH"
+        self._stall_until = now + COMBAT_STALL_TIMEOUT
+        return True
+
+    def _stall_maneuver_tick(self, dt: float, half: float, now: float) -> bool:
+        """Fährt ein laufendes Unstick-Manöver ab. True = Tick vollständig behandelt.
+        Nach Abschluss/Timeout: Modus beenden → normaler COMBAT-Fluss, Watchdog re-armiert neu."""
+        if self._stall_mode is None:
+            return False
+        if self._stall_mode == "REV":
+            driven = math.hypot(self.pos[0] - self._stall_rev_start[0],
+                                self.pos[1] - self._stall_rev_start[1])
+            if driven >= self._stall_rev_dist or now >= self._stall_until:
+                self._stall_end()
+                return False
+            # KEIN Klippen-Guard: Absturz ist hier gewollt (bricht den Spiegel-Stall).
+            speed = -self._tank_speed
+            self.ang_vel = 0.0
+            speed, self.ang_vel = self._apply_movement_caps(speed, self.ang_vel)
+            self.vel[0] = math.cos(self.azimuth) * speed
+            self.vel[1] = math.sin(self.azimuth) * speed
+            self._apply_bounds(dt, half)
+            return True
+        # PATH-Modus
+        if not getattr(self, "_nav_path", []) or now >= self._stall_until:
+            self._stall_end()
+            return False
+        self._navigate_wp(dt, half)
+        return True
+
+    def _stall_end(self) -> None:
+        """Manöver beenden: Pfad/Ziel verwerfen (frischer Replan Richtung Gegner)."""
+        self._stall_mode = None
+        self._stall_check_at = None
+        self._nav_path = []
+        self._nav_goal = None
 
     def _setup_dodge(self, threat, now: float, time_to_impact: float,
                      dodge_dir: float, orig_diff: float = None) -> None:
