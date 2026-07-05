@@ -317,6 +317,71 @@ class TestShouldUpdatePlayer:
         assert bot._should_update_player(info, 50.0, 0.0, 0.0, now + 0.6) is True   # nach Ablauf
 
 
+# ── P7: LoS-Cache pro Spieler im Update-Pfad ─────────────────────────────────
+
+def _count_los(bot, monkeypatch, results=None):
+    """Ersetzt _has_los_to_point durch einen Zähl-Wrapper. results: optionale Liste
+    fester Rückgabewerte (letzter Wert wiederholt); ohne results läuft das Original."""
+    orig = bot._has_los_to_point
+    calls = []
+
+    def counting(x, y, z):
+        calls.append((x, y, z))
+        if results is not None:
+            return results[min(len(calls), len(results)) - 1]
+        return orig(x, y, z)
+
+    monkeypatch.setattr(bot, "_has_los_to_point", counting)
+    return calls
+
+
+class TestPlayerLosCache:
+    def test_second_call_within_ttl_uses_cache(self, bot, monkeypatch):
+        from bot.constants import PLAYER_LOS_TTL_S
+        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
+        calls = _count_los(bot, monkeypatch)
+        now = time.monotonic()
+        assert bot._should_update_player(info, 50.0, 0.0, 0.0, now) is True
+        assert len(calls) == 1
+        assert bot._should_update_player(info, 50.0, 0.0, 0.0, now + PLAYER_LOS_TTL_S * 0.5) is True
+        assert len(calls) == 1                       # kein neuer Raycast innerhalb TTL
+
+    def test_cached_result_is_returned_not_recomputed(self, bot, monkeypatch):
+        """Negatives Ergebnis bleibt bis TTL-Ablauf gültig, auch wenn die Sicht real frei würde."""
+        from bot.constants import PLAYER_LOS_TTL_S
+        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
+        calls = _count_los(bot, monkeypatch, results=[False, True])  # 1. blockiert, danach frei
+        now = time.monotonic()
+        assert bot._should_update_player(info, 50.0, 0.0, 0.0, now) is False
+        assert bot._should_update_player(info, 50.0, 0.0, 0.0, now + 0.5) is False  # stale False
+        assert len(calls) == 1
+        assert bot._should_update_player(info, 50.0, 0.0, 0.0, now + PLAYER_LOS_TTL_S + 0.1) is True
+        assert len(calls) == 2                       # nach Ablauf neu gerechnet
+
+    def test_cache_is_per_player(self, bot, monkeypatch):
+        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        a = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
+        b = make_player(bot, pid=3, pos=(50.0, 5.0, 0.0), flag="ST")
+        calls = _count_los(bot, monkeypatch)
+        now = time.monotonic()
+        bot._should_update_player(a, 50.0, 0.0, 0.0, now)
+        bot._should_update_player(b, 50.0, 5.0, 0.0, now)
+        assert len(calls) == 2                       # je Spieler ein eigener Raycast
+        assert a.los_cache_until > now and b.los_cache_until > now
+
+    def test_without_now_no_caching(self, bot, monkeypatch):
+        """Targeting-Aufrufer (ohne now) rechnen exakt und berühren den Cache nicht."""
+        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
+        calls = _count_los(bot, monkeypatch)
+        assert bot._sees_in_window(info, 50.0, 0.0, 0.0) is True
+        assert bot._sees_in_window(info, 50.0, 0.0, 0.0) is True
+        assert len(calls) == 2                       # kein Cache ohne now
+        assert info.los_cache_until == 0.0           # Cache unberührt
+
+
 # ── ST-Akquise braucht LoS ────────────────────────────────────────────────────
 
 class TestStealthAcquisitionLoS:

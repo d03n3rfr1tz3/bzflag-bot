@@ -184,7 +184,12 @@ AHEAD_HALF_ANGLE    = math.pi / 2  # ±90° — Geometrie „liegt vor mir" (kei
 RADAR_SKIP_DEFAULT     = 0.33
 RADAR_SKIP_CL          = 0.66  # CL: out-the-window unsichtbar + Schussgefahr → öfter weggeschaut
 RADAR_COOLDOWN_DEFAULT = 0.25  # s, nach einem Fehlschlag ganz „weggeschaut" (keine Radar-Updates)
-RADAR_COOLDOWN_CL      = 0.5
+RADAR_COOLDOWN_CL      = 0.75
+# P7: LoS-Ergebnis pro Spieler im Update-Pfad cachen (statt Raycast pro MsgPlayerUpdate, 30 Hz ×
+# Spieler). Bewusst deutlich länger als der Radar-Cooldown: reines Wahrnehmungs-Gate, die Staleness
+# wirkt praktisch nur auf die Fenster-Sicht (ST-Träger) — radar-sichtbare Gegner werden bei LoS-Fehlschlag
+# weiterhin über den Radar-Pfad aktualisiert.
+PLAYER_LOS_TTL_S       = 0.75
 ENEMY_STALE_S          = 10.0  # so lange ungesehen → Gegner gilt als verloren (kein Ziel-Re-Lock)
 PAUSE_WAIT_S           = 12.0  # so lange wartet der Bot auf Rückkehr eines pausierten Ziels, dann SEEKING
 
