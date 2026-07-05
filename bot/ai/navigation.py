@@ -541,6 +541,15 @@ class NavigationMixin:
                 self.target_pos = None
                 self._nav_path  = []
                 self._nav_goal  = (_ep_now[0], _ep_now[1]) if _ep_now is not None else None
+            elif self._ai_state == AIState.IDLE:
+                # IDLE: Pfad abgefahren → parken statt Wandern (CPU sparen). Der Bot
+                # bleibt stehen, bis _has_presence() den Wechsel nach SEEKING auslöst.
+                self.target_pos = None
+                self._nav_path  = []
+                self._nav_goal  = None
+                self.vel[0]  = 0.0
+                self.vel[1]  = 0.0
+                self.ang_vel = 0.0
             else:
                 self._new_target()
 
