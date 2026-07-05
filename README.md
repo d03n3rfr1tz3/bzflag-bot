@@ -145,42 +145,45 @@ bzflag-bot/
 ├── bzflag/
 │   ├── __init__.py            – Paket-Init
 │   ├── client.py              – TCP/UDP-Client mit Handshake und Message-Dispatch
+│   ├── intersect.py           – Geometrie-Primitive (Port bzfs Intersect.cxx): OBB-OBB-/Ray×Box-/Segment×Box-Overlap
 │   ├── nav_graph.py           – NavGraph: A*-Pfadsuche, Layer-Verwaltung, Sprung-/Fall-Kanten
 │   ├── obstacle_grid.py       – ObstacleGrid: Broad-Phase-Beschleunigung (Zellen-Grid, DDA-Ray)
 │   ├── protocol.py            – BZFlag 2.4 Protokoll-Konstanten und Hilfsfunktionen
-│   ├── shot_physics.py        – Schuss-Physik: simulate_shot_path (Bounce-Simulation), _segment_hits_obb_3d
+│   ├── shot_physics.py        – Schuss-Physik: simulate_shot_path (Bounce-Simulation), Teleporter-Querung
 │   ├── world_parser.py        – MsgGetWorld-Parser: zlib-Dekomprimierung, Obstacle-Parsing
 │   └── world_map.py           – Datenklassen: BoxObstacle, WorldMap, FlagInfo
 ├── tests/                     – Unit-Tests (kein Server nötig; `pytest tests/ -v`)
 │   ├── conftest.py            – Pytest-Fixtures (Bot-Mock, Karten-Fixture-Loader)
-│   ├── test_geometry.py       – Geometrie-Hilfsfunktionen und Shot-Methoden
-│   ├── test_kill_payloads.py  – MsgKilled-Payload für alle Waffenarten
-│   ├── test_shot_parsing.py   – MsgShotBegin-Parsing, SW/Laser/Thief-Sofortcheck
-│   ├── test_hit_detection.py  – Hit-Detection (SW, GM, Laser, SR, Obesity, Narrow-OBB)
-│   ├── test_sb_hit.py         – SB-Treffer: Wand-Phasing, Längskapsel, Hit-Fenster
-│   ├── test_shooting.py       – Schieß-Logik: GM-Targeting, Ricochet-Aim, Burst-Intervalle
-│   ├── test_targeting.py      – Zielauswahl (Radar/FOV, Stealth, Cloaking, Team, LoS-Cache)
-│   ├── test_movement.py       – Bewegung (Waypoints, Schwerkraft, BY-Flag)
-│   ├── test_dodge_and_jump.py – Ausweichen und Sprung-Fallback
-│   ├── test_tactics.py        – Taktische Sprünge, Z-Attack, Landing-Shot, State-Machine
-│   ├── test_flags.py          – Flag-Strategie (Grab/Drop, Klassifizierung, Effektiv-Stats)
-│   ├── test_capability_checks.py – Flag-Fähigkeiten (FO/RO/LT/RT, NJ, OO, …)
-│   ├── test_pause.py          – Pause-Behandlung (MsgPause: nicht beschießen, warten)
-│   ├── test_protocol.py       – MsgSetVar/GameSettings-Parsing, Limited-Flags
-│   ├── test_setvar_snapshot.py – Snapshot-Test: alle Server-Variablen → Attribute
-│   ├── test_update_cadence.py – 30-Hz-Kadenz der Positions-Updates (Anker, Stall)
-│   ├── test_client_udp_addr.py – UDP-Zieladresse (gecachte IP statt Hostname)
-│   ├── test_client_join.py    – Join-Handshake (Accept/Reject-Auswertung)
-│   ├── test_idle_early_out.py – Leerlauf-Early-Outs bei leeren Shot-Dicts
-│   ├── test_tick_memo.py      – Per-Tick-Memo (LoS/FloorZ/Muzzle)
-│   ├── test_world_parser.py   – MsgGetWorld-Parsing (zlib, Obstacles)
-│   ├── test_nav_graph.py      – NavGraph A*/Layer (Karten-Fixtures, ggf. übersprungen)
 │   ├── test_async_plan.py     – Asynchrones Pathfinding (Worker, Prefix-Resync)
-│   ├── test_teleporter.py     – Teleporter (Querung, Pfad-Resync, NAV_TELE)
-│   ├── test_shot_physics.py   – Ricochet-Pfad-Simulation (Bounce, Normalen)
 │   ├── test_bot_manager.py    – Bot-Manager (Rebalancing, Observer-Zählung, Profiling)
 │   ├── test_bzbot_managed.py  – Managed-Modus (IPC-Statuszeilen, stdin-Kommandos)
-│   └── test_performance.py    – Performance-/Timing-Checks (`pytest -m perf -s`)
+│   ├── test_capability_checks.py – Flag-Fähigkeiten (FO/RO/LT/RT, NJ, OO, …)
+│   ├── test_client_join.py    – Join-Handshake (Accept/Reject-Auswertung)
+│   ├── test_client_udp_addr.py – UDP-Zieladresse (gecachte IP statt Hostname)
+│   ├── test_dodge_and_jump.py – Ausweichen und Sprung-Fallback
+│   ├── test_flags.py          – Flag-Strategie (Grab/Drop, Klassifizierung, Effektiv-Stats)
+│   ├── test_geometry.py       – Geometrie-Hilfsfunktionen und Shot-Methoden
+│   ├── test_hit_detection.py  – Hit-Detection (SW, GM, Laser, SR, Obesity, Narrow-OBB)
+│   ├── test_idle_early_out.py – Leerlauf-Early-Outs bei leeren Shot-Dicts
+│   ├── test_intersect.py      – OBB-OBB-Overlap (rect_rect_overlap) + Shim-Re-Export aus shot_physics
+│   ├── test_kill_payloads.py  – MsgKilled-Payload für alle Waffenarten
+│   ├── test_movement.py       – Bewegung (Waypoints, Schwerkraft, BY-Flag)
+│   ├── test_nav_graph.py      – NavGraph A*/Layer (Karten-Fixtures, ggf. übersprungen)
+│   ├── test_pause.py          – Pause-Behandlung (MsgPause: nicht beschießen, warten)
+│   ├── test_performance.py    – Performance-/Timing-Checks (`pytest -m perf -s`)
+│   ├── test_protocol.py       – MsgSetVar/GameSettings-Parsing, Limited-Flags
+│   ├── test_sb_hit.py         – SB-Treffer: Wand-Phasing, Längskapsel, Hit-Fenster
+│   ├── test_setvar_snapshot.py – Snapshot-Test: alle Server-Variablen → Attribute
+│   ├── test_shooting.py       – Schieß-Logik: GM-Targeting, Ricochet-Aim, Burst-Intervalle
+│   ├── test_shot_parsing.py   – MsgShotBegin-Parsing, SW/Laser/Thief-Sofortcheck
+│   ├── test_shot_physics.py   – Ricochet-Pfad-Simulation (Bounce, Normalen)
+│   ├── test_tactics.py        – Taktische Sprünge, Z-Attack, Landing-Shot, State-Machine
+│   ├── test_targeting.py      – Zielauswahl (Radar/FOV, Stealth, Cloaking, Team, LoS-Cache)
+│   ├── test_teleporter.py     – Teleporter (Querung, Pfad-Resync, NAV_TELE)
+│   ├── test_thin_wall_obb.py  – Dünne 135°-Wand: OBB-Kollision, kein Wand-Durchschuss (normal/GM)
+│   ├── test_tick_memo.py      – Per-Tick-Memo (LoS/FloorZ/Muzzle)
+│   ├── test_update_cadence.py – 30-Hz-Kadenz der Positions-Updates (Anker, Stall)
+│   └── test_world_parser.py   – MsgGetWorld-Parsing (zlib, Obstacles)
 ├── bot_manager.py             – Manager für mehrere Bots
 ├── bzbot.py                   – Einzelner Bot (direkt startbar; Entry-Point)
 ├── config.yaml                – Konfigurationsbeispiel
