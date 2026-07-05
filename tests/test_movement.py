@@ -974,7 +974,7 @@ class TestRouteDiscardClearsTarget:
 
     def test_execute_combat_move_clears_target_pos(self, bot):
         """_execute_combat_move: Route-Discard setzt target_pos auf None.
-        Gegner auf z=15 → _check1 (bot_z+TANK_HEIGHT > enemy_z) False → WPs aktiv."""
+        Gegner auf z=15 → _not_below_enemy (bot_z+TANK_HEIGHT > enemy_z) False → WPs aktiv."""
         import time
         from conftest import make_player
         p = make_player(bot, 7, pos=(100.0, 0.0, 15.0))  # elevated → _skip_nav=False
@@ -1000,7 +1000,7 @@ class TestDirectModeNoPlanning:
         _nav_path invalidiert. (replan_xy würde sonst wegen _nav_goal=None planen.)"""
         from unittest.mock import MagicMock
         from bot.models import AIState
-        p = make_player(bot, 7, pos=(40.0, 0.0, 0.0))  # gleiche Z → _check1 True
+        p = make_player(bot, 7, pos=(40.0, 0.0, 0.0))  # gleiche Z → _not_below_enemy True
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 7
         bot.pos = [0.0, 0.0, 0.0]
@@ -1271,6 +1271,41 @@ class TestSkipNavCondition:
         bot._navigate_wp = lambda *a, **kw: nav_wp_called.append(True) or True
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
         assert nav_wp_called
+
+
+# ── COMBAT-Optimaldistanz-Deadzone ───────────────────────────────────────────
+
+class TestCombatDeadzone:
+    """_execute_combat_move: ±COMBAT_DIST_DEADZONE um die Optimaldistanz nicht regeln,
+    sonst zittern zwei distanzgleiche Bots. Direktmodus (kein NavGraph → _has_los=True)."""
+
+    def _setup(self, bot, dist):
+        p = make_player(bot, 2, pos=(dist, 0.0, 0.0))
+        p.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 2
+        bot.pos = [0.0, 0.0, 0.0]
+        bot.vel = [0.0, 0.0, 0.0]
+        bot.azimuth = 0.0
+        bot._nav_path = []
+        bot._nav_goal = None
+
+    def test_deadzone_holds_at_optimal(self, bot):
+        from bot.constants import OPTIMAL_RANGE
+        self._setup(bot, dist=OPTIMAL_RANGE)          # exakt Optimaldistanz
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
+
+    def test_reverse_just_below_deadzone(self, bot):
+        from bot.constants import OPTIMAL_RANGE
+        self._setup(bot, dist=OPTIMAL_RANGE - 2.0)    # 58u → rückwärts
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot.vel[0] < 0.0
+
+    def test_forward_just_above_deadzone(self, bot):
+        from bot.constants import OPTIMAL_RANGE
+        self._setup(bot, dist=OPTIMAL_RANGE + 2.0)    # 62u → langsam vorwärts
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot.vel[0] > 0.0
 
 
 # ── _has_los_to_enemy ─────────────────────────────────────────────────────────
@@ -2085,3 +2120,172 @@ class TestCombatSteepWallRouting:
         bot._navigate_wp = lambda *a, **kw: nav_wp.append(True) or True
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
         assert not nav_wp
+
+
+# ── COMBAT-Stall-Watchdog (Spiegel-Stall an dünner Wand) ─────────────────────
+
+class TestCombatStallWatchdog:
+    """_execute_combat_move: erkennt Null-Bewegung im sichtlosen Direktmodus und löst mit einem
+    randomisierten Unstick-Manöver (REV/PATH) auf. Setup: Gegner in Optimaldistanz hinter dünner
+    Wand (kein LoS), außerhalb der 20u-Wand-Probe → _skip_nav bleibt True, Direktsteuerung."""
+
+    def _stalled_bot(self, bot, wall=True):
+        boxes = [(45.0, 0.0, 0.0, 0.0, 0.5, 40.0, 10.0)] if wall else []
+        _build_nav(bot, boxes)                        # Wand bei x=45 (>20u Probe) blockt LoS
+        p = make_player(bot, 2, pos=(60.0, 0.0, 0.0))  # dist 60 = Optimaldistanz
+        p.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 2
+        bot.pos = [0.0, 0.0, 0.0]
+        bot.azimuth = 0.0
+        bot._nav_goal = None
+        bot._nav_path = []
+        bot._next_shoot = float("inf")
+        return p
+
+    def test_arms_without_los(self, bot):
+        from bot.constants import COMBAT_STALL_WIN_MIN, COMBAT_STALL_WIN_MAX
+        self._stalled_bot(bot)
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot._stall_check_at is not None
+        assert 1000.0 + COMBAT_STALL_WIN_MIN <= bot._stall_check_at <= 1000.0 + COMBAT_STALL_WIN_MAX
+
+    def test_no_arm_with_los(self, bot):
+        self._stalled_bot(bot, wall=False)            # freie Sicht → nicht armieren
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot._stall_check_at is None
+
+    def test_no_arm_during_indirect_hold(self, bot):
+        self._stalled_bot(bot)
+        with patch.object(bot, "_update_indirect_hold", return_value=True):
+            bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot._stall_check_at is None
+
+    def test_fires_rev(self, bot):
+        self._stalled_bot(bot)
+        bot._stall_check_at = 999.0                    # Fenster bereits abgelaufen
+        bot._stall_anchor = [0.0, 0.0]                 # keine Bewegung seit Armierung
+        from bot.constants import COMBAT_STALL_REV_MIN, COMBAT_STALL_REV_MAX
+        with patch("bot.ai.combat.random.choice", return_value="REV"):
+            bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot._stall_mode == "REV"
+        assert COMBAT_STALL_REV_MIN <= bot._stall_rev_dist <= COMBAT_STALL_REV_MAX
+
+    def test_fires_path(self, bot):
+        self._stalled_bot(bot)
+        bot._stall_check_at = 999.0
+        bot._stall_anchor = [0.0, 0.0]
+        bot._plan_path = lambda *a, **kw: setattr(bot, "_nav_path", [(10.0, 10.0, 0.0)])
+        with patch("bot.ai.combat.random.choice", return_value="PATH"):
+            bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot._stall_mode == "PATH"
+
+    def test_path_fail_falls_back_to_rev(self, bot):
+        self._stalled_bot(bot)
+        bot._stall_check_at = 999.0
+        bot._stall_anchor = [0.0, 0.0]
+        bot._plan_path = lambda *a, **kw: setattr(bot, "_nav_path", [])   # Planung scheitert
+        with patch("bot.ai.combat.random.choice", return_value="PATH"):
+            bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot._stall_mode == "REV"
+
+    def test_rearms_when_moved(self, bot):
+        self._stalled_bot(bot)
+        bot._stall_check_at = 999.0
+        bot._stall_anchor = [-10.0, 0.0]               # 10u Bewegung seit Armierung
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot._stall_mode is None
+        assert bot._stall_check_at is not None and bot._stall_check_at > 1000.0
+
+    def test_rev_drives_backward_then_ends(self, bot):
+        self._stalled_bot(bot)
+        bot._stall_mode = "REV"
+        bot._stall_rev_start = [0.0, 0.0]
+        bot._stall_rev_dist = 10.0
+        bot._stall_until = 1008.0
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot.vel[0] < 0.0                        # fährt rückwärts (azimuth 0)
+        bot.pos = [-11.0, 0.0, 0.0]                    # Soll-Distanz überschritten
+        bot._execute_combat_move(0.02, bot.world_half, now=1001.0)
+        assert bot._stall_mode is None
+
+    def test_path_navigates_then_ends(self, bot):
+        self._stalled_bot(bot)
+        bot._stall_mode = "PATH"
+        bot._nav_path = [(20.0, 20.0, 0.0)]
+        bot._stall_until = 1008.0
+        nav_wp = []
+        bot._navigate_wp = lambda *a, **kw: nav_wp.append(True) or True
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert nav_wp                                  # Manöver-Pfad gefahren
+        bot._nav_path = []                             # Pfad erschöpft
+        bot._execute_combat_move(0.02, bot.world_half, now=1001.0)
+        assert bot._stall_mode is None
+
+    def test_window_is_randomized(self, bot):
+        # Spiegel-Symmetrie-Sanity: zwei frische Armierungen ziehen unabhängige Fenster im
+        # Konstanten-Bereich. Zwei reale Bots ziehen zudem unabhängige Manöver (REV-Distanz/PATH-
+        # Winkel) → identisches synchrones Wieder-Einrasten ist praktisch ausgeschlossen.
+        from bot.constants import COMBAT_STALL_WIN_MIN, COMBAT_STALL_WIN_MAX
+        self._stalled_bot(bot)
+        bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        w1 = bot._stall_check_at - 1000.0
+        bot._stall_check_at = None
+        bot._execute_combat_move(0.02, bot.world_half, now=2000.0)
+        w2 = bot._stall_check_at - 2000.0
+        assert COMBAT_STALL_WIN_MIN <= w1 <= COMBAT_STALL_WIN_MAX
+        assert COMBAT_STALL_WIN_MIN <= w2 <= COMBAT_STALL_WIN_MAX
+
+
+# ── Gegner höher + kein LoS (T2): Pfad erzwingen, sonst Watchdog fängt Fallthrough ──
+
+class TestHigherEnemyNoLos:
+    """Gegner deutlich höher (z=15) → _not_below_enemy False → kein Direktmodus, Pfadplanung.
+    Schlägt die Planung fehl (kein Pfad, Gegner aber springbar → keine Eskalation), fängt der
+    Stall-Watchdog den Fallthrough in die Direktsteuerung ab."""
+
+    def test_higher_enemy_forces_path_planning(self, bot):
+        from unittest.mock import MagicMock
+        make_player(bot, 2, pos=(60.0, 0.0, 15.0))
+        bot.pos = [0.0, 0.0, 0.0]
+        bot.target_player = 2
+        bot._nav_goal = None
+        bot._nav_path = []
+        bot._plan_path = MagicMock()
+        with patch.object(bot, "_update_indirect_hold", return_value=False):
+            bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        bot._plan_path.assert_called_once()
+
+    def test_higher_enemy_planfail_arms_watchdog(self, bot):
+        _build_nav(bot, [(30.0, 0.0, 0.0, 0.0, 0.5, 40.0, 16.0)])   # blockt LoS zum Gegner z=15
+        make_player(bot, 2, pos=(60.0, 0.0, 15.0))
+        bot.pos = [0.0, 0.0, 0.0]
+        bot.target_player = 2
+        bot._nav_goal = None
+        bot._nav_path = []
+        bot._next_shoot = float("inf")
+        bot._plan_path = lambda *a, **kw: setattr(bot, "_nav_path", [])   # Planung scheitert
+        with patch.object(bot, "_update_indirect_hold", return_value=False):
+            bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot._stall_check_at is not None
+
+
+# ── T1: dünnste HIX-Wand (1u) verdeckt LoS zuverlässig ───────────────────────
+
+class TestThinWallLos:
+    """Regression: die dünnste reale HIX-Wand (half_w=0.5 → 1u dick, Basis z=14, Höhe 16, also
+    z-Spanne [14,30]) blockt LoS exakt; Strahlen darüber/darunter bleiben frei. Die echte Wand
+    steht auf 135° — hier achsparallel für die Assertion-Geometrie, dünnster Wert unverändert."""
+
+    def test_thin_hix_wall_blocks_los(self, bot):
+        _build_nav(bot, [(0.0, 0.0, 14.0, 0.0, 0.5, 150.0, 16.0)])
+        bot.pos = [-30.0, 0.0, 15.0]                  # auf der z=15-Plattform
+        make_player(bot, 2, pos=(30.0, 0.0, 15.0))
+        eye = 15.0 + bot._tank_height * 0.5
+        assert not bot._segment_clear(-30.0, 0.0, eye, 30.0, 0.0, eye)   # dünne Wand blockt
+        assert not bot._has_los_to_enemy(2)
+
+    def test_ray_above_and_below_thin_hix_wall_clear(self, bot):
+        _build_nav(bot, [(0.0, 0.0, 14.0, 0.0, 0.5, 150.0, 16.0)])
+        bot.pos = [-30.0, 0.0, 15.0]
+        assert bot._segment_clear(-30.0, 0.0, 31.0, 30.0, 0.0, 31.0)    # über der Wand (>z=30)
+        assert bot._segment_clear(-30.0, 0.0, 13.0, 30.0, 0.0, 13.0)    # unter der Basis (<z=14)

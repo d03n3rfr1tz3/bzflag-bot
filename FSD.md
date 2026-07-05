@@ -559,6 +559,13 @@ Der Bot wird über eine Zustandsmaschine gesteuert; jeder Übergang wird protoko
   revertiert (`_is_inside_obstacle`); bei Timeout/Block folgt Cooldown + Replan.
 - Nach dem Ausweichen wird derselbe Schuss kurzzeitig nicht erneut als Auslöser gewertet (kein
   sofortiger Re-Trigger).
+- Im Kampf hält der Bot die Optimaldistanz mit einer kleinen **Deadzone**: minimale Abstandsände-
+  rungen lösen kein Vor-/Zurückfahren aus, sonst zittern zwei distanzgleiche Bots umeinander.
+- **Stall-Watchdog:** Steht der Bot im sichtlosen Direktkampf (typisch an einer dünnen Trennwand ohne
+  Sicht und ohne Abpraller-Schuss) für ein randomisiertes Zeitfenster nahezu bewegungslos, löst er
+  aktiv auf — entweder ein kurzes Rückwärtsstück (darf auch von einer Plattform führen) oder ein
+  Ausweichpfad zu einem nahen Zufallspunkt. Die Randomisierung verhindert, dass zwei Bots sich
+  spiegeln und synchron erneut festfahren.
 
 ---
 
