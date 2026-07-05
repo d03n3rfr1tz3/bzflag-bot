@@ -2230,3 +2230,36 @@ class TestCombatStallWatchdog:
         bot._execute_combat_move(0.02, bot.world_half, now=2000.0)
         w2 = bot._stall_check_at - 2000.0
         assert 10.0 <= w1 <= 15.0 and 10.0 <= w2 <= 15.0
+
+
+# ── Gegner höher + kein LoS (T2): Pfad erzwingen, sonst Watchdog fängt Fallthrough ──
+
+class TestHigherEnemyNoLos:
+    """Gegner deutlich höher (z=15) → _not_below_enemy False → kein Direktmodus, Pfadplanung.
+    Schlägt die Planung fehl (kein Pfad, Gegner aber springbar → keine Eskalation), fängt der
+    Stall-Watchdog den Fallthrough in die Direktsteuerung ab."""
+
+    def test_higher_enemy_forces_path_planning(self, bot):
+        from unittest.mock import MagicMock
+        make_player(bot, 2, pos=(60.0, 0.0, 15.0))
+        bot.pos = [0.0, 0.0, 0.0]
+        bot.target_player = 2
+        bot._nav_goal = None
+        bot._nav_path = []
+        bot._plan_path = MagicMock()
+        with patch.object(bot, "_update_indirect_hold", return_value=False):
+            bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        bot._plan_path.assert_called_once()
+
+    def test_higher_enemy_planfail_arms_watchdog(self, bot):
+        _build_nav(bot, [(30.0, 0.0, 0.0, 0.0, 0.5, 40.0, 16.0)])   # blockt LoS zum Gegner z=15
+        make_player(bot, 2, pos=(60.0, 0.0, 15.0))
+        bot.pos = [0.0, 0.0, 0.0]
+        bot.target_player = 2
+        bot._nav_goal = None
+        bot._nav_path = []
+        bot._next_shoot = float("inf")
+        bot._plan_path = lambda *a, **kw: setattr(bot, "_nav_path", [])   # Planung scheitert
+        with patch.object(bot, "_update_indirect_hold", return_value=False):
+            bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
+        assert bot._stall_check_at is not None
