@@ -115,9 +115,6 @@ python bzbot.py [Optionen]
                           Layer + Obstacle-Liste (Diagnose) und läuft normal weiter.
   --dump-raw PFAD         Schreibt die rohen Weltdaten als <PFAD>.bin + <PFAD>.meta
                           (für Karten-Test-Fixtures, siehe DEVELOPER.md).
-  --managed               Intern: aktiviert die IPC-Kopplung an bot_manager.py
-                          (Status via stdout, Kommandos via stdin); nicht für
-                          den manuellen Start gedacht.
 ```
 
 > Hinweis: Bei Rundenende (Zeit- oder Score-Limit) trennt der Bot und verbindet sich
@@ -127,15 +124,33 @@ python bzbot.py [Optionen]
 
 ```
 bzflag-bot/
+├── bot/                       – Bot-Logik als Paket
+│   ├── constants.py           – Spiel-Konstanten (+ Server-Var-Tabelle)
+│   ├── core.py                – BZBot: Game-Loop, Server-Updates, Spawn
+│   ├── handlers.py            – Message-Handler (_on_*, _on_set_var)
+│   ├── hit_detection.py       – Hit-Detection, Steamroller, Schuss-Cleanup
+│   ├── models.py              – Shot/PlayerInfo/FlagInfo/AIState
+│   ├── util.py                – Geometrie-Helfer
+│   └── ai/                    – BZBotAI als 9 Mixins
+│       ├── __init__.py        – Mixin-Zusammensetzung von BZBotAI (MRO)
+│       ├── capabilities.py    – _can_*-Gates und _effective_*-Ableitungen aus Flagge + Server-Variablen
+│       ├── combat.py          – COMBAT-Tick, Bedrohungsreaktion/Dodge, Eskalation bei unerreichbaren Gegnern
+│       ├── navigation.py      – A*-Planung (sync + async Worker), Wegpunkt-Abfahren, NAV_JUMP-Vorbereitung, Teleporter-Querung
+│       ├── perception.py      – FoV/LoS-Prädikate, Radar-Aufmerksamkeit, Sichtbarkeits-Gates, Bedrohungserkennung eingehender Schüsse
+│       ├── physics.py         – Lokale Physik-Simulation des eigenen Tanks: Integration, Boden-/Hindernis-Kollision
+│       ├── shooting.py        – Zielpunkt-/Ricochet-Berechnung, Feuer-Gates, alle _maybe_shoot_*-Zweige, _send_shot
+│       ├── states.py          – State-Machine: Zustandsübergänge, 60-Hz-Dispatch, alle _tick_*-Zustände außer COMBAT
+│       ├── tactics.py         – Sprung-Ausführung, taktischer Übersprung, Z-Höhenangriff, Rückwärtsfahrt-Entscheid
+│       └── targeting.py       – Gegner-Scoring, Ziel-Validierung/Staleness, Flaggen-Route
 ├── bzflag/
 │   ├── __init__.py            – Paket-Init
-│   ├── protocol.py            – BZFlag 2.4 Protokoll-Konstanten und Hilfsfunktionen
 │   ├── client.py              – TCP/UDP-Client mit Handshake und Message-Dispatch
-│   ├── world_parser.py        – MsgGetWorld-Parser: zlib-Dekomprimierung, Obstacle-Parsing
-│   ├── world_map.py           – Datenklassen: BoxObstacle, WorldMap, FlagInfo
+│   ├── nav_graph.py           – NavGraph: A*-Pfadsuche, Layer-Verwaltung, Sprung-/Fall-Kanten
 │   ├── obstacle_grid.py       – ObstacleGrid: Broad-Phase-Beschleunigung (Zellen-Grid, DDA-Ray)
+│   ├── protocol.py            – BZFlag 2.4 Protokoll-Konstanten und Hilfsfunktionen
 │   ├── shot_physics.py        – Schuss-Physik: simulate_shot_path (Bounce-Simulation), _segment_hits_obb_3d
-│   └── nav_graph.py           – NavGraph: A*-Pfadsuche, Layer-Verwaltung, Sprung-/Fall-Kanten
+│   ├── world_parser.py        – MsgGetWorld-Parser: zlib-Dekomprimierung, Obstacle-Parsing
+│   └── world_map.py           – Datenklassen: BoxObstacle, WorldMap, FlagInfo
 ├── tests/                     – Unit-Tests (kein Server nötig; `pytest tests/ -v`)
 │   ├── conftest.py            – Pytest-Fixtures (Bot-Mock, Karten-Fixture-Loader)
 │   ├── test_geometry.py       – Geometrie-Hilfsfunktionen und Shot-Methoden
@@ -166,18 +181,8 @@ bzflag-bot/
 │   ├── test_bot_manager.py    – Bot-Manager (Rebalancing, Observer-Zählung, Profiling)
 │   ├── test_bzbot_managed.py  – Managed-Modus (IPC-Statuszeilen, stdin-Kommandos)
 │   └── test_performance.py    – Performance-/Timing-Checks (`pytest -m perf -s`)
-├── bzbot.py                   – Einzelner Bot (direkt startbar; Entry-Point)
-├── bot/                       – Bot-Logik als Paket
-│   ├── constants.py           – Spiel-Konstanten (+ Server-Var-Tabelle)
-│   ├── models.py              – Shot/PlayerInfo/FlagInfo/AIState
-│   ├── util.py                – Geometrie-Helfer
-│   ├── core.py                – BZBot: Game-Loop, Server-Updates, Spawn
-│   ├── handlers.py            – Message-Handler (_on_*, _on_set_var)
-│   ├── hit_detection.py       – Hit-Detection, Steamroller, Schuss-Cleanup
-│   └── ai/                    – BZBotAI als 9 Mixins (states, combat, navigation,
-│                                perception, targeting, tactics, shooting, physics,
-│                                capabilities)
 ├── bot_manager.py             – Manager für mehrere Bots
+├── bzbot.py                   – Einzelner Bot (direkt startbar; Entry-Point)
 ├── config.yaml                – Konfigurationsbeispiel
 └── README.md
 ```
