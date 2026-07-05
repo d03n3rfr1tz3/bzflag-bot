@@ -170,9 +170,15 @@ class HitDetectionMixin:
                         shot.pos[0] += shot.vel[0] * dt
                         shot.pos[1] += shot.vel[1] * dt
                         shot.pos[2] += shot.vel[2] * dt
-                        hit = _segment_point_dist3d(prev_x, prev_y, prev_z,
-                                                    shot.pos[0], shot.pos[1], shot.pos[2],
-                                                    tank_cx, tank_cy, tank_cz) < eff_r
+                        # Wand-Occlusion (Sicherheitsnetz): die lokale GM-Integration kennt keine
+                        # Wände. Steckt eine solide Wand zwischen Rakete und Tank, zählt kein
+                        # Treffer (rundet die Rakete die Wand später, greift er dann). Ohne NavGraph
+                        # liefert _segment_clear True → Verhalten wie bisher.
+                        hit = (_segment_point_dist3d(prev_x, prev_y, prev_z,
+                                                     shot.pos[0], shot.pos[1], shot.pos[2],
+                                                     tank_cx, tank_cy, tank_cz) < eff_r
+                               and self._segment_clear(shot.pos[0], shot.pos[1], shot.pos[2],
+                                                       tank_cx, tank_cy, tank_cz))
                     else:
                         prev_t = max(shot.fire_time, win_start)
                         _half_len, _half_w, _half_h = self._hitbox_half_dims()

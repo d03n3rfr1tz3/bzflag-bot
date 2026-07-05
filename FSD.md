@@ -559,6 +559,12 @@ Der Bot wird über eine Zustandsmaschine gesteuert; jeder Übergang wird protoko
   revertiert (`_is_inside_obstacle`); bei Timeout/Block folgt Cooldown + Replan.
 - Nach dem Ausweichen wird derselbe Schuss kurzzeitig nicht erneut als Auslöser gewertet (kein
   sofortiger Re-Trigger).
+- **Der Tank wird als orientierte Box behandelt** (nicht als Punkt/Kreis): er ragt mit seiner
+  langen Achse nicht durch dünne oder gedrehte Wände. Ein Bot, der frontal an einer dünnen Wand
+  steht, steckt also nicht mit der Nase auf der Gegenseite — und wird dort folglich auch nicht
+  beschossen.
+- **Treffer nur mit freier Schuss-Sicht:** ein anfliegender Schuss trifft nur, wenn keine solide
+  Wand zwischen Schuss und Tank liegt — auch gelenkte Raketen (GM) treffen nicht durch Wände.
 - Im Kampf hält der Bot die Optimaldistanz mit einer kleinen **Deadzone**: minimale Abstandsände-
   rungen lösen kein Vor-/Zurückfahren aus, sonst zittern zwei distanzgleiche Bots umeinander.
 - **Stall-Watchdog:** Steht der Bot im sichtlosen Direktkampf (typisch an einer dünnen Trennwand ohne

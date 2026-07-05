@@ -781,6 +781,21 @@ Gebäudes wird genutzt um die Normalrichtung der nächsten Wand zu berechnen. Nu
 Geschwindigkeitsanteil senkrecht zur Wand wird genullt — der Anteil parallel zur Wand
 bleibt erhalten. Das ermöglicht das "Entlangfahren" an Wänden.
 
+**Einheitliches OBB-Form-Modell (Tank als orientierte Box).** Der Überlapp-Gate von Wand-
+und Decken-Kollision UND `_is_inside_obstacle` nutzen dieselbe Primitive
+`rect_rect_overlap` (`bzflag/intersect.py`, Port von bzfs `testRectRect`/`testOrigRectRect`).
+**Warum:** der Tank ist mit `TANK_LENGTH=6.0` deutlich **länger** als dünne Wände dick sind
+(z.B. HIX-Trennwand 1u). Der frühere Kreis-Test (Radius = Halb-*Breite* 1,4u) ließ die lange
+Tank-Achse durch dünne, oft gedrehte (135°) Wände **ragen** — Folge: der Tank wurde durch die
+Wand beschossen und schien „durch die Wand zu zielen". Der OBB-Gate hält die ganze orientierte
+Box draußen (senkrecht an eine dünne Wand → Zentrum bleibt ~Halb-Länge 3,0 + Wand-Halb-Breite
+draußen). Die **Glide-Achsen-Wahl** bleibt bewusst isotrop (Trennachse aus der Obstacle-Geometrie,
+nicht aus der Tank-Orientierung) — nur der *Gate* wurde OBB, damit lange Tanks nicht an kleinen
+Hindernissen (z.B. Teleporter-Posts) in die falsche Achse gleiten. Maße: Kollision/Innen nutzen
+den **physischen** Tank (`_tank_length/2`, `_effective_half_width()`), die Treffer-Hitbox
+(`_segment_hits_obb_3d`, `_hitbox_half_dims`) zusätzlich `+_shot_radius` — bewusst, keine
+Inkonsistenz. **Pfadplanung** (NavGraph-Clearance) bleibt bewusst grob und nutzt das OBB NICHT.
+
 ### `_can_drive_through_obstacles()` — wann Kollision deaktiviert ist
 
 ```python
@@ -791,16 +806,21 @@ def _can_drive_through_obstacles(self) -> bool:
 Mit OO-Flag fährt der Bot durch Gebäude. `_apply_obstacle_bounds` wird dann nicht
 aufgerufen. Das ist also die Ausnahme, nicht die Regel.
 
-Zusätzlich gibt es `_is_inside_obstacle()`: Prüft die echte Gebäudegeometrie (nicht
-den A*-Margin). Wird für Debug-Logging genutzt. Gibt `False` zurück wenn OO aktiv.
+Zusätzlich gibt es `_is_inside_obstacle()`: Prüft per OBB-Overlap (`rect_rect_overlap`,
+einheitliches Form-Modell), ob **irgendein Teil** der Tank-Box in einem Gebäude steckt (nicht
+mehr nur das Zentrum). Nutzer: Teleport-Exit-Revert (`_check_teleport_crossing`), OO-Dodge-Gate,
+Debug-Logging. Mit der OBB-Wandkollision ist das im Normalbetrieb nie wahr (Berühren zählt strikt
+nicht) → nur nach Teleport/Spawn/Durchdringung. Gibt `False` zurück wenn OO aktiv (ohne `include_oo`).
 
 ### Wichtige Größen
 
 | Variable | Wert | Bedeutung |
 |----------|------|-----------|
 | `TANK_HEIGHT` | 2.05u | Tankhöhe für Decken-Check |
-| `TANK_WIDTH` | 2.8u | Tankbreite für Wall-Sliding |
+| `TANK_WIDTH` | 2.8u | Tankbreite (Halb-Breite = OBB-Querachse) |
+| `TANK_LENGTH` | 6.0u | Tanklänge (Halb-Länge = OBB-Längsachse, verhindert Nase-durch-dünne-Wand) |
 | `_effective_half_width()` | Normal=1.4u, T=0.56u, N=0.3u | Flag-abhängige Kollisionsbreite |
+| `GRID_PAD` | `0.5 + hypot(HL,HW) + 0.01` ≈ 3,82u | Broad-Phase-Polster ≥ Tank-Eck-Radius, sonst verpasst die Grid-Query eine Wand, die die Tank-Nase erreicht |
 
 ### Broad-Phase-Grids (ObstacleGrid)
 
@@ -917,6 +937,12 @@ die tatsächliche Tank-Form besser ab: lang (3.5u), schmal (1.0u), normalhohe (1
 - Richtung wird bei `MsgGMUpdate` aktualisiert — KEIN periodisches Update in der Simulation
 - Zwischen zwei MsgGMUpdate-Paketen fährt das GM geradeaus; wenn Update-Pakete fehlen,
   kennt der Bot das neue Ziel nicht
+- **Wand-Occlusion (Sicherheitsnetz):** die per-Tick-Homing-Simulation hat KEINEN Segment-
+  Cache (der wäre für eine gelenkte Rakete falsch) und kennt daher keine Wände. Der Treffer-
+  Check zählt deshalb nur, wenn `_segment_clear(Rakete → Tank)` frei ist — sonst würde die
+  Rakete durch eine solide Wand „treffen" (im Rennfenster, bevor der Server das Schussende
+  meldet). Rundet die Rakete die Wand später, greift der Treffer korrekt. Ohne NavGraph liefert
+  `_segment_clear` `True` → unverändertes Verhalten.
 
 **Laser (L):**
 - **Instant** (bewusste Vereinfachung, kein Bug → BUGS/FSD P3-SHT-06): Sofort-Check bei
