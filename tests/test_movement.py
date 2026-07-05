@@ -2315,3 +2315,18 @@ class TestThinWallLos:
         bot.pos = [-30.0, 0.0, 15.0]
         assert bot._segment_clear(-30.0, 0.0, 31.0, 30.0, 0.0, 31.0)    # über der Wand (>z=30)
         assert bot._segment_clear(-30.0, 0.0, 13.0, 30.0, 0.0, 13.0)    # unter der Basis (<z=14)
+
+    def test_rotated_135_wall_blocks_los(self, bot):
+        """Die ECHTE Wand steht auf 135° — LoS quer über die Normale bleibt geblockt (der Slab-Test
+        ist rotationskorrekt), Strahlen darüber sind frei."""
+        ang = math.radians(135)
+        _build_nav(bot, [(0.0, 0.0, 14.0, ang, 0.5, 150.0, 16.0)])
+        perp = (math.cos(ang), math.sin(ang))          # Wand-Normale
+        bx, by = perp[0] * 30.0, perp[1] * 30.0
+        ex, ey = -perp[0] * 30.0, -perp[1] * 30.0
+        bot.pos = [bx, by, 15.0]
+        make_player(bot, 2, pos=(ex, ey, 15.0))
+        eye = 15.0 + bot._tank_height * 0.5
+        assert not bot._segment_clear(bx, by, eye, ex, ey, eye)         # 135°-Wand blockt
+        assert not bot._has_los_to_enemy(2)
+        assert bot._segment_clear(bx, by, 31.0, ex, ey, 31.0)          # über der Wand frei
