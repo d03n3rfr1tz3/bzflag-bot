@@ -16,6 +16,14 @@ from typing import Optional, List, Tuple, TYPE_CHECKING
 from collections import namedtuple
 
 from .world_map import BoxObstacle, TeleporterObstacle
+# Generische Geometrie-Primitive liegen jetzt in intersect.py (Port bzfs Intersect.cxx).
+# Re-Export-Shim: bestehende `from bzflag.shot_physics import …`-Pfade bleiben gültig.
+from .intersect import (  # noqa: F401
+    _normal_orig_rect, _normal_rect_2d,
+    ray_box_hit, _ray_orig_box_hit,
+    _segment_hits_obb_3d, _extend_segment,
+    rect_rect_overlap,
+)
 
 if TYPE_CHECKING:   # nur Typ-Annotation (obs_grid) — kein Laufzeit-Import nötig
     from .obstacle_grid import ObstacleGrid
@@ -149,60 +157,9 @@ def teleport_through(px: float, py: float, pz: float,
 # Interne Normalenberechnung (Port von getNormalOrigRect + getNormalRect)
 # ---------------------------------------------------------------------------
 
-def _normal_orig_rect(px: float, py: float, dx: float, dy: float) -> float:
-    """
-    Port von getNormalOrigRect(). Winkel (Radiant) der nächsten Wand eines
-    achsenparallelen Rechtecks [-dx,dx]×[-dy,dy] relativ zum Punkt (px,py).
-    """
-    if px > dx:           # east of box
-        if py > dy:
-            return math.atan2(py - dy, px - dx)   # ne corner
-        elif py < -dy:
-            return math.atan2(py + dy, px - dx)   # se corner
-        else:
-            return 0.0                              # east side
-    if px < -dx:          # west of box
-        if py > dy:
-            return math.atan2(py - dy, px + dx)   # nw corner
-        elif py < -dy:
-            return math.atan2(py + dy, px + dx)   # sw corner
-        else:
-            return math.pi                          # west side
-    if py > dy:
-        return 0.5 * math.pi                        # north of box
-    if py < -dy:
-        return 1.5 * math.pi                        # south of box
-
-    # inside box — find closest wall
-    if px > 0.0:
-        if py > 0.0:
-            return 0.0 if dy * px > dx * py else 0.5 * math.pi
-        else:
-            return 0.0 if dy * px > -dx * py else 1.5 * math.pi
-    else:
-        if py > 0.0:
-            return math.pi if dy * px < -dx * py else 0.5 * math.pi
-        else:
-            return math.pi if dy * px < dx * py else 1.5 * math.pi
-
-
-def _normal_rect_2d(px: float, py: float,
-                    cx: float, cy: float, angle: float,
-                    dx: float, dy: float) -> Tuple[float, float]:
-    """
-    Port von getNormalRect(). Gibt (nx, ny) der nächsten Obstacle-Wand
-    in Weltkoordinaten zurück (Z-Komponente = 0).
-    """
-    c = math.cos(-angle)
-    s = math.sin(-angle)
-    lx = c * (px - cx) - s * (py - cy)
-    ly = c * (py - cy) + s * (px - cx)
-    norm_angle = _normal_orig_rect(lx, ly, dx, dy) + angle
-    return math.cos(norm_angle), math.sin(norm_angle)
-
-
 # ---------------------------------------------------------------------------
 # Normalenberechnung für Box und Pyramide
+# (_normal_orig_rect / _normal_rect_2d → bzflag/intersect.py, oben re-exportiert)
 # ---------------------------------------------------------------------------
 
 def get_box_normal(px: float, py: float, pz: float,
@@ -278,134 +235,9 @@ def get_pyramid_normal(px: float, py: float, pz: float,
 
 
 # ---------------------------------------------------------------------------
-# Ray-Box-Intersection (Port von timeRayHitsOrigBox + timeRayHitsBlock)
+# Ray-Box-Intersection: ray_box_hit / _ray_orig_box_hit → bzflag/intersect.py
+# (oben re-exportiert; simulate_shot_path nutzt sie über den Shim-Import)
 # ---------------------------------------------------------------------------
-
-def ray_box_hit(ox: float, oy: float, oz: float,
-                dx: float, dy: float, dz: float,
-                box: BoxObstacle) -> Optional[Tuple[float, float, float, float]]:
-    """
-    Port von timeRayHitsBlock() inkl. Flächennormale.
-    Transformiert Ray in Box-Lokalkoordinaten, ruft AABB-Slab-Test auf.
-
-    Gibt (t, nx, ny, nz) zurück (Normale in Weltkoordinaten), oder None.
-    """
-    angle = box.angle
-    c = math.cos(-angle)
-    s = math.sin(-angle)
-
-    # Translate + rotate to local
-    tx = ox - box.cx
-    ty = oy - box.cy
-    lox = c * tx - s * ty
-    loy = c * ty + s * tx
-    loz = oz - box.bottom_z
-    ldx = c * dx - s * dy
-    ldy = c * dy + s * dx
-    ldz = dz
-
-    result = _ray_orig_box_hit(lox, loy, loz, ldx, ldy, ldz,
-                                box.half_w, box.half_d, box.height)
-    if result is None:
-        return None
-
-    t, nlx, nly, nlz = result
-
-    # Rotate normal back to world (Z-Komponente bleibt unverändert)
-    cf = math.cos(angle)
-    sf = math.sin(angle)
-    nx_w = cf * nlx - sf * nly
-    ny_w = cf * nly + sf * nlx
-    return t, nx_w, ny_w, nlz
-
-
-def _ray_orig_box_hit(px: float, py: float, pz: float,
-                       vx: float, vy: float, vz: float,
-                       dx: float, dy: float,
-                       dz: float) -> Optional[Tuple[float, float, float, float]]:
-    """
-    Port von timeRayHitsOrigBox(). Box: x=[-dx,dx], y=[-dy,dy], z=[0,dz].
-    Gibt (t, face_nx, face_ny, face_nz) in Lokalkoordinaten zurück, oder None.
-    """
-    if abs(px) <= dx and abs(py) <= dy and 0.0 <= pz <= dz:
-        return None  # innerhalb der Box — kein gültiger Treffer
-
-    tx = ty = tz = -1.0
-
-    if px > dx:           # east
-        if vx >= 0.0: return None
-        tx = (dx - px) / vx
-    elif px < -dx:        # west
-        if vx <= 0.0: return None
-        tx = -(dx + px) / vx
-
-    if py > dy:           # north
-        if vy >= 0.0: return None
-        ty = (dy - py) / vy
-    elif py < -dy:        # south
-        if vy <= 0.0: return None
-        ty = -(dy + py) / vy
-
-    if pz > dz:           # above
-        if vz >= 0.0: return None
-        tz = (dz - pz) / vz
-    elif pz < 0.0:        # below
-        if vz <= 0.0: return None
-        tz = -pz / vz
-
-    # Kandidaten validieren: liegt Auftreffpunkt innerhalb der Box-Grenzen?
-    if tx >= 0.0:
-        hy = py + tx * vy
-        hz = pz + tx * vz
-        if abs(hy) > dy or hz < 0.0 or hz > dz:
-            tx = -1.0
-    if ty >= 0.0:
-        hx = px + ty * vx
-        hz = pz + ty * vz
-        if abs(hx) > dx or hz < 0.0 or hz > dz:
-            ty = -1.0
-    if tz >= 0.0:
-        hx = px + tz * vx
-        hy = py + tz * vy
-        if abs(hx) > dx or abs(hy) > dy:
-            tz = -1.0
-
-    if tx < 0.0 and ty < 0.0 and tz < 0.0:
-        return None
-
-    # Minimales t auswählen (Port der if-Kaskade aus timeRayHitsOrigBox)
-    if tx < 0.0:
-        if ty < 0.0:
-            t, face = tz, 2
-        elif tz < 0.0 or ty < tz:
-            t, face = ty, 1
-        else:
-            t, face = tz, 2
-    elif ty < 0.0:
-        if tz < 0.0 or tx < tz:
-            t, face = tx, 0
-        else:
-            t, face = tz, 2
-    elif tz < 0.0:
-        t, face = (tx, 0) if tx < ty else (ty, 1)
-    else:
-        if tx < ty and tx < tz:
-            t, face = tx, 0
-        elif ty < tz:
-            t, face = ty, 1
-        else:
-            t, face = tz, 2
-
-    if t < 0.0:
-        return None
-
-    # Normale aus getroffener Fläche + Angriffsseite
-    if face == 0:
-        return t, (1.0 if px > 0.0 else -1.0), 0.0, 0.0
-    elif face == 1:
-        return t, 0.0, (1.0 if py > 0.0 else -1.0), 0.0
-    else:
-        return t, 0.0, 0.0, (1.0 if pz > dz else -1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -583,48 +415,7 @@ def _world_boundary_hits(ox: float, oy: float, oz: float,
 # Geometrie-Hilfsfunktionen
 # ---------------------------------------------------------------------------
 
-def _segment_hits_obb_3d(ax: float, ay: float, az: float,
-                          bx: float, by: float, bz: float,
-                          cx: float, cy: float, cz: float, angle: float,
-                          half_len: float, half_w: float, half_h: float) -> bool:
-    """Parametrische Slab-Methode: Segment [A,B] gegen OBB (Mittelpunkt cx,cy,cz, Winkel angle)."""
-    cos_a = math.cos(-angle); sin_a = math.sin(-angle)
-    def to_local(x: float, y: float, z: float):
-        dx, dy = x - cx, y - cy
-        return (dx*cos_a - dy*sin_a, dx*sin_a + dy*cos_a, z - cz)
-    alx, aly, alz = to_local(ax, ay, az)
-    blx, bly, blz = to_local(bx, by, bz)
-    t_min, t_max = 0.0, 1.0
-    for a_c, b_c, half in ((alx, blx, half_len),
-                            (aly, bly, half_w),
-                            (alz, blz, half_h)):
-        d = b_c - a_c
-        if abs(d) < 1e-9:
-            if abs(a_c) > half:
-                return False
-        else:
-            t1 = (-half - a_c) / d;  t2 = (half - a_c) / d
-            if t1 > t2: t1, t2 = t2, t1
-            t_min = max(t_min, t1);  t_max = min(t_max, t2)
-            if t_min > t_max:
-                return False
-    return True
-
-
-def _extend_segment(ax: float, ay: float, az: float,
-                    bx: float, by: float, bz: float,
-                    extra: float) -> Tuple[float, float, float,
-                                           float, float, float]:
-    """Verlängert das Segment [A,B] an beiden Enden um `extra` entlang seiner
-    eigenen Richtung (SB-Längskapsel: der Bolt ragt vor und hinter das
-    Schusszentrum, seitlich bleibt die Reichweite unverändert)."""
-    dx, dy, dz = bx - ax, by - ay, bz - az
-    length = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if length < 1.0e-9:
-        return ax, ay, az, bx, by, bz
-    f = extra / length
-    ex, ey, ez = dx * f, dy * f, dz * f
-    return ax - ex, ay - ey, az - ez, bx + ex, by + ey, bz + ez
+# _segment_hits_obb_3d / _extend_segment → bzflag/intersect.py (oben re-exportiert).
 
 
 # ---------------------------------------------------------------------------
