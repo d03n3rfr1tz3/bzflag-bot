@@ -974,7 +974,7 @@ class TestRouteDiscardClearsTarget:
 
     def test_execute_combat_move_clears_target_pos(self, bot):
         """_execute_combat_move: Route-Discard setzt target_pos auf None.
-        Gegner auf z=15 → _check1 (bot_z+TANK_HEIGHT > enemy_z) False → WPs aktiv."""
+        Gegner auf z=15 → _not_below_enemy (bot_z+TANK_HEIGHT > enemy_z) False → WPs aktiv."""
         import time
         from conftest import make_player
         p = make_player(bot, 7, pos=(100.0, 0.0, 15.0))  # elevated → _skip_nav=False
@@ -1000,7 +1000,7 @@ class TestDirectModeNoPlanning:
         _nav_path invalidiert. (replan_xy würde sonst wegen _nav_goal=None planen.)"""
         from unittest.mock import MagicMock
         from bot.models import AIState
-        p = make_player(bot, 7, pos=(40.0, 0.0, 0.0))  # gleiche Z → _check1 True
+        p = make_player(bot, 7, pos=(40.0, 0.0, 0.0))  # gleiche Z → _not_below_enemy True
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 7
         bot.pos = [0.0, 0.0, 0.0]

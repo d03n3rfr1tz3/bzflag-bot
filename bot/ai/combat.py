@@ -193,13 +193,14 @@ class CombatMixin:
         # F5: Server-Basiswert (_shotRange) statt Konstante; ohne Flaggen-Multiplikatoren,
         # sonst würde z.B. Laser den Direktmodus kartenweit aktivieren (nie mehr A*-Nav).
         _dist_thresh = self._shot_range if _los_clear else _opt * 1.1
-        _check1      = self.pos[2] + self._tank_height > _enemy_z
+        # Gegner nicht deutlich höher als der Bot (Bot-Oberkante über Gegner-Fußpunkt)?
+        _not_below_enemy = self.pos[2] + self._tank_height > _enemy_z
         # C: Bot unter erhöhtem Gegner mit verfügbarem Indirekt-Schuss → stehen & aufs Tor zielen
         # statt hochzuklettern, zeitlich gedeckelt (kein ewiges Festkleben). sobald die
         # Navigation durch Tore routet, wird genau diese Bedingung zur traverse-vs-shoot-Entscheidung.
         _hold_indirect = self._update_indirect_hold(
-            now, (not _check1) and self._indirect_shot_available(self.target_player))
-        _skip_nav    = (_check1 and dist < _dist_thresh) or _hold_indirect
+            now, (not _not_below_enemy) and self._indirect_shot_available(self.target_player))
+        _skip_nav    = (_not_below_enemy and dist < _dist_thresh) or _hold_indirect
         # Proaktive Wand-Vorausschau: würde der Direktmodus den Bot ohne Sicht steil in eine Wand
         # fahren (z.B. dünne Trennwand auf einer Plattform), nicht stur rammen, sondern A* um die
         # Wand routen lassen. Nur den Nahkampf-Direktmodus aufbrechen, nicht den Indirekt-Halt.
