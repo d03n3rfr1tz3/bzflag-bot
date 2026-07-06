@@ -25,6 +25,10 @@ class CapabilityMixin:
         else:                       scale = 1.0
         return TANK_RADIUS * scale * 0.99
 
+    def _effective_tank_radius(self) -> float:
+        """Aktueller Tank-Radius aus der nachgeführten Server-Variable (_tankRadius = 0.72 * _tankLength)."""
+        return TANK_RADIUS_FACTOR * self._tank_length
+
     def _effective_optimal_range(self) -> float:
         """Optimale Kampfdistanz je nach eigener Flagge UND Gegner-Flagge.
         Eingegrabener BU-Gegner ist immun gegen normale Schüsse (nur GM/SW treffen) und von
@@ -34,15 +38,15 @@ class CapabilityMixin:
         tgt = self.players.get(self.target_player) if self.target_player is not None else None
         if (tgt is not None and tgt.flag == "BU" and tgt.pos[2] < 0.0
                 and self.own_flag not in ("GM", "SW")):
-            return TANK_RADIUS * self._sr_radius_mult   # eingegrabener Gegner (z<0): Ramm-Kontaktdistanz
+            return self._effective_tank_radius() / 2 * self._sr_radius_mult   # eingegrabener Gegner (z<0): Ramm-Kontaktdistanz
         if self.own_flag == "MG":
-            return 25.0   # MG-Schüsse laufen nach ~87u ab; aggressiver Nahkampf nötig
+            return OPTIMAL_RANGE_MG
         if self.own_flag == "SW":
-            return 20.0   # SW-Killzone beginnt bei 6u; nahe heranfahren, dann zünden
+            return OPTIMAL_RANGE_SW
         if self.own_flag == "SR":
-            return TANK_RADIUS / 2 * self._sr_radius_mult  # Kontaktdistanz für Ramm-Kill
+            return self._effective_tank_radius() / 2 * self._sr_radius_mult  # Kontaktdistanz für Ramm-Kill
         if self.own_flag == "GM":
-            return 85.0
+            return OPTIMAL_RANGE_GM
         return OPTIMAL_RANGE
 
     def _can_shoot(self) -> bool:

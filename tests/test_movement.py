@@ -245,19 +245,19 @@ class TestRamBurrowedEnemy:
         assert bot.vel[0] > 0.0
 
     def test_no_ram_when_gm_can_hit_burrowed(self, bot):
-        """GM trifft den Eingegrabenen aus der Distanz → kein Rammen, Optimaldistanz bleibt 85u."""
+        """GM trifft den Eingegrabenen aus der Distanz → kein Rammen, Optimaldistanz bleibt 100u."""
+        from bot.constants import OPTIMAL_RANGE_GM
         bot.own_flag = "GM"
         make_player(bot, 99, pos=(40.0, 0.0, -1.32), flag="BU")
         bot.target_player = 99
-        assert bot._effective_optimal_range() == 85.0
+        assert bot._effective_optimal_range() == OPTIMAL_RANGE_GM
 
     def test_optimal_range_ram_for_burrowed_target(self, bot):
-        """Bot ohne (GM/SW-)Flagge, Ziel mit BU → Ramm-Kontaktdistanz TANK_RADIUS*SR_RADIUS_MULT."""
-        from bot.constants import TANK_RADIUS, SR_RADIUS_MULT
+        """Bot ohne (GM/SW-)Flagge, Ziel mit BU → Ramm-Kontaktdistanz _effective_tank_radius()/2*_sr_radius_mult."""
         bot.own_flag = ""
         make_player(bot, 99, pos=(40.0, 0.0, -1.32), flag="BU")
         bot.target_player = 99
-        assert bot._effective_optimal_range() == TANK_RADIUS * SR_RADIUS_MULT
+        assert bot._effective_optimal_range() == bot._effective_tank_radius() / 2 * bot._sr_radius_mult
 
     def test_no_ram_for_bu_target_on_building(self, bot):
         """BU-Gegner auf einem Dach (z>0) ist NICHT eingegraben → normal trefbar → OPTIMAL_RANGE,

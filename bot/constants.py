@@ -19,7 +19,8 @@ from bzflag.nav_graph import CELL_SIZE as NAV_CELL_SIZE
 TANK_LENGTH         = 6.0                  # ↔ _tankLength ↔ self._tank_length
 TANK_WIDTH          = 2.8                  # ↔ _tankWidth ↔ self._tank_width
 TANK_HEIGHT         = 2.05                 # ↔ _tankHeight ↔ self._tank_height
-TANK_RADIUS         = 0.72 * TANK_LENGTH   # 4.32 (_tankRadius; nicht nachgeführt —
+TANK_RADIUS_FACTOR  = 0.72                 # _tankRadius = 0.72 * _tankLength (global.cxx)
+TANK_RADIUS         = TANK_RADIUS_FACTOR * TANK_LENGTH   # 4.32 (_tankRadius; nicht nachgeführt —
                                            # an TANK_RADIUS hängen Modulkonstanten wie
                                            # HIT_RADIUS/DODGE_DIST/MUZZLE_FRONT und der
                                            # NavGrid-Pad, s. F7-Entscheidung im FABLE-PLAN)
@@ -164,6 +165,9 @@ UNREACH_REPOS_TIMEOUT = 8.0    # s, Sicherheits-Timeout fürs Abfahren der Repos
 
 # ── Kampf, Ausweichen & Schießen ─────────────────────────────────────────
 OPTIMAL_RANGE  = 60.0
+OPTIMAL_RANGE_MG  = 25.0   # MG-Schüsse laufen nach ~87u ab; aggressiver Nahkampf nötig
+OPTIMAL_RANGE_SW  = 20.0   # SW-Killzone beginnt bei 6u; nahe heranfahren, dann zünden
+OPTIMAL_RANGE_GM  = 100.0  # GM-Schüsse fliegen erst kurz geradeaus, bevor die Zielsuche beginnt. Abstand halten!
 
 # COMBAT-Optimaldistanz-Deadzone (Controller-Deadzone-Analogie): innerhalb ±dieser Spanne um die
 # Optimaldistanz NICHT vor/zurück regeln, sonst zittern zwei exakt distanzgleiche Bots umeinander.
