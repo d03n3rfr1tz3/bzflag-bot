@@ -918,6 +918,11 @@ class HandlersMixin:
 
     def _on_disconnect(self, code: int, payload: bytes) -> None:
         """Stoppt Spielschleife bei Verbindungsverlust."""
+        # Nur als unerwarteten Verlust markieren, wenn nicht ohnehin ein bewusster Stop
+        # läuft (stop() setzt _running vorher auf False). Steuert den Exit-Code für den
+        # Manager (BOT_EXIT_CONN_LOST statt generischem Absturz).
+        if self._running:
+            self._connection_lost = True
         logger.warning("[%s] Verbindung verloren", self.callsign)
         self._running = False; self._stop_event.set()
 
@@ -938,6 +943,12 @@ class HandlersMixin:
                             self.callsign, self.own_flag)
             logger.info("[%s] %s: noch %d Schüsse verbleibend",
                         self.callsign, self.own_flag, self._shots_remaining)
+            return
+        # Jede andere Server-Nachricht (Kick-/Bann-/Lag-/Flood-Grund, Admin-Text) sichtbar
+        # machen: bzfs schickt den Grund als MsgMessage von ServerPlayer *vor* removePlayer.
+        # Ohne dieses Log ginge genau die Diagnose eines Verbindungsverlusts verloren.
+        if text:
+            logger.warning("[%s] Server-Nachricht: %s", self.callsign, text)
 
     def _ignored(self, code: int, payload: bytes) -> None:
         """Leerer Handler für bekannte, nicht ausgewertete Message-Typen."""

@@ -145,7 +145,14 @@ class StateMachineMixin:
             elif self._ai_state not in (AIState.JUMP_WINDUP, AIState.EVADING,
                                         AIState.JUMPING, AIState.DODGE_JUMP,
                                         AIState.LANDING_SHOT, AIState.NAV_JUMP_ALIGN):
-                self._move_to_target(dt, half)
+                if self._ai_state == AIState.IDLE and self.target_pos is None:
+                    # IDLE geparkt: _move_to_target würde bei target_pos=None früh
+                    # zurückkehren und Rest-Geschwindigkeit stehen lassen → explizit stoppen.
+                    self.vel[0]  = 0.0
+                    self.vel[1]  = 0.0
+                    self.ang_vel = 0.0
+                else:
+                    self._move_to_target(dt, half)
 
     def _tick_jumping(self, dt: float, now: float) -> None:
         """Sprungphysik (BZFlag: in der Luft keine Steuerung). LocalPlayer.cxx Z. 364-368."""
@@ -535,24 +542,16 @@ class StateMachineMixin:
                     return
 
     def _tick_idle(self, now: float) -> None:
-        """IDLE: Passiv-Wegpunkte + Übergang zu SEEKING wenn Menschen da.
-        Bedrohungen werden auch im Passiv-Modus erkannt (Schuss kann jederzeit kommen)."""
+        """IDLE: Passiv-Stillstand + Übergang zu SEEKING wenn Menschen/Zuschauer da.
+        Kein Wandern mehr — ein evtl. Rest-Pfad (nach SEEKING→IDLE) wird zu Ende
+        gefahren, danach bleibt der Bot stehen (CPU sparen). Bedrohungen werden auch
+        im Passiv-Modus erkannt (Schuss kann jederzeit kommen)."""
         if self._handle_threat(now):
             return
         if self._has_presence():
             self._transition_to(AIState.SEEKING)
             return  # _tick_seeking übernimmt Navigation im nächsten Tick
-        # Passiv-Modus: Stuck-Erkennung und Wegpunkte
-        if now - self._last_pos_check_time >= STUCK_WINDOW:
-            d = math.hypot(self.pos[0] - self._last_pos_check[0],
-                           self.pos[1] - self._last_pos_check[1])
-            if d < STUCK_MIN_DIST and self.target_pos is not None:
-                self._new_target()
-            self._last_pos_check_time = now
-            self._last_pos_check = [self.pos[0], self.pos[1]]
         self._move_reverse = False
-        if self.target_pos is None:
-            self._new_target()
 
     def _tick_seeking(self, now: float) -> None:
         """SEEKING: Ziel suchen, Bedrohungen prüfen, zu COMBAT/IDLE wechseln."""

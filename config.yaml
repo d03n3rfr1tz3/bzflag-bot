@@ -5,10 +5,14 @@
 host: "localhost"        # Hostname oder IP des BZFlag-Servers
 port: 5154               # Standard-Port für BZFlag
 
-# ── Bot-Anzahl ────────────────────────────────────────────────────────────
-max_bots: 3              # Maximale Anzahl gleichzeitiger Bots
-min_bots: 1              # Mindestanzahl (wird niemals unterschritten,
-                         # auch wenn echte Spieler online sind)
+# ── Bot-Anzahl (Präsenz-Modell) ───────────────────────────────────────────
+# Ohne echte Präsenz (weder Spieler noch Zuschauer) laufen nur min_bots – und die
+# IDLE-Bots bleiben stehen (keine Fahrten, spart CPU). Sobald ein echter Spieler
+# ODER Zuschauer verbunden ist, wird auf  min_bots + max_bots − aktive_Spieler
+# skaliert (nur spielende Menschen zählen ab; ein einzelner Zuschauer ⇒ volle
+# Arena min_bots+max_bots).
+max_bots: 3              # Größe des aktiven Bot-Pools bei Präsenz
+min_bots: 1              # Grundstock (wird nie unterschritten)
 
 # ── Bot-Identität ─────────────────────────────────────────────────────────
 # Prefix, den JEDER Bot erhält – dient zugleich der zuverlässigen Bot-Erkennung
@@ -29,12 +33,14 @@ motto: ""                # Motto-Text (kann leer bleiben)
 token: ""                # BZFlag-Auth-Token (leer = nicht registriert)
 
 # ── Welt ──────────────────────────────────────────────────────────────────
-world_half: 400.0        # Halbe Weltgröße in Einheiten (Standard: 800x800)
+world_half: 400.0        # Halbe Weltgröße in Einheiten (Standard: 800×800)
                          # Der Manager versucht, diese aus dem Server zu lesen.
 
 # ── Verhalten ─────────────────────────────────────────────────────────────
 check_interval: 5.0      # Sekunden zwischen Rebalance-Prüfungen
 reconnect_delay: 10.0    # Sekunden vor Observer-Reconnect nach Verbindungsabbruch
+idle_cleanup_delay: 300.0 # Sekunden ohne echte Präsenz, bis auf min_bots abgeräumt
+                         # wird (bis dahin bleibt das aktuelle Niveau erhalten; 0 = sofort)
 
 # ── Flag-Strategie ────────────────────────────────────────────────────────
 # Gute Flags: behalten und beim Schießen nutzen (Standard: GM SW L SB MG V TR SE ID)

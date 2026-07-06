@@ -285,6 +285,21 @@ class TestLogOutputRejectVisible:
         assert bp.last_rc == BOT_EXIT_REJECTED
         assert seen == [BOT_EXIT_REJECTED]
 
+    def test_conn_lost_exit_is_not_crash_but_shows_tail(self, caplog):
+        """Exit-Code BOT_EXIT_CONN_LOST ⇒ kein Absturz, aber der Grund (Tail) bleibt sichtbar."""
+        import logging
+        from bzflag.protocol import BOT_EXIT_CONN_LOST
+        records = self._run(caplog, [
+            "12:00:00 [bzbot] WARNING: [Bot] Server-Nachricht: You were kicked\n",
+            "12:00:00 [bzbot] WARNING: [Bot] Verbindung verloren nach 59s\n",
+        ], returncode=BOT_EXIT_CONN_LOST)
+        # Nicht als "unerwartet beendet" (=Absturz) markiert …
+        assert not any("unerwartet beendet" in r.getMessage() for r in records)
+        # … aber ein Verbindungsverlust-Hinweis inkl. Tail (Kick-Grund) ist da.
+        dump = [r for r in records
+                if "Verbindung verloren" in r.getMessage() and "You were kicked" in r.getMessage()]
+        assert len(dump) == 1
+
 
 # ---------------------------------------------------------------------------
 # IPC: Bot→Manager-Status (@@BZMGR@@) und Manager→Bot-Kommandos (stdin)
@@ -610,7 +625,30 @@ class TestStopAndCrashClassification:
         mgr.bots = [bot]
         with caplog.at_level(logging.DEBUG, logger="bot_manager"):
             mgr._restart_crashed_bots()
-        assert any(r.levelno == logging.WARNING and "abgestürzt" in r.getMessage()
+        recs = [r for r in caplog.records
+                if r.levelno == logging.WARNING and "abgestürzt" in r.getMessage()]
+        assert recs
+        assert "Exit-Code 1" in recs[0].getMessage()   # Exit-Code immer sichtbar
+
+    def test_restart_crashed_classifies_conn_lost_as_info(self, caplog):
+        """Exit-Code BOT_EXIT_CONN_LOST ⇒ Verbindungsverlust (INFO), NICHT 'abgestürzt'."""
+        import logging
+        from bot_manager import BotManager, Config, BotProcess
+        from bzflag.protocol import BOT_EXIT_CONN_LOST
+        mgr = BotManager(Config())
+        mgr.config.min_bots = 0
+        mgr.config.max_bots = 0          # kein Nachstarten (keine echten Subprozesse)
+        bot = MagicMock(spec=BotProcess)
+        bot.is_alive = False
+        bot._stopping = False
+        bot.last_rc = BOT_EXIT_CONN_LOST
+        bot.callsign = "Lost"
+        mgr.bots = [bot]
+        with caplog.at_level(logging.DEBUG, logger="bot_manager"):
+            mgr._restart_crashed_bots()
+        assert bot not in mgr.bots
+        assert not any("abgestürzt" in r.getMessage() for r in caplog.records)
+        assert any(r.levelno == logging.INFO and "Verbindung verloren" in r.getMessage()
                    for r in caplog.records)
 
 
@@ -833,3 +871,130 @@ class TestBotProcessStopStaged:
         proc.terminate.assert_called_once()
         proc.kill.assert_called_once()
         assert bp.process is None
+
+
+# ---------------------------------------------------------------------------
+# Präsenz-basierte Skalierung + Abräum-Timeout (_desired_bot_count)
+# ---------------------------------------------------------------------------
+
+class TestPresenceScaling:
+    """desired = min_bots ohne echte Präsenz (nach Timeout); mit Präsenz
+    min_bots+max_bots − aktive Spieler. Zuschauer triggern, zählen aber nicht ab."""
+
+    def _mgr(self, min_bots=1, max_bots=3, cleanup=300.0):
+        from bot_manager import BotManager, Config
+        cfg = Config()
+        cfg.min_bots = min_bots
+        cfg.max_bots = max_bots
+        cfg.idle_cleanup_delay = cleanup
+        return BotManager(cfg)
+
+    def _alive(self, n):
+        from bot_manager import BotProcess
+        out = []
+        for _ in range(n):
+            b = MagicMock(spec=BotProcess); b.is_alive = True
+            out.append(b)
+        return out
+
+    def test_config_default_idle_cleanup_delay(self):
+        from bot_manager import Config
+        assert Config().idle_cleanup_delay == pytest.approx(300.0)
+
+    def test_no_presence_after_timeout_returns_min(self):
+        mgr = self._mgr(min_bots=1, max_bots=3, cleanup=300.0)
+        now = time.monotonic()
+        mgr._presence_lost_at = now - 400.0     # Timeout bereits abgelaufen
+        assert mgr._desired_bot_count(now) == 1
+
+    def test_single_spectator_gives_full_pool(self):
+        """Ein Zuschauer (human=0, obs=1) ⇒ volle Arena min+max, kein Abzug."""
+        mgr = self._mgr(min_bots=1, max_bots=3)
+        mgr._human_count = 0
+        mgr._observer_count = 1
+        assert mgr._desired_bot_count(time.monotonic()) == 4
+
+    def test_one_player_subtracts_one(self):
+        mgr = self._mgr(min_bots=1, max_bots=3)
+        mgr._human_count = 1
+        assert mgr._desired_bot_count(time.monotonic()) == 3   # 1+3-1
+
+    def test_many_players_floored_at_min(self):
+        mgr = self._mgr(min_bots=1, max_bots=3)
+        mgr._human_count = 5
+        assert mgr._desired_bot_count(time.monotonic()) == 1   # max(1, 4-5)
+
+    def test_grace_period_holds_current_level(self):
+        """Präsenz fällt auf 0, Timeout NICHT abgelaufen → aktuelles Bot-Niveau halten."""
+        mgr = self._mgr(min_bots=1, max_bots=3, cleanup=300.0)
+        mgr.bots = self._alive(3)
+        now = time.monotonic()
+        assert mgr._desired_bot_count(now) == 3    # hält 3, räumt nicht ab
+        assert mgr._presence_lost_at is not None    # Timer gestartet
+
+    def test_cleanup_after_delay_drops_to_min(self):
+        mgr = self._mgr(min_bots=1, max_bots=3, cleanup=300.0)
+        mgr.bots = self._alive(3)
+        now = time.monotonic()
+        mgr._presence_lost_at = now - 301.0
+        assert mgr._desired_bot_count(now) == 1
+
+    def test_zero_delay_cleans_immediately(self):
+        mgr = self._mgr(min_bots=1, max_bots=3, cleanup=0.0)
+        mgr.bots = self._alive(3)
+        assert mgr._desired_bot_count(time.monotonic()) == 1
+
+    def test_presence_resets_timer(self):
+        mgr = self._mgr(min_bots=1, max_bots=3)
+        mgr._desired_bot_count(time.monotonic())          # presence 0 → Timer läuft
+        assert mgr._presence_lost_at is not None
+        mgr._human_count = 1
+        mgr._desired_bot_count(time.monotonic())          # Präsenz da → Timer zurück
+        assert mgr._presence_lost_at is None
+
+
+class TestObserverAwareness:
+    """Manager erfährt Zuschauer aus Bot-Status (primär) und Fallback-Observer."""
+
+    def test_on_bot_status_reads_observers(self):
+        from bot_manager import BotManager, Config, BotProcess
+        mgr = BotManager(Config())
+        bot = MagicMock(spec=BotProcess); bot.callsign = "X"
+        with patch.object(mgr, "_rebalance") as reb:
+            mgr._on_bot_status(bot, {"humans": 0, "observers": 2})
+        assert mgr._observer_count == 2
+        reb.assert_called_once()          # Zuschauer-Änderung löst Rebalance aus
+
+    def test_server_observer_counts_real_spectator(self):
+        import struct
+        from bot_manager import ServerObserver, Config
+        from bzflag.protocol import PLAYER_TYPE_TANK, TEAM_OBSERVER, CallSignLen
+        cfg = Config()
+        cfg.bot_name_prefix = "[b0t] "
+        seen = []
+        with patch("bot_manager.BZFlagClient"):
+            obs = ServerObserver(cfg, on_count_changed=lambda h, o: seen.append((h, o)))
+        cs = "Watcher"                     # kein Bot-Name, kein eigener Callsign
+        payload = (bytes([7]) + struct.pack(">H", PLAYER_TYPE_TANK)
+                   + struct.pack(">H", TEAM_OBSERVER) + b"\x00" * 6
+                   + cs.encode("ascii").ljust(CallSignLen, b"\x00"))
+        obs._on_add_player(0x6170, payload)
+        assert obs.observer_count == 1
+        assert obs.human_count == 0
+        assert seen[-1] == (0, 1)
+
+    def test_server_observer_excludes_own_connection(self):
+        """Die eigene Observer-Verbindung zählt NICHT als Zuschauer."""
+        import struct
+        from bot_manager import ServerObserver, Config
+        from bzflag.protocol import PLAYER_TYPE_TANK, TEAM_OBSERVER, CallSignLen
+        cfg = Config()
+        cfg.observer_callsign = "Bot-Manager"
+        with patch("bot_manager.BZFlagClient"):
+            obs = ServerObserver(cfg)
+        cs = "Bot-Manager"                 # == eigener Observer-Callsign
+        payload = (bytes([1]) + struct.pack(">H", PLAYER_TYPE_TANK)
+                   + struct.pack(">H", TEAM_OBSERVER) + b"\x00" * 6
+                   + cs.encode("ascii").ljust(CallSignLen, b"\x00"))
+        obs._on_add_player(0x6170, payload)
+        assert obs.observer_count == 0

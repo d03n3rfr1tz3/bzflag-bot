@@ -43,8 +43,8 @@ python bzbot.py --host mein-server.de --callsign "Robo"
 |-------------------|-------------|------------------------------------------------------------------------------|
 | `host`            | `localhost` | Hostname/IP des BZFlag-Servers                                               |
 | `port`            | `5154`      | TCP-Port                                                                     |
-| `max_bots`        | `3`         | Maximale gleichzeitige Bots                                                  |
-| `min_bots`        | `0`         | Mindestanzahl (nie unterschritten)                                           |
+| `max_bots`        | `3`         | Größe des aktiven Bot-Pools bei echter Präsenz (Spieler/Zuschauer)          |
+| `min_bots`        | `0`         | Grundstock (nie unterschritten); allein aktiv, wenn niemand da ist          |
 | `bot_name_prefix` | `Bot_`      | Präfix, den **jeder** Bot erhält (dient zugleich der zuverlässigen Bot-Erkennung) |
 | `bot_callsigns`   | `[]`        | **Basisnamen** der Bots (ohne Präfix, z.B. `["Zwiebel", "Tomate"]`); In-Game-Name = `bot_name_prefix` + Basisname. Leer → `bot_name_prefix` + Nummer (`Bot_01`, …) |
 | `observer_callsign` | `Bot-Manager` | Callsign des Fallback-Observers (verbindet nur, wenn kein Bot Spielerzahlen liefert) |
@@ -54,6 +54,7 @@ python bzbot.py --host mein-server.de --callsign "Robo"
 | `world_half`      | `400.0`     | Halbe Weltgröße in Einheiten (Standard-Map = 800x800)                        |
 | `check_interval`  | `5.0`       | Sekunden zwischen Rebalance-Prüfungen                                        |
 | `reconnect_delay` | `10.0`      | Sekunden vor Reconnect des Fallback-Observers nach Verbindungsabbruch        |
+| `idle_cleanup_delay` | `300.0`  | Sekunden ohne echte Präsenz, bis auf `min_bots` abgeräumt wird (`0` = sofort) |
 | `good_flags`      | eingebaute Liste | Flaggen-Kürzel, die die Bots behalten und nutzen                        |
 | `bad_flags`       | eingebaute Liste | Flaggen-Kürzel, die die Bots sofort ablegen                             |
 | `bot_lifetime_min` | `900`      | Minimale Bot-Lebensdauer in Sekunden; danach Ersatz durch neuen Bot (Namens-/Statistik-Rotation) |
@@ -72,8 +73,8 @@ python bot_manager.py [Optionen]
   --config YAML           Pfad zur YAML-Konfigurationsdatei
   --host HOST             Server-Hostname
   --port PORT             Server-Port
-  --max_bots N            Maximale Bot-Anzahl
-  --min_bots N            Mindest-Bot-Anzahl
+  --max_bots N            Größe des aktiven Bot-Pools bei Präsenz
+  --min_bots N            Grundstock-Bot-Anzahl (nie unterschritten)
   --bot_name_prefix P     Callsign-Präfix für jeden Bot (auch zur Erkennung)
   --bot_callsigns NAMEN   Kommagetrennte Bot-Basisnamen (ohne Präfix)
   --observer_callsign C   Callsign des Fallback-Observers
@@ -82,6 +83,7 @@ python bot_manager.py [Optionen]
   --token TOKEN           Auth-Token
   --world_half FLOAT      Halbe Weltgröße
   --check_interval S      Rebalance-Intervall in Sekunden
+  --idle_cleanup_delay S  Sekunden ohne Präsenz bis Abräumen auf min_bots (0 = sofort)
   --good_flags FLAGS      Kommagetrennte Flaggen-Kürzel, die die Bots behalten
   --bad_flags FLAGS       Kommagetrennte Flaggen-Kürzel, die die Bots ablegen
   --log_level LEVEL       Log-Level (DEBUG/INFO/WARNING/ERROR)
@@ -244,18 +246,31 @@ Bot sendet:       MsgAlive  (Spawn-Anfrage)
 
 ### Manager-Logik
 
-```
-Spielerzahl-Quelle:
-  Primär melden die laufenden Bots ihre Sicht (Menschenzahl/-liste) per IPC
-  (stdout-Zeile "@@BZMGR@@ {…}") an den Manager. Nur wenn gerade kein Bot
-  verbunden ist, verbindet sich ein Fallback-Observer (TankPlayer + ObserverTeam,
-  observer_callsign) und zählt selbst – sobald ein Bot meldet, trennt er wieder.
+Der Manager ist ein eigener, langlebiger Prozess. Er spielt selbst nicht mit, sondern
+sorgt dafür, dass auf dem Server stets eine sinnvolle Anzahl Bots läuft: genug, damit ein
+beitretender Mensch sofort Gegner vorfindet, aber nie so viele, dass echte Spieler oder die
+CPU des Hosts unnötig belastet werden. Dazu beobachtet er fortlaufend die **Präsenz** auf dem
+Server (Spieler und Zuschauer) und startet oder beendet Bots als eigenständige Subprozesse.
 
-Peer-Erkennung:
-  Der Manager pusht jedem Bot per stdin die Liste aktiver Bot-Callsigns
-  ({"type":"bots",…}); jeder Bot erkennt seine Peers (Präfix + Liste) und
-  zählt sie nicht als Menschen.
-```
+Die Anzahl richtet sich nach der Präsenz. Ist niemand da, hält der Manager nur den Grundstock
+`min_bots` – diese Bots bleiben passiv stehen und verbrauchen kaum Ressourcen. Sobald ein echter
+Spieler oder Zuschauer verbunden ist, füllt er den aktiven Pool bis `min_bots + max_bots` auf und
+zieht für jeden **aktiv spielenden** Menschen einen Bot ab (Zuschauer wecken die Bots, belegen aber
+keinen Spielplatz). Verlässt der letzte Mensch den Server, wird nicht sofort abgeräumt, sondern erst
+nach `idle_cleanup_delay` wieder auf `min_bots` zurückgefahren – das überbrückt kurze Verbindungs­abbrüche
+und Rundenwechsel.
+
+Seine Sicht auf die Präsenz bezieht der Manager primär von den Bots selbst: Jeder Bot meldet die von ihm
+wahrgenommene Spieler-/Zuschauerzahl per IPC (getaggte stdout-Zeile `@@BZMGR@@ {…}`). Läuft gerade kein
+Bot, verbindet sich der Manager ersatzweise selbst als stiller Beobachter (TankPlayer + ObserverTeam,
+`observer_callsign`) und zählt direkt – sobald wieder ein Bot meldet, trennt er diese Hilfsverbindung.
+Damit die Bots einander nicht fälschlich für Menschen halten, verteilt der Manager außerdem die Liste
+aller aktiven Bot-Callsigns an jeden Bot (`{"type":"bots",…}`).
+
+Neben der Skalierung übernimmt der Manager die Betriebsstabilität: Er startet abgestürzte Bots neu
+(mit exponentiellem Backoff gegen Restart-Schleifen bei dauerhafter Server-Ablehnung), rotiert Bots nach
+einer zufälligen Lebensdauer für frische Namen/Statistiken und koordiniert bei Rundenende einen sauberen
+Gesamt-Neustart.
 
 ## Bekannte Einschränkungen
 

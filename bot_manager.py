@@ -32,7 +32,7 @@ from bzflag.protocol import (
     MsgSuperKill,
     unpack_uint8, unpack_uint16, unpack_string,
     CallSignLen, MGR_STATUS_PREFIX, BOT_EXIT_REJECTED,
-    BOT_EXIT_ROUND_OVER, ROUND_RESTART_GAP_S,
+    BOT_EXIT_ROUND_OVER, BOT_EXIT_CONN_LOST, ROUND_RESTART_GAP_S,
 )
 
 logger = logging.getLogger("bot_manager")
@@ -74,6 +74,10 @@ class Config:
         self.restart_backoff_base = 10.0   # Basis-Wartezeit (Sekunden) nach dem 1. frühen Ende
         self.restart_backoff_max  = 300.0  # Obergrenze der Wartezeit (Sekunden)
         self.restart_healthy_s    = 30.0   # ab dieser Laufzeit gilt ein Bot als „gesund" → Reset
+        # Abräum-Timeout: Wenn kein echter Mensch (Spieler ODER Zuschauer) mehr auf dem
+        # Server ist, wird erst nach dieser Zeit auf min_bots reduziert. Bis dahin bleibt
+        # das aktuelle Bot-Niveau erhalten. 0 = sofort abräumen.
+        self.idle_cleanup_delay   = 300.0  # Sekunden (5 min)
         self.good_flags: Optional[List[str]] = None   # None = Standardliste aus bzbot.py
         self.bad_flags:  Optional[List[str]] = None   # None = Standardliste aus bzbot.py
         # cProfile-Instrumentierung: profile=True startet jeden Bot als
@@ -123,6 +127,7 @@ class ServerObserver:
         self.client.log_unhandled = False
         self.players: Dict[int, dict] = {}
         self.human_count = 0
+        self.observer_count = 0    # echte Zuschauer (ohne die eigene Observer-Verbindung)
         self._own_callsign = config.observer_callsign or f"__mgr_obs_{os.getpid()}"
 
         self.client.add_handler(MsgAddPlayer,           self._on_add_player)
@@ -179,22 +184,33 @@ class ServerObserver:
             or (full and callsign in full)
             or (self.config.bot_name_prefix and callsign.startswith(self.config.bot_name_prefix))
         )
+        # Echter Zuschauer = Observer-Team, aber weder Bot noch die eigene Observer-Verbindung.
+        is_real_observer = is_observer and not is_bot
 
         self.players[pid] = {
-            "callsign":    callsign,
-            "team":        team,
-            "player_type": ptype,
-            "is_human":    not is_bot and not is_observer,
+            "callsign":       callsign,
+            "team":           team,
+            "player_type":    ptype,
+            "is_human":       not is_bot and not is_observer,
+            "is_real_observer": is_real_observer,
         }
 
         if self.players[pid]["is_human"]:
             self.human_count += 1
             logger.info("Spieler beigetreten: '%s' (Menschen: %d)", callsign, self.human_count)
-            if self.on_count_changed:
-                self.on_count_changed(self.human_count)
+            self._report_counts()
+        elif is_real_observer:
+            self.observer_count += 1
+            logger.info("Zuschauer beigetreten: '%s' (Zuschauer: %d)", callsign, self.observer_count)
+            self._report_counts()
+
+    def _report_counts(self):
+        """Meldet aktuelle Spieler- und Zuschauerzahl an den Manager-Callback."""
+        if self.on_count_changed:
+            self.on_count_changed(self.human_count, self.observer_count)
 
     def _on_remove_player(self, code, payload):
-        """Entfernt Spieler; dekrementiert human_count wenn Mensch."""
+        """Entfernt Spieler; dekrementiert human_count/observer_count entsprechend."""
         if len(payload) < 1:
             return
         pid  = unpack_uint8(payload, 0)
@@ -203,8 +219,12 @@ class ServerObserver:
             self.human_count = max(0, self.human_count - 1)
             logger.info("Spieler verlassen: '%s' (Menschen: %d)",
                         info["callsign"], self.human_count)
-            if self.on_count_changed:
-                self.on_count_changed(self.human_count)
+            self._report_counts()
+        elif info and info.get("is_real_observer"):
+            self.observer_count = max(0, self.observer_count - 1)
+            logger.info("Zuschauer verlassen: '%s' (Zuschauer: %d)",
+                        info["callsign"], self.observer_count)
+            self._report_counts()
 
     def _on_disconnect(self, code, payload):
         """Loggt Verbindungsverlust des Observers."""
@@ -429,6 +449,15 @@ class BotProcess:
                 "Bot '%s' bei Rundenende beendet – Manager koordiniert Rejoin",
                 self.callsign,
             )
+        elif rc == BOT_EXIT_CONN_LOST:
+            # Unerwarteter Verbindungsverlust nach erfolgreichem Join – KEIN Absturz, aber
+            # der Grund (Server-Nachricht/Socket-Fehler) steht in den letzten Zeilen → Tail
+            # mit ausgeben, damit die Ursache sichtbar ist.
+            tail = "\n".join(recent)
+            bot_logger.warning(
+                "Bot '%s' hat die Verbindung verloren (kein Absturz). Letzte Ausgabe:\n%s",
+                self.callsign, tail,
+            )
         else:
             tail = "\n".join(recent)
             bot_logger.warning(
@@ -458,7 +487,11 @@ class BotManager:
         self._lock    = threading.Lock()
         self._running = False
         self._observer: Optional[ServerObserver] = None
-        self._human_count = 0
+        self._human_count = 0       # aktive Spieler (Team ≠ Observer)
+        self._observer_count = 0    # echte Zuschauer (menschliche Observer)
+        # Abräum-Timeout: Zeitpunkt (monotonic), an dem die echte Präsenz zuletzt auf 0
+        # fiel; None = aktuell Präsenz vorhanden. Steuert das verzögerte Abräumen auf min_bots.
+        self._presence_lost_at: Optional[float] = None
         # Bot-Status als primäre Info-Quelle: Zeitpunkt der letzten Bot-Statusmeldung.
         self._last_status_at = 0.0
         # Reject-/Crash-Backoff gegen Hot-Restart-Loop.
@@ -541,13 +574,8 @@ class BotManager:
             # Observer trennen – er zählt sonst als Spieler und blockiert count()==0.
             self._disconnect_observer_if_any()
 
-            # Gewünschte Anzahl VOR dem Stoppen bestimmen (Menschen behalten Vorrang).
-            with self._lock:
-                human = self._human_count
-            desired = max(
-                self.config.min_bots,
-                min(self.config.max_bots, self.config.max_bots - human),
-            )
+            # Gewünschte Anzahl VOR dem Stoppen bestimmen (Präsenz-Modell, Spieler behalten Vorrang).
+            desired = self._desired_bot_count(time.monotonic())
 
             # Alle Bots herunterfahren (bereits beendete überspringt stop() von selbst).
             for bot in list(self.bots):
@@ -601,13 +629,15 @@ class BotManager:
 
         obs = ServerObserver(
             config            = self.config,
-            on_count_changed  = self._on_human_count_changed,
+            on_count_changed  = self._on_observer_counts,
         )
         if obs.connect():
             self._observer = obs
-            # Initiale Spielerzahl lesen
-            self._human_count = obs.human_count
-            logger.info("Observer verbunden – aktuelle Spieler: %d", self._human_count)
+            # Initiale Spieler-/Zuschauerzahl lesen
+            self._human_count    = obs.human_count
+            self._observer_count = obs.observer_count
+            logger.info("Observer verbunden – aktuelle Spieler: %d, Zuschauer: %d",
+                        self._human_count, self._observer_count)
         else:
             logger.warning(
                 "Observer-Verbindung fehlgeschlagen – versuche erneut in %.0fs",
@@ -615,11 +645,14 @@ class BotManager:
             )
             time.sleep(self.config.reconnect_delay)
 
-    def _on_human_count_changed(self, human_count: int):
-        """Callback des Observers: speichert neue Spielerzahl und löst Rebalancing aus."""
+    def _on_observer_counts(self, human_count: int, observer_count: int):
+        """Callback des Fallback-Observers: neue Spieler-/Zuschauerzahl übernehmen und
+        Rebalancing auslösen."""
         with self._lock:
-            self._human_count = human_count
-        logger.info("Spielerzahl geändert: %d menschliche Spieler", human_count)
+            self._human_count    = human_count
+            self._observer_count = observer_count
+        logger.info("Präsenz geändert: %d Spieler, %d Zuschauer",
+                    human_count, observer_count)
         self._rebalance()
 
     def _on_bot_status(self, bot: "BotProcess", data: dict):
@@ -629,19 +662,24 @@ class BotManager:
             humans = int(data.get("humans", 0))
         except (TypeError, ValueError):
             return
+        try:
+            observers = int(data.get("observers", 0))
+        except (TypeError, ValueError):
+            observers = self._observer_count
         game_over = bool(data.get("game_over", False))
         bot.game_over = game_over
         with self._lock:
-            changed = (humans != self._human_count)
+            changed = (humans != self._human_count) or (observers != self._observer_count)
             self._human_count = humans
+            self._observer_count = observers
             self._last_status_at = time.monotonic()
             # Rundenende-Flanke (bedingungslos, kein Humans-Check): koordinierter Neustart.
             # Während eines laufenden Zyklus nicht erneut setzen (verhindert Re-Trigger).
             if game_over and not self._round_restart_active:
                 self._round_over_seen = True
         if changed:
-            logger.info("Spielerzahl (von Bot '%s'): %d menschliche Spieler",
-                        bot.callsign, humans)
+            logger.info("Präsenz (von Bot '%s'): %d Spieler, %d Zuschauer",
+                        bot.callsign, humans, observers)
             self._rebalance()
 
     def _on_bot_exit(self, bot: "BotProcess", rc: int):
@@ -691,25 +729,40 @@ class BotManager:
             if b.is_alive:
                 b.send_command({"type": "bots", "callsigns": names})
 
+    def _desired_bot_count(self, now: float) -> int:
+        """Gewünschte Bot-Anzahl nach Präsenz-Modell (nimmt self._lock selbst — NICHT
+        unter gehaltenem Lock aufrufen).
+
+        - Keine echte Präsenz (weder Spieler noch Zuschauer): nach idle_cleanup_delay
+          auf min_bots abräumen; bis dahin aktuelles Niveau halten.
+        - Mit Präsenz: min_bots + max_bots − aktive Spieler (nur Team ≠ Observer zählen
+          ab; ein einzelner Zuschauer ⇒ volle Arena min_bots+max_bots).
+        Als Nebeneffekt wird der Abräum-Timer (_presence_lost_at) nachgeführt."""
+        with self._lock:
+            human     = self._human_count
+            observers = self._observer_count
+            active    = sum(1 for b in self.bots if b.is_alive)
+            full_pool = self.config.min_bots + self.config.max_bots
+
+            if human + observers > 0:
+                self._presence_lost_at = None
+                return max(self.config.min_bots, min(full_pool, full_pool - human))
+
+            # Keine echte Präsenz → Abräum-Timer starten/prüfen.
+            if self._presence_lost_at is None:
+                self._presence_lost_at = now
+            if now - self._presence_lost_at >= self.config.idle_cleanup_delay:
+                return self.config.min_bots
+            # Gnadenfrist: aktuelles Niveau halten (kein Hoch-/Runterskalieren).
+            return max(self.config.min_bots, active)
+
     def _rebalance(self):
-        """Passt die Bot-Anzahl an die aktuelle Spielerzahl an."""
+        """Passt die Bot-Anzahl an die aktuelle Präsenz an (siehe _desired_bot_count)."""
         if self._round_restart_active:
             return  # koordinierter Neustart läuft – nicht dazwischenfunken
+        desired = self._desired_bot_count(time.monotonic())
         with self._lock:
-            human = self._human_count
             active_bots = [b for b in self.bots if b.is_alive]
-
-            # Gewünschte Bot-Anzahl:
-            #   So viele Bots, dass insgesamt immer etwas los ist,
-            #   aber menschliche Spieler haben immer Vorrang.
-            desired = max(
-                self.config.min_bots,
-                min(
-                    self.config.max_bots,
-                    self.config.max_bots - human,
-                )
-            )
-
             diff = desired - len(active_bots)
 
             if diff > 0:
@@ -801,13 +854,7 @@ class BotManager:
         """Startet abgestürzte Bots neu (falls sie noch benötigt werden)."""
         if self._round_restart_active:
             return  # koordinierter Neustart läuft – nicht dazwischenfunken
-        with self._lock:
-            human    = self._human_count
-            active   = sum(1 for b in self.bots if b.is_alive)
-            desired  = max(
-                self.config.min_bots,
-                min(self.config.max_bots, self.config.max_bots - human),
-            )
+        desired = self._desired_bot_count(time.monotonic())
 
         crashed = [b for b in self.bots if not b.is_alive]
         for bot in crashed:
@@ -816,9 +863,14 @@ class BotManager:
                 logger.debug("Bot '%s' wurde bewusst gestoppt – entfernt", bot.callsign)
             elif bot.last_rc == BOT_EXIT_REJECTED:
                 logger.info("Bot '%s' vom Server abgelehnt – entfernt (kein Absturz)", bot.callsign)
+            elif bot.last_rc == BOT_EXIT_CONN_LOST:
+                logger.info("Bot '%s' hat die Verbindung verloren – entfernt (kein Absturz)",
+                            bot.callsign)
             else:
-                logger.warning("Bot '%s' war abgestürzt – entfernt", bot.callsign)
+                logger.warning("Bot '%s' war abgestürzt (Exit-Code %s) – entfernt",
+                               bot.callsign, bot.last_rc)
 
+        active = sum(1 for b in self.bots if b.is_alive)
         if active < desired:
             logger.info("Starte %d Bot(s) nach", desired - active)
             for _ in range(desired - active):
@@ -858,6 +910,8 @@ def parse_args():
     p.add_argument("--token",           help="BZFlag-Auth-Token")
     p.add_argument("--world_half",      type=float, help="Halbe Weltgröße")
     p.add_argument("--check_interval",  type=float, help="Sekunden zwischen Rebalance-Prüfungen")
+    p.add_argument("--idle_cleanup_delay", type=float,
+                   help="Sekunden ohne echte Menschen bis Abräumen auf min_bots (0 = sofort)")
     p.add_argument("--good_flags", help="Kommagetrennte Liste zu behaltender Flags")
     p.add_argument("--bad_flags",  help="Kommagetrennte Liste sofort abzulegender Flags")
     p.add_argument("--log_level", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -873,7 +927,8 @@ def main():
 
     for attr in ("host", "port", "max_bots", "min_bots", "bot_name_prefix",
                  "observer_callsign",
-                 "team", "motto", "token", "world_half", "check_interval", "log_level"):
+                 "team", "motto", "token", "world_half", "check_interval",
+                 "idle_cleanup_delay", "log_level"):
         cli_val = getattr(args, attr, None)
         if cli_val is not None:
             setattr(config, attr, cli_val)

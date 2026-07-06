@@ -370,6 +370,10 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._running          = False
         self._stop_event       = threading.Event()
         self._reconnect_needed = False
+        # True, wenn die Spielschleife NACH erfolgreichem Join durch einen unerwarteten
+        # Verbindungsverlust endet (Server-Close/Reset/MsgSuperKill) — kein Absturz, aber
+        # auch kein bewusster Stop. Steuert den Exit-Code (BOT_EXIT_CONN_LOST) für den Manager.
+        self._connection_lost  = False
         self._round_over_until: float | None = None  # Endzeit der Endstand-Linger-Phase
         self._exploding_until: float = 0.0   # Endzeit der Explosions-Animation (PS_EXPLODING senden)
         self._game_over: bool = False        # Server-Rundenende-Zustand (aus MsgTimeUpdate/MsgScoreOver)
@@ -448,8 +452,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
 
     def _run_game_loop(self) -> None:
         """60-Hz-Spielschleife (Physik); KI 10 Hz, Server-Update 30 Hz: Hit-Detection, Bewegung, Schuss, PlayerUpdate."""
-        dt        = 1.0 / UPDATE_RATE_HZ
-        last_tick = time.monotonic()
+        dt         = 1.0 / UPDATE_RATE_HZ
+        last_tick  = time.monotonic()
+        loop_start = last_tick   # für die Verbindungsdauer beim Verbindungsverlust
         self._stop_event.wait(timeout=0.5)
         if not self._game_over:        # nicht in eine laufende Rundenende-Phase spawnen
             self._spawn()
@@ -471,7 +476,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
             dt_r = min(now - last_tick, 0.1)
             last_tick = now
             if not self.client.connected:
-                logger.warning("[%s] Verbindung verloren", self.callsign)
+                self._connection_lost = True
+                logger.warning("[%s] Verbindung verloren nach %.0fs",
+                               self.callsign, now - loop_start)
                 break
             # UDP-Handshake notfalls wiederholen, bis udp_active (sonst schießt der Bot nie —
             # _can_shoot gatet auf udp_active, weil TCP-Shots gekickt werden). Selbst-gedrosselt.

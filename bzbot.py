@@ -15,7 +15,8 @@ import threading
 import time
 
 from bzflag.protocol import (DEFAULT_PORT, BOT_EXIT_REJECTED,
-                             BOT_EXIT_ROUND_OVER, ROUND_RESTART_GAP_S)
+                             BOT_EXIT_ROUND_OVER, BOT_EXIT_CONN_LOST,
+                             ROUND_RESTART_GAP_S)
 from bot.constants import WORLD_HALF_DEFAULT
 from bot.core import BZBot
 
@@ -194,6 +195,12 @@ def main():
                 logger.info("Rundenende — warte %.1fs vor Reconnect (Server leeren)",
                             ROUND_RESTART_GAP_S)
                 time.sleep(ROUND_RESTART_GAP_S)
+            if bot._connection_lost and not bot._reconnect_needed:
+                # Unerwarteter Verbindungsverlust nach erfolgreichem Join (kein Reconnect
+                # angefordert): eigener Exit-Code, damit der Manager es als Netz-/Server-
+                # Ereignis beschriften kann statt als Absturz (Exit 0 sähe wie ein sauberes
+                # Ende aus, Exit 1 wie ein Crash).
+                sys.exit(BOT_EXIT_CONN_LOST)
             if not bot._reconnect_needed:
                 break
 

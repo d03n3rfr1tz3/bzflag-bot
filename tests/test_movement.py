@@ -54,24 +54,26 @@ def test_dist_to_target_no_target(bot):
 
 # ── Passive mode via _update_movement ────────────────────────────────────────
 
-def test_passive_sets_waypoint_when_none(bot):
-    """human_count=0, target_pos=None → _update_movement setzt neuen Waypoint."""
+def test_passive_stays_parked_when_none(bot):
+    """human_count=0, target_pos=None → Bot bleibt geparkt (kein neues Wander-Ziel)."""
     bot.human_count = 0
     bot.target_pos  = None
     now = time.monotonic()
     bot._update_movement(0.02, now, ai_tick=True)
-    assert bot.target_pos is not None
+    assert bot.target_pos is None
+    assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
 
 
-def test_passive_replaces_waypoint_when_reached(bot):
-    """human_count=0, Bot steht am Waypoint → neuer Waypoint wird gesetzt."""
+def test_passive_parks_when_waypoint_reached(bot):
+    """human_count=0, Bot steht am Waypoint → Pfadende → parken (target_pos=None)."""
     bot.human_count = 0
     bot.pos         = [50.0, 0.0, 0.0]
     bot.target_pos  = (50.0, 0.0)   # bereits am Ziel
     now = time.monotonic()
     bot._update_movement(0.02, now, ai_tick=True)
-    # target_pos muss geändert worden sein
-    assert bot.target_pos != (50.0, 0.0)
+    # Ziel erreicht, kein neues gesetzt → geparkt
+    assert bot.target_pos is None
+    assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
 
 
 def test_active_mode_no_crash_without_players(bot):

@@ -11,16 +11,17 @@ sie stehen im Quellcode und in `DEVELOPER.md`.
 
 Ein vollautomatischer BZFlag-2.4-Bot, der sich wie ein echter Spieler verhält: verbindet sich per
 TCP/UDP, nimmt am Spiel teil, weicht Schüssen aus, navigiert die Karte, zielt und schießt. Ein
-Manager-Prozess hält die Bot-Anzahl dynamisch auf dem konfigurierten Niveau und macht automatisch
-Platz, wenn echte Spieler beitreten.
+Manager-Prozess hält die Bot-Anzahl präsenz-abhängig auf dem konfigurierten Niveau: ohne echte
+Spieler/Zuschauer laufen nur `min_bots` (die dann stehen bleiben), bei Präsenz wird aufgefüllt und
+für echte Spieler Platz gemacht.
 
 ---
 
 ## Architektur-Überblick
 
 **Zwei Prozesstypen:**
-- **Manager** — verbindet sich als Observer, zählt menschliche Spieler und startet/stoppt die Bots
-  als eigenständige Prozesse.
+- **Manager** — kennt die echte Präsenz (Spieler und Zuschauer, primär aus den Bot-Meldungen,
+  ersatzweise per eigener Observer-Verbindung) und startet/stoppt die Bots als eigenständige Prozesse.
 - **Bot** — ein Prozess je Bot, verbindet sich als Tank (TCP für Steuer-/Broadcast-Nachrichten,
   UDP für die eigenen Positions-Updates).
 
@@ -129,11 +130,12 @@ ID-Spalte trägt dann einen ID-Bereich).
 
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
-| P1-MGR-01 | Observer-Verbindung zum Mitzählen menschlicher Spieler | ✅ | — |
-| P1-MGR-02 | Dynamische Bot-Anzahl: hält `max_bots − Menschen` zwischen Min/Max | ✅ | — |
+| P1-MGR-01 | Observer-Verbindung zum Mitzählen echter Spieler und Zuschauer | ✅ | — |
+| P1-MGR-02 | Präsenz-basierte Bot-Anzahl: ohne echte Präsenz nur `min_bots`, mit Präsenz `min_bots + max_bots − aktive Spieler` (Zuschauer triggern, zählen nicht ab) | ✅ | P1-MGR-01 |
 | P1-MGR-03 | Bots als eigenständige Subprozesse starten/stoppen/überwachen | ✅ | — |
 | P1-MGR-04 | Konfiguration per YAML-Datei mit CLI-Override | ✅ | — |
 | P1-MGR-05 | Optionales Laufzeit-Profiling je Bot (Diagnose); Profil wird beim regulären Bot-Ende geschrieben | ✅ | P1-MGR-03 |
+| P1-MGR-06 | Verzögertes Abräumen auf `min_bots` nach `idle_cleanup_delay` ohne echte Präsenz (Puffer gegen kurze Reconnects) | ✅ | P1-MGR-02 |
 
 **Bot-Kern (P1-BOT)**
 
@@ -149,7 +151,7 @@ ID-Spalte trägt dann einen ID-Bereich).
 
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
-| P1-MOV-01 | Zufalls-Wegpunkte im Passivmodus (niemand auf dem Server) | ✅ | — |
+| P1-MOV-01 | Passivmodus (niemand auf dem Server): Rest-Pfad zu Ende fahren, dann stehen bleiben (parken, CPU sparen) | ✅ | — |
 | P1-MOV-02 | Zielverfolgung im Aktivmodus (mind. ein Mensch) | ✅ | — |
 | P1-MOV-03 | Physik: Schwerkraft, Sprung ohne Luftsteuerung (Absprungbewegung bleibt erhalten) | ✅ | — |
 | P1-MOV-04 | Abprall an den Weltgrenzen | ✅ | — |
@@ -497,7 +499,7 @@ Der Bot wird über eine Zustandsmaschine gesteuert; jeder Übergang wird protoko
 | State | Beschreibung | Bewegung |
 |---|---|---|
 | `DEAD` | Tot, wartet auf Spawn | — |
-| `IDLE` | Passiv — niemand auf dem Server | Zufalls-Wegpunkte |
+| `IDLE` | Passiv — niemand auf dem Server | Rest-Pfad zu Ende, dann parken |
 | `SEEKING` | Aktiv — Ziel/Flaggen suchen (Mensch oder Observer da) | Wegpunkt-Navigation |
 | `COMBAT` | Kampf — Abstandshaltung + Schießen | Kampf-Bewegung |
 | `EVADING` | Ausweichen — Schuss im Anflug (timer-basiert) | committed |
