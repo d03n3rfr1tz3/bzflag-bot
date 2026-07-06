@@ -105,6 +105,66 @@ class PhysicsMixin:
                 return True
         return False
 
+    def _crossing_wall(self) -> bool:
+        """True wenn der echte Client hier das PS_CROSSING-Bit setzen würde.
+
+        Spiegelt die Client-Verzweigung (LocalPlayer.cxx:678-694): entweder ein OO-Tank
+        durchquert eine Gebäudewand ODER (jede Flagge) straddlet eine Teleporter-
+        Querungsebene. Für das Statusbit ist es ein ODER — die Client-Priorität (OO-Zweig
+        vor Teleporter) spielt für den einen Bit-Wert keine Rolle."""
+        if self.own_flag == "OO" and self._oo_crossing_wall():
+            return True
+        return self._crossing_teleporter()
+
+    def _oo_crossing_wall(self) -> bool:
+        """True wenn der OO-Tank gerade eine solide Box durchquert (→ PS_CROSSING).
+
+        Grid-Broad-Phase wie _apply_obstacle_bounds (nicht der bewusst lineare
+        _is_inside_obstacle) — läuft nur bei OO und mit 30-Hz-Sende-Kadenz.
+        Approximation: True bei jedem Overlap (Straddle wie vollständig-innen); der
+        Client-`isCrossing` nur beim Straddeln. Für den Effekt praktisch identisch."""
+        world_map = getattr(self, '_world_map', None)
+        if world_map is None:
+            return False
+        px, py, pz = self.pos[0], self.pos[1], self.pos[2]
+        _solid = world_map.boxes + getattr(self, '_tele_solid_boxes', [])
+        _grid = getattr(getattr(self, '_nav_graph', None), '_solid_grid', None)
+        cands = _grid.query_point(px, py) if _grid is not None else _solid
+        tank_top = pz + self._tank_height
+        half_len = self._tank_length / 2.0
+        half_w = self._effective_half_width()
+        for obs in cands:
+            if obs.drive_through:
+                continue
+            # z-Gate wie _is_inside_obstacle: auf/unter der Box zählt nicht als "durch die Wand".
+            if tank_top <= obs.bottom_z or pz >= obs.bottom_z + obs.height - ON_TOP_EPS:
+                continue
+            if rect_rect_overlap(obs.cx, obs.cy, obs.angle, obs.half_w, obs.half_d,
+                                 px, py, self.azimuth, half_len, half_w):
+                return True
+        return False
+
+    def _crossing_teleporter(self) -> bool:
+        """True wenn die Tank-OBB eine Teleporter-Querungsebene straddlet (→ PS_CROSSING).
+
+        Für JEDE Flagge (wie der Client). Port von Teleporter::isCrossing: OBB gegen das
+        Querungsfeld (getWidth × getBreadth-border) plus z-Gate. Linear über die wenigen
+        Teleporter der Karte, Early-Out ohne Teleporter."""
+        world_map = getattr(self, '_world_map', None)
+        if world_map is None or not world_map.teleporters:
+            return False
+        px, py, pz = self.pos[0], self.pos[1], self.pos[2]
+        half_len = self._tank_length / 2.0
+        half_w = self._effective_half_width()
+        for tele in world_map.teleporters:
+            if pz < tele.bottom_z or pz > tele.bottom_z + tele.height - tele.border:
+                continue
+            if rect_rect_overlap(tele.cx, tele.cy, tele.angle,
+                                 tele.half_w, max(0.0, tele.half_d - tele.border),
+                                 px, py, self.azimuth, half_len, half_w):
+                return True
+        return False
+
     def _apply_obstacle_bounds(self, dt: float) -> None:
         """Wall-Sliding + Decken-Kollision: korrigiert self.vel/pos bei Gebäude-Kollision (60 Hz)."""
         if self._can_drive_through_obstacles():
