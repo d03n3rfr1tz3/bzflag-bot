@@ -110,8 +110,9 @@ class TestFlagStrategy:
 
 class TestFlagUpdate:
 
-    def _build_flag_update(self, flags):
-        """Baut MsgFlagUpdate-Payload (57 Bytes/Eintrag): flag_id(2)+Flag::pack()(55)."""
+    def _build_flag_update(self, flags, owner=255):
+        """Baut MsgFlagUpdate-Payload (57 Bytes/Eintrag): flag_id(2)+Flag::pack()(55).
+        owner: PlayerId des Trägers (255 = NoPlayer)."""
         buf = struct.pack(">H", len(flags))
         for flag_id, abbr, status, x, y, z in flags:
             abbr_b = (abbr.encode('ascii') + b'\x00\x00')[:2]
@@ -120,7 +121,7 @@ class TestFlagUpdate:
                 + abbr_b                         # abbr (2)
                 + struct.pack(">H", status)      # status (2)
                 + struct.pack(">H", 0)           # endurance (2)
-                + struct.pack(">B", 255)         # owner (1)
+                + struct.pack(">B", owner)       # owner (1)
                 + struct.pack(">fff", x, y, z)   # position (12)
                 + struct.pack(">fff", 0, 0, 0)   # launchPos (12)
                 + struct.pack(">fff", 0, 0, 0)   # landingPos (12) ← war bisher vergessen!
@@ -148,6 +149,24 @@ class TestFlagUpdate:
         payload = self._build_flag_update([(1, "GM", 2, 50.0, 30.0, 0.0)])
         bot._on_flag_update(MsgFlagUpdate, payload)
         assert 1 not in bot.flags
+
+    def test_carried_flag_seeds_owner_on_join(self, bot):
+        """Voll-Dump beim Join: getragene Flagge wird dem Träger zugeordnet
+        (deckt den ursprünglichen Bug: spät gejointe Bots kannten Trägerschaft nicht)."""
+        from bzflag.protocol import MsgFlagUpdate
+        make_player(bot, 2, flag="")            # Träger bereits bekannt, ohne Flag
+        payload = self._build_flag_update([(3, "BU", 2, 10.0, 20.0, 0.0)], owner=2)
+        bot._on_flag_update(MsgFlagUpdate, payload)
+        assert bot.players[2].flag == "BU"
+        assert 3 not in bot.flags               # getragen ≠ Boden-Flag
+
+    def test_carried_flag_no_owner_leaves_players_untouched(self, bot):
+        """owner=255 (NoPlayer) darf keine Trägerschaft setzen (Regression)."""
+        from bzflag.protocol import MsgFlagUpdate
+        make_player(bot, 2, flag="")
+        payload = self._build_flag_update([(3, "BU", 2, 10.0, 20.0, 0.0)], owner=255)
+        bot._on_flag_update(MsgFlagUpdate, payload)
+        assert bot.players[2].flag == ""
 
     def test_grab_flag_removes_from_flags(self, bot):
         from bzflag.protocol import MsgGrabFlag

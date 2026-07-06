@@ -643,12 +643,20 @@ class HandlersMixin:
             flag_id = unpack_uint16(payload, off); off += 2
             abbr_b  = payload[off:off+2];          off += 2
             status  = unpack_uint16(payload, off);  off += 2
-            off += 2 + 1
+            off += 2                                # endurance überspringen
+            owner   = unpack_uint8(payload, off);   off += 1
             x, y, z = unpack_vec3(payload, off)
             off = flag_start + 57
             abbr = abbr_b.rstrip(b'\x00').decode('ascii', errors='replace')
             if abbr == "PZ":
                 abbr = ""  # Server-seitiger Fake-Placeholder für unidentifizierte Flaggen
+            # Getragene Flaggen der Trägerschaft zuordnen (u.a. Voll-Dump beim Join,
+            # damit spät gejointe Bots verpasste Grabs nachholen) – vgl. _on_grab_flag.
+            if status == 2 and owner != 0xFF and abbr:
+                if owner == self.player_id:
+                    self.own_flag = abbr          # Robustheit bei Reconnect/Resync
+                elif owner in self.players:
+                    self.players[owner].flag = abbr
             if status in (0, 2):
                 self.flags.pop(flag_id, None)
             else:
