@@ -464,6 +464,28 @@ class StateMachineMixin:
     def _tick_landing_shot(self, now: float) -> None:
         """KI während LANDING_SHOT: Azimuth auf Landepunkt; nur Bedrohung von anderen prüfen.
         Bewegung (vel=0) und Azimuth-Drehung werden in _update_movement (60Hz) gehandhabt."""
+        # Menschlicher "Doppelklick"-Nachschuss: nach dem ersten Schuss wartet der Bot wenige
+        # Ticks und feuert – falls noch ausgerichtet und ein Slot frei ist – ein zweites Mal.
+        # Das deckt einen leicht zu früh berechneten ersten Schuss ab (siehe Plan/DEVELOPER).
+        # Vor dem Timeout-Check, damit _landing_shot_until den Nachschuss nicht verschluckt.
+        if self._landing_second_shot_at is not None:
+            if now >= self._landing_second_shot_at:
+                info = (self.players.get(self.target_player)
+                        if self.target_player is not None else None)
+                if (info is not None and self._landing_aim_pos is not None
+                        and self._can_shoot() and self._next_slot_ready(now)):
+                    _target_az = math.atan2(self._landing_aim_pos[1] - self.pos[1],
+                                            self._landing_aim_pos[0] - self.pos[0])
+                    if abs(_angle_diff(_target_az, self.azimuth)) <= math.radians(25):
+                        self._send_shot(now, self.azimuth)
+                        self._set_next_shoot_after_fire(now)
+                        if getattr(self, '_debug_log_shot', False):
+                            logger.debug("[%s] Schuss: LANDING_SHOT Nachschuss (Doppelklick)",
+                                         self.callsign)
+                self._landing_second_shot_at = None
+                self._transition_to(
+                    AIState.COMBAT if self.target_player is not None else AIState.SEEKING)
+            return
         if now > self._landing_shot_until:
             self._transition_to(
                 AIState.COMBAT if self.target_player is not None else AIState.SEEKING)
@@ -498,6 +520,16 @@ class StateMachineMixin:
                             if getattr(self, '_debug_log_shot', False):
                                 logger.debug("[%s] Schuss: LANDING_SHOT (t_rem=%.2fs tof=%.2fs)",
                                              self.callsign, _t_rem, _tof)
+                            # Doppelklick-Nachschuss nur einplanen, wenn bis dahin auch ein Slot
+                            # frei wird (Reload-Zeitpunkt des nächsten Slots steht nach _send_shot
+                            # bereits fest) – sonst wie bisher sofort weiter.
+                            _ns = (self._shot_slot + 1) % self._max_shots
+                            if self._slot_reload_at[_ns] <= now + LANDING_DOUBLE_SHOT_DELAY:
+                                self._landing_second_shot_at = now + LANDING_DOUBLE_SHOT_DELAY
+                                self._landing_shot_until = max(
+                                    self._landing_shot_until,
+                                    now + LANDING_DOUBLE_SHOT_DELAY + 0.05)
+                                return
                             self._transition_to(
                                 AIState.COMBAT if self.target_player is not None
                                 else AIState.SEEKING)

@@ -108,6 +108,7 @@ AI_RATE_HZ            = 10
 SHOOT_INTERVAL_RANDOM_MAX = 10.0   # Obergrenze für zufälliges Random-Shot-Intervall
 MIN_BURST_INTERVAL    = 1.0    # Mindestabstand zwischen zwei Schüssen im Burst
 GM_BURST_INTERVAL     = 2.0    # GM: längere Pause, nur 1 Rakete gleichzeitig im Flug
+LANDING_DOUBLE_SHOT_DELAY = 0.15   # LANDING_SHOT: Abstand zum menschlichen "Doppelklick"-Nachschuss
 RESPAWN_DELAY         = 3.0
 EXPLODE_TIME          = 5.0    # BZFlag-Default für _explodeTime: Dauer der Explosions-Animation,
                                # Aufwärts-Flugzeit des Wracks (_explodeTime derzeit NICHT nachgeführt)

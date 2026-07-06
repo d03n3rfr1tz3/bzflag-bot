@@ -291,6 +291,7 @@ class HandlersMixin:
         self._gm_resend_at        = None
         self._landing_shot_until  = 0.0
         self._landing_hit_z       = 0.0
+        self._landing_second_shot_at = None
         self._rico_aim_cache      = None
         self._indirect_hold_until = None
         with self._shots_lock:

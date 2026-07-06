@@ -1185,6 +1185,21 @@ stimmen. Die globale Sperre in `_maybe_shoot` (`if state in (Z_ATTACK, LANDING_S
 hält den normalen Feuerpfad — und damit den Z-Block — vom LANDING_SHOT fern, sodass die Resthöhe
 des fallenden Gegners den Schuss nicht unterdrückt (sonst käme er erst bei Landung).
 
+**Menschlicher Doppelschuss:** Der `t_rem ≤ tof + 0.15`-Trigger feuert am *ersten* Tick, an dem
+er greift — der Schuss kann dadurch bis zu ~0.15 s zu früh kommen und unter dem noch fallenden
+Gegner durchgehen (verstärkt durch Distanz: `_dist_aim` ab `bot_pos` statt Mündung, `tof` mit
+`_effective_shot_speed()` vs. Basis-`_shot_speed` in `_send_shot`). Statt die Trigger-Mathematik
+zu verfeinern, ahmt der Bot echte Spieler nach, die bei Unsicherheit einfach mehrfach klicken: nach
+dem ersten Schuss gibt er im Abstand `LANDING_DOUBLE_SHOT_DELAY = 0.15 s` (~Doppelklick) einen
+zweiten ab. Der Zweitschuss wird **nur eingeplant**, wenn nach `_send_shot` feststeht, dass bis
+dahin ein Slot frei wird (`_slot_reload_at[(_shot_slot+1) % _max_shots] ≤ now + delay`) — sonst
+transitioniert der Bot sofort weiter (Early-Out; auf `maxShots=1`-Servern gibt es damit nie einen
+Nachschuss, wie bei einem Menschen auch). Der Pending-Zweig (`_landing_second_shot_at`, geprüft
+noch **vor** dem `_landing_shot_until`-Timeout) feuert den zweiten Schuss nur bei erneut geprüfter
+Ausrichtung (±25° auf `_landing_aim_pos`) und freiem Slot, danach → COMBAT/SEEKING. Beim Einplanen
+wird `_landing_shot_until` auf mind. `now + delay + 0.05` nachgezogen, damit der Timeout den
+Nachschuss nicht abschneidet.
+
 **Warum LANDING_SHOT-Aktivierung in `_compute_aim_point` statt in der State-Machine:**
 Nur der Schieß-Code kennt `tof` (Flugzeit des Schusses), den Reload-Status und den
 genauen Landepunkt. Der Movement-Code hätte keinen sinnvollen Zugriff darauf.

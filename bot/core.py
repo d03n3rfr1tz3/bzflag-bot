@@ -355,6 +355,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._landing_shot_until: float = 0.0
         self._landing_aim_pos: Optional[Tuple[float, float]] = None
         self._landing_hit_z: float = 0.0   # Interzeptionshöhe für LANDING_SHOT (P4-TAC-07)
+        self._landing_second_shot_at: Optional[float] = None   # Zeitpunkt des menschlichen "Doppelklick"-Nachschusses
         self._rico_aim_cache: Optional[Tuple[float, int, Optional[Tuple[float, bool]]]] = None
         self._indirect_hold_until: Optional[float] = None   # Zeit-Cap fürs Indirekt-Schuss-Halten (C)
 

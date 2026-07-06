@@ -138,6 +138,7 @@ class ShootingMixin:
                             if self._ai_state == AIState.COMBAT:
                                 self._landing_aim_pos = (aim_x, aim_y)
                                 self._landing_shot_until = now + t_aim + 0.2
+                                self._landing_second_shot_at = None
                                 self._transition_to(AIState.LANDING_SHOT)
                             return None
                         elif tof_to_landing > t_aim + 0.2:

@@ -940,13 +940,49 @@ class TestLandingShotTickFires:
 
     def test_fires_in_window_despite_z_block(self, bot):
         """Restfallzeit im Fenster (t_rem ≈ 0.61s ≤ tof+0.15) bei z_diff=8 > HIT_RADIUS:
-        der Z-Block würde einen COMBAT-Schuss unterdrücken — der Tick feuert trotzdem."""
+        der Z-Block würde einen COMBAT-Schuss unterdrücken — der Tick feuert trotzdem.
+        maxShots=1 (Fixture-Default) → kein Nachschuss möglich → sofort COMBAT."""
         from bot.models import AIState
         # z=8, vz=-10 → t_rem ≈ 0.614s; tof = 50/100 = 0.5s → im 0.15s-Fenster.
         self._setup_landing_state(bot, enemy_z=8.0, enemy_vz=-10.0)
         bot._update_movement(0.02, time.monotonic(), ai_tick=True)
         assert bot.client.send.called
         assert bot._ai_state == AIState.COMBAT
+
+    def test_double_shot_fires_second(self, bot):
+        """Doppelklick-Nachschuss: bei freiem zweiten Slot bleibt der Bot nach dem ersten
+        Schuss in LANDING_SHOT und feuert nach LANDING_DOUBLE_SHOT_DELAY erneut."""
+        from bot.models import AIState
+        from bot.constants import LANDING_DOUBLE_SHOT_DELAY
+        self._setup_landing_state(bot, enemy_z=8.0, enemy_vz=-10.0)
+        bot._max_shots = 2
+        bot._shot_slot = 0
+        bot._slot_reload_at = [0.0, 0.0]   # beide Slots frei
+        t0 = time.monotonic()
+        bot._update_movement(0.02, t0, ai_tick=True)
+        assert bot.client.send.called                       # erster Schuss
+        assert bot._ai_state == AIState.LANDING_SHOT
+        assert bot._landing_second_shot_at is not None
+        first_calls = bot.client.send.call_count
+        # Zweiter Tick nach Ablauf des Doppelklick-Delays → Nachschuss + Übergang.
+        bot._update_movement(0.02, t0 + LANDING_DOUBLE_SHOT_DELAY + 0.01, ai_tick=True)
+        assert bot.client.send.call_count > first_calls      # zweiter Schuss
+        assert bot._ai_state == AIState.COMBAT
+        assert bot._landing_second_shot_at is None
+
+    def test_double_shot_early_out_when_no_slot(self, bot):
+        """Early-Out: wird bis zum Doppelklick-Fenster kein Slot frei, transitioniert der Bot
+        sofort (wie bei maxShots=1) statt sinnlos in LANDING_SHOT zu verweilen."""
+        from bot.models import AIState
+        self._setup_landing_state(bot, enemy_z=8.0, enemy_vz=-10.0)
+        bot._max_shots = 2
+        bot._shot_slot = 0
+        t0 = time.monotonic()
+        bot._slot_reload_at = [t0 + 1.0, 0.0]   # nächster Slot (0) lädt erst nach 1.0s nach
+        bot._update_movement(0.02, t0, ai_tick=True)
+        assert bot.client.send.called
+        assert bot._ai_state == AIState.COMBAT
+        assert bot._landing_second_shot_at is None
 
 
 # ---------------------------------------------------------------------------
