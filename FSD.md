@@ -114,6 +114,7 @@ Dokumentierte Abweichungen vom BZFlag-2.4-Protokoll und ihr Stand (✅ behoben/u
 | PRO-04 | Flag-Liste im Handshake vollständig gegen BZFlag 2.4 abgeglichen | Mittel | ✅ |
 | PRO-05 | Flag-Aktiv-Statusbit in den Positions-Updates beim Flag-Tragen gesetzt | Niedrig | ✅ |
 | PRO-06 | Veraltete Positions-Pakete (niedrigere Order-Nummer) werden erkannt und verworfen | Niedrig | ✅ |
+| PRO-07 | CrossingWall-Statusbit gesetzt: OO-Wanddurchquerung und Teleporter-Straddle | Niedrig | ✅ |
 
 ---
 

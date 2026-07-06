@@ -23,7 +23,7 @@ from bzflag.protocol import (
     MsgDropFlag, MsgCaptureFlag, MsgTransferFlag, MsgSuperKill,
     MsgScoreOver, MsgTeleport, MsgPause, MSG_INTERNAL_DISCONNECT,
     MGR_STATUS_PREFIX, BOT_EXIT_REJECTED, PS_ALIVE, PS_FALLING,
-    PS_EXPLODING, PS_FLAG_ACTIVE, PS_TELEPORTING, build_player_update,
+    PS_EXPLODING, PS_FLAG_ACTIVE, PS_TELEPORTING, PS_CROSSING, build_player_update,
 )
 from bot.constants import *  # noqa: F401,F403
 from bot.models import Shot, PlayerInfo, FlagInfo, AIState
@@ -570,6 +570,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
             status = PS_ALIVE | (PS_FALLING if falling else 0) | (PS_FLAG_ACTIVE if self.own_flag else 0)
             if time.monotonic() < self._teleporting_until:
                 status |= PS_TELEPORTING   # P3-NAV-02: laufender Teleport
+            if self._crossing_wall():
+                status |= PS_CROSSING   # OO durch Wand / Teleporter-Straddle → Client-Phasing-Effekt
             vel, ang_vel = tuple(self.vel), self.ang_vel
         else:
             return   # tot und keine laufende Explosion → kein Update (wie der echte Client)
