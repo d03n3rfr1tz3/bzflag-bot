@@ -21,7 +21,7 @@ from bzflag.protocol import (
     MsgScore, MsgMessage, MsgGameTime, MsgHandicap,
     MsgLagState, MsgGMUpdate, MsgNearFlag, MsgGrabFlag,
     MsgDropFlag, MsgCaptureFlag, MsgTransferFlag, MsgSuperKill,
-    MsgScoreOver, MsgTeleport, MsgPause, MSG_INTERNAL_DISCONNECT,
+    MsgScoreOver, MsgTeleport, MsgPause, MsgNewRabbit, MSG_INTERNAL_DISCONNECT,
     MGR_STATUS_PREFIX, BOT_EXIT_REJECTED, PS_ALIVE, PS_FALLING,
     PS_EXPLODING, PS_FLAG_ACTIVE, PS_TELEPORTING, PS_CROSSING, build_player_update,
 )
@@ -407,6 +407,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self.client.add_handler(MsgNearFlag,      self._on_near_flag)
         self.client.add_handler(MsgGameTime,      self._on_game_time)
         self.client.add_handler(MsgTimeUpdate,    self._on_time_update)
+        self.client.add_handler(MsgNewRabbit,     self._on_new_rabbit)
         for code in (MsgPlayerInfo, MsgTeamUpdate,
                      MsgScore,
                      MsgHandicap, MsgLagState):

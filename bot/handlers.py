@@ -10,7 +10,7 @@ from bzflag.shot_physics import (simulate_shot_path, build_link_map, can_ricoche
 from bzflag.world_map import teleporter_solid_boxes
 from bzflag.obstacle_grid import ObstacleGrid, LOS_GRID_PAD
 from bzflag.protocol import (
-    PLAYER_TYPE_COMPUTER, TEAM_OBSERVER, MsgKilled, MsgAddPlayer,
+    PLAYER_TYPE_COMPUTER, TEAM_OBSERVER, TEAM_RABBIT, TEAM_HUNTER, MsgKilled, MsgAddPlayer,
     MsgPlayerUpdate, MsgPlayerUpdateSmall, MsgSetVar, MsgFlagUpdate,
     MsgMessage, MsgGameTime, MsgGMUpdate, MsgNearFlag,
     MsgTransferFlag, MsgScoreOver, MsgTeleport, MsgPause,
@@ -449,6 +449,28 @@ class HandlersMixin:
         if p is not None:
             p.paused = paused
             logger.debug("[%s] Spieler %d %spausiert", self.callsign, pid, "" if paused else "un")
+
+    def _on_new_rabbit(self, code: int, payload: bytes) -> None:
+        """MsgNewRabbit (0x6e52): Rabbit-Chase-Team-Umbelegung. Payload [pid:uint8].
+        Neuer Rabbit → TEAM_RABBIT, alle anderen Nicht-Beobachter → TEAM_HUNTER.
+        pid==0xFF (NoPlayer) => kein Rabbit, alle werden Hunter."""
+        if len(payload) < 1: return
+        new_rabbit = unpack_uint8(payload, 0)
+        for pid, info in self.players.items():
+            if info.team == TEAM_OBSERVER:
+                continue
+            info.team = TEAM_RABBIT if pid == new_rabbit else TEAM_HUNTER
+        # eigenes Team synchronisieren (self.team wird von _is_foe genutzt);
+        # der Bot steht im Normalfall selbst in self.players, der elif-Zweig ist
+        # eine defensive Absicherung, falls nicht.
+        me = self.players.get(self.player_id)
+        if me is not None:
+            if me.team != TEAM_OBSERVER:
+                self.team = me.team
+        elif self.team != TEAM_OBSERVER:
+            self.team = TEAM_RABBIT if self.player_id == new_rabbit else TEAM_HUNTER
+        if self.player_id == new_rabbit:
+            logger.info("[%s] Bot ist jetzt der Rabbit", self.callsign)
 
     def _on_shot_begin(self, code: int, payload: bytes) -> None:
         """Registriert neuen Schuss; Sofort-Check für Laser und SW."""

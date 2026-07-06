@@ -174,6 +174,7 @@ bzflag-bot/
 │   ├── test_pause.py          – Pause-Behandlung (MsgPause: nicht beschießen, warten)
 │   ├── test_performance.py    – Performance-/Timing-Checks (`pytest -m perf -s`)
 │   ├── test_protocol.py       – MsgSetVar/GameSettings-Parsing, Limited-Flags
+│   ├── test_rabbit.py         – Rabbit-Chase: MsgNewRabbit-Team-Umbelegung (Rabbit/Hunter, Freund/Feind)
 │   ├── test_sb_hit.py         – SB-Treffer: Wand-Phasing, Längskapsel, Hit-Fenster
 │   ├── test_setvar_snapshot.py – Snapshot-Test: alle Server-Variablen → Attribute
 │   ├── test_shooting.py       – Schieß-Logik: GM-Targeting, Ricochet-Aim, Burst-Intervalle

@@ -60,6 +60,7 @@ Danach: [uint16 length][uint16 code][payload]
 | `0x616c` | MsgAlive | ↔ | Spawn-Anfrage / Spawn-Bestätigung mit Position |
 | `0x6170` | MsgAddPlayer | ← Server | Neuer Spieler: ID, Callsign, Team, Typ, Flag |
 | `0x7270` | MsgRemovePlayer | ← Server | Spieler hat den Server verlassen |
+| `0x6e52` | MsgNewRabbit | ← Server | Rabbit-Chase: Team-Umbelegung (neuer Rabbit → Rabbit, alle übrigen → Hunter) |
 | `0x7075` | MsgPlayerUpdate | → Server | Eigene Position + Velocity + Status (via UDP) |
 | `0x7073` | MsgPlayerUpdateSmall | ← Server | Andere Spieler: kompaktes Positions-Update |
 | `0x7362` | MsgShotBegin | ↔ | Schuss abgefeuert: Pos, Vel, Flag, Lifetime, Shot-ID |
@@ -324,6 +325,7 @@ Kritische Fähigkeiten für den produktiven Server-Betrieb.
 
 | P3-PER-06 | Verstärkte Reaktionsverzögerung gegen schwer wahrnehmbare Schützen: IB ×3, Momentum ×1,5, Cloaked Shot ×3 | ✅ | — |
 | P3-PER-07 | Ziel-Scoring (Distanz, Mensch-Bonus, PhantomZone-/Stealth-gegen-GM-Abwertung) | ✅ | — |
+| P3-PER-08 | Rabbit-Chase: Team-Umbelegung verarbeiten (neuer Rabbit vs. Hunter korrekt als Freund/Feind gewertet) | ✅ | — |
 
 **Flaggen (P3-FLG)**
 
