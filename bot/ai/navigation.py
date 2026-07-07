@@ -15,7 +15,12 @@ from bot.models import AIState
 logger = logging.getLogger("bzbot")
 
 
-class NavigationMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class NavigationMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _wp_reach_radius(self) -> float:

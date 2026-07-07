@@ -8,7 +8,12 @@ from bot.models import AIState
 from bzflag.intersect import rect_rect_overlap
 
 
-class PhysicsMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class PhysicsMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _run_physics(self, dt: float, now: float) -> None:

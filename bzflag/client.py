@@ -141,6 +141,7 @@ class BZFlagClient:
         self.log_unhandled = True
 
         self._handlers: Dict[int, List[Callable]] = {}
+        self._on_game_settings: Callable[..., None] | None = None
 
         # Join-Synchronisation
         self._ev_accepted = threading.Event()
@@ -149,9 +150,10 @@ class BZFlagClient:
         self._world_bytes  = 0
         self._world_buf:  bytearray = bytearray()
         self._world_hash: str = ""
+        self._world_half_cache: float = 0.0
 
         # Callback: on_world_ready(WorldMap) — gesetzt von bzbot.py
-        self.on_world_ready = None
+        self.on_world_ready: Callable[..., None] | None = None
 
         # Eingebaute Handler
         self.add_handler(MsgAccept,           self._h_accept)
@@ -503,7 +505,7 @@ class BZFlagClient:
     def _h_game_settings(self, code: int, payload: bytes) -> None:
         """MsgGameSettings: leitet Payload an optionalen Callback weiter; antwortet mit MsgWantWHash."""
         logger.debug("MsgGameSettings (%d B) – sende MsgWantWHash", len(payload))
-        if hasattr(self, "_on_game_settings"):
+        if self._on_game_settings is not None:
             self._on_game_settings(payload)
         self.send(MsgWantWHash, b"")
 

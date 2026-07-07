@@ -471,8 +471,10 @@ class NavGraph:
         # In Weltkoordinaten umwandeln
         waypoints = []
         keep_idx: set = set()      # P3-NAV-02: Portal-Wegpunkte vor dem Smoothing schützen
-        prev_z = prev_wx = prev_wy = None
-        prev_node = None
+        prev_z:  Optional[float] = None
+        prev_wx: Optional[float] = None
+        prev_wy: Optional[float] = None
+        prev_node: Optional[Tuple] = None
         for idx, (lid, ix, iy) in enumerate(path_nodes):
             layer = self.layers[lid]
             wx, wy = layer.cell_to_world(ix, iy)
@@ -494,6 +496,8 @@ class NavGraph:
             # NICHT für Teleport-Exits: die werden per Tor durchquert (reaktiv), nicht angesprungen —
             # ihre reale Austrittsposition (z.B. z=30 am Ziel-Tor) muss erhalten bleiben.
             if prev_z is not None and layer.z - prev_z > 1.5 and not is_tele_exit:
+                # prev_wx/prev_wy werden stets zusammen mit prev_z gesetzt → hier nicht None
+                assert prev_wx is not None and prev_wy is not None
                 wx, wy, _ = _entry_point(layer, prev_wx, prev_wy)
             waypoints.append((wx, wy, layer.z))
             prev_z, prev_wx, prev_wy = layer.z, wx, wy

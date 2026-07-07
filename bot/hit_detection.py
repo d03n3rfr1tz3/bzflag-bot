@@ -17,7 +17,12 @@ from bot.util import _wrap, _segment_point_dist3d
 logger = logging.getLogger("bzbot")
 
 
-class HitDetectionMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class HitDetectionMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot.py verschoben (Track 4/W5)."""
 
     def _hitbox_half_dims(self) -> Tuple[float, float, float]:

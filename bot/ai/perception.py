@@ -9,7 +9,12 @@ from bot.constants import *  # noqa: F401,F403
 from bot.util import _angle_diff
 
 
-class PerceptionMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class PerceptionMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _effective_fov(self) -> float:

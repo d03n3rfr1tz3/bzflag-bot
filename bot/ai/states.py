@@ -11,7 +11,12 @@ from bot.models import AIState
 logger = logging.getLogger("bzbot")
 
 
-class StateMachineMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class StateMachineMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _transition_to(self, state: AIState) -> None:
