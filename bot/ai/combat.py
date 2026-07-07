@@ -6,7 +6,30 @@ import time
 import logging
 from typing import Optional
 
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    NAV_CELL_SIZE,
+    NAV_WALL_PROBE_DIST,
+    COMBAT_STALL_WIN_MIN,
+    COMBAT_STALL_WIN_MAX,
+    COMBAT_STALL_MIN_DIST,
+    COMBAT_STALL_REV_MIN,
+    COMBAT_STALL_REV_MAX,
+    COMBAT_STALL_WP_MIN,
+    COMBAT_STALL_WP_MAX,
+    COMBAT_STALL_TIMEOUT,
+    COMBAT_REPLAN_RETRY,
+    UNREACH_DIRECT_TIME,
+    UNREACH_AVOID_TIME,
+    UNREACH_REPOS_RADIUS,
+    UNREACH_REPOS_TIMEOUT,
+    COMBAT_DIST_DEADZONE,
+    HIT_RADIUS,
+    DODGE_REACT_DELAY,
+    IB_REACT_MULTIPLIER,
+    M_REACT_MULTIPLIER,
+    CS_REACT_MULTIPLIER,
+    PAUSE_WAIT_S,
+)
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
 

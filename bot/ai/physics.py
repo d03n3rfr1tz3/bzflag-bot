@@ -3,7 +3,9 @@
 import math
 import random
 
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    ON_TOP_EPS,
+)
 from bot.models import AIState
 from bzflag.intersect import rect_rect_overlap
 

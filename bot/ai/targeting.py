@@ -7,7 +7,16 @@ import time
 import logging
 
 from bzflag.protocol import MsgGrabFlag
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    TANK_RADIUS,
+    FLAG_GRAB_RADIUS,
+    IDENTIFY_RANGE,
+    WP_TIMEOUT_BASE,
+    WP_TIMEOUT_SCALE,
+    UNREACH_AVOID_PENALTY,
+    ST_GM_PENALTY,
+    ENEMY_STALE_S,
+)
 from bot.models import PlayerInfo
 from bot.util import _angle_diff
 

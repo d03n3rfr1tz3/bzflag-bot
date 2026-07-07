@@ -4,7 +4,19 @@ import math
 import time
 import logging
 
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    LANDING_DOUBLE_SHOT_DELAY,
+    NAV_TELE_TIMEOUT,
+    NAV_TELE_COOLDOWN,
+    NAV_TELE_OVERSHOOT,
+    STUCK_WINDOW,
+    STUCK_MIN_DIST,
+    EVADE_CLEAR_GRACE,
+    DODGE_REACT_DELAY,
+    IB_REACT_MULTIPLIER,
+    M_REACT_MULTIPLIER,
+    CS_REACT_MULTIPLIER,
+)
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
 
