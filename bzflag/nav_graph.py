@@ -518,7 +518,7 @@ class NavGraph:
 
         open_heap = [(0.0, 0, start)]
         g_score   = {start: 0.0}
-        came_from = {start: None}
+        came_from: Dict[Tuple, Optional[Tuple]] = {start: None}
         closed:   set = set()
         counter   = 1
         # Best-Effort-Fallback: dem Ziel nächster bisher expandierter Knoten. Bei Limit-Treffer
@@ -536,7 +536,7 @@ class NavGraph:
             lvl = logging.DEBUG if grund == "Abgebrochen" else partial_level
             if best_node != start:
                 path = []
-                node = best_node
+                node: Optional[Tuple] = best_node
                 while node is not None:
                     path.append(node)
                     node = came_from[node]
@@ -564,6 +564,14 @@ class NavGraph:
             # Wall-Clock-Budget + kooperatives Cancel nur alle 1024 Expansionen prüfen
             # (perf_counter/is_set sind nicht gratis):
             if len(closed) % 1024 == 0:
+                # GIL explizit freigeben, damit der 60-Hz-Sendeloop pünktlich bleibt, während
+                # dieser A*-Lauf im Hintergrund-Thread (_submit_async_plan) läuft. Interpretiert
+                # yielded der Bytecode-Loop von selbst an solchen Grenzen — als mypyc-Native-Code
+                # (Track 5) gibt es diese automatischen Yield-Punkte nicht mehr, sonst könnte eine
+                # lange Vollsuche _send_update blockieren ([nr]-Stalls). time.sleep(0) wirkt
+                # interpretiert wie kompiliert identisch und ist im Schnellplan (selten >1024
+                # Expansionen) vernachlässigbar.
+                time.sleep(0)
                 if time.perf_counter() > t_deadline:
                     return _best_effort("Zeitbudget erreicht")
                 if cancel is not None and cancel.is_set():
@@ -571,10 +579,10 @@ class NavGraph:
 
             if current in goal_set:
                 path = []
-                node = current
-                while node is not None:
-                    path.append(node)
-                    node = came_from[node]
+                node2: Optional[Tuple] = current
+                while node2 is not None:
+                    path.append(node2)
+                    node2 = came_from[node2]
                 return list(reversed(path))
 
             lid, ix, iy = current
@@ -700,7 +708,7 @@ class NavGraph:
         round(dst_wy), dst.z)`` für Sprung-hoch-Kanten (NAV-14-Filter wird erst beim Lesen in
         ``_vertical_neighbors`` angewandt), ``None`` für Fall-Kanten. ``ts`` ist die horizontale
         Sprung-Reisegeschwindigkeit (Basis oder Flaggen-erhöht)."""
-        result = []
+        result: List[Tuple[Tuple, float, object]] = []
 
         # ── Sprung-rauf ────────────────────────────────────────────────────
         # Nur die vorberechneten Kandidaten-Layer (konservativer JUMP_RANGE-AABB-Filter) statt aller

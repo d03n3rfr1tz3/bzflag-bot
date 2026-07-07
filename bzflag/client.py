@@ -355,12 +355,14 @@ class BZFlagClient:
 
         if use_udp:
             try:
+                assert self._udp_sock is not None  # use_udp impliziert _udp_sock gesetzt
                 self._udp_sock.sendto(data, self._server_addr or (self.host, self.port))
             except OSError as exc:
                 logger.error("UDP-Sendefehler 0x%04x: %s", code, exc)
         else:
             with self._send_lock:
                 try:
+                    assert self._sock is not None  # TCP-Pfad läuft nur nach connect()
                     self._sock.setblocking(True)
                     self._sock.sendall(data)
                 except OSError as exc:
@@ -392,6 +394,7 @@ class BZFlagClient:
     def _recv_loop_tcp(self) -> None:
         """TCP-Empfangs-Thread: liest Pakete aus dem Stream und dispatcht sie."""
         buf = b""
+        assert self._sock is not None  # Thread startet erst nach erfolgreichem connect()
         self._sock.settimeout(1.0)
         while self.running:
             try:
