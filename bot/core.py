@@ -21,11 +21,79 @@ from bzflag.protocol import (
     MsgScore, MsgMessage, MsgGameTime, MsgHandicap,
     MsgLagState, MsgGMUpdate, MsgNearFlag, MsgGrabFlag,
     MsgDropFlag, MsgCaptureFlag, MsgTransferFlag, MsgSuperKill,
-    MsgScoreOver, MsgTeleport, MsgPause, MsgNewRabbit, MSG_INTERNAL_DISCONNECT,
-    MGR_STATUS_PREFIX, BOT_EXIT_REJECTED, PS_ALIVE, PS_FALLING,
+    MsgScoreOver, MsgTeleport, MsgPause, MsgNewRabbit,
+    MSG_INTERNAL_DISCONNECT, MGR_STATUS_PREFIX, PS_ALIVE, PS_FALLING,
     PS_EXPLODING, PS_FLAG_ACTIVE, PS_TELEPORTING, PS_CROSSING, build_player_update,
 )
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    TANK_LENGTH,
+    TANK_WIDTH,
+    TANK_HEIGHT,
+    TANK_SPEED,
+    TANK_TURN_RATE,
+    JUMP_VELOCITY,
+    GRAVITY,
+    WALL_HEIGHT_DEFAULT,
+    WORLD_HALF_DEFAULT,
+    MUZZLE_FRONT,
+    MUZZLE_HEIGHT,
+
+    SHOT_SPEED_DEFAULT,
+    SHOT_RANGE,
+    SHOT_LIFETIME,
+    MAX_SHOTS_DEFAULT,
+    SHOT_RADIUS,
+    RELOAD_TIME_DEFAULT,
+    SHOCK_IN_RADIUS,
+    SHOCK_OUT_RADIUS,
+    SHOCK_AD_LIFE,
+    SW_EXPAND_SPEED,
+
+    GM_TURN_RATE,
+    GM_ACTIVATION_TIME,
+    GM_AD_LIFE,
+    GM_LOCK_ON_ANGLE,
+
+    FLAG_RADIUS,
+    VELOCITY_AD,
+    AGILITY_AD_VEL,
+    LG_GRAVITY,
+    BURROW_DEPTH,
+    BURROW_SPEED_AD,
+    BURROW_ANG_AD,
+    ANGULAR_AD,
+    SHIELD_FLIGHT,
+    IDENTIFY_RANGE,
+    OBESITY_FACTOR,
+    _TINY_FACTOR,
+    THIEF_TINY_FACTOR,
+    THIEF_VEL_AD,
+    THIEF_AD_SHOT_VEL,
+    THIEF_AD_LIFE,
+    _NARROW_HW,
+    SR_RADIUS_MULT,
+
+    MGUN_AD_RATE,
+    MGUN_AD_LIFE,
+    MGUN_AD_VEL,
+    RFIRE_AD_RATE,
+    RFIRE_AD_VEL,
+    RFIRE_AD_LIFE,
+    LASER_AD_VEL,
+    LASER_AD_RATE,
+    LASER_AD_LIFE,
+
+    UPDATE_RATE_HZ,
+    SERVER_UPDATE_RATE_HZ,
+    AI_RATE_HZ,
+    RESPAWN_DELAY,
+    EXPLODE_TIME,
+    
+    WIDE_ANGLE_ANG,
+
+    GOOD_FLAGS_DEFAULT,
+    BAD_FLAGS_DEFAULT,
+)
 from bot.models import Shot, PlayerInfo, FlagInfo, AIState
 from bot.ai import BZBotAI
 from bot.handlers import HandlersMixin
@@ -105,13 +173,13 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
     def _init_tank_state(self):
         """Eigener Tank-Zustand + Shot-Slots."""
         # Eigener Zustand
-        self.player_id: Optional[int] = None
+        self.player_id = None
         self.pos       = [0.0, 0.0, 0.0]
         self.vel       = [0.0, 0.0, 0.0]
         self.azimuth   = 0.0
         self.ang_vel   = 0.0
         self.alive     = False
-        self.death_time: Optional[float] = None
+        self.death_time = None
         self._order    = 0       # GLOBAL, niemals zurücksetzen!
 
         # Shot-ID: low byte = slot (0..maxShots-1), high byte = generation
@@ -119,8 +187,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._shot_gen  = 0
         self._max_shots = MAX_SHOTS_DEFAULT
         self._next_shoot = 0.0
-        self._slot_reload_at: list[float] = []
-        self._spawn_sent_at: Optional[float] = None
+        self._slot_reload_at = []
+        self._spawn_sent_at = None
         self._reload_time = RELOAD_TIME_DEFAULT
 
     def _init_server_vars(self):
@@ -176,7 +244,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # 0,1-s-Stall-Clamp der Hauptschleife und trägt die Eigenbewegung in den
         # Sweep ein (Client-Äquivalent: relativeRay). Reset bei Spawn (_on_alive).
         self._last_hit_check_t   = time.monotonic()
-        self._last_hit_check_pos: Optional[Tuple[float, float, float]] = None
+        self._last_hit_check_pos = None
         self._tiny_factor        = _TINY_FACTOR        # via MsgSetVar _tinyFactor
         self._thief_tiny_factor  = THIEF_TINY_FACTOR   # via MsgSetVar _thiefTinyFactor
         self._thief_vel_ad       = THIEF_VEL_AD        # via MsgSetVar _thiefVelAd
@@ -194,7 +262,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # sind die Ausdrücke "_gravity" bzw. "_jumpVelocity").
         self._wings_gravity = None
         self._wings_jump_velocity = None
-        self._dropped_neutrals: collections.deque = collections.deque(maxlen=5)
+        self._dropped_neutrals = collections.deque(maxlen=5)
 
         # Schuss-Typ-Multiplikatoren (via MsgSetVar)
         self._mgun_ad_rate  = MGUN_AD_RATE
@@ -210,44 +278,44 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
     def _init_world(self):
         """Welt-/Spieler-Zustand (gefüllt nach Welt-Download)."""
         # Welt
-        self.players:  Dict[int, PlayerInfo] = {}
+        self.players = {}
         self.human_count    = 0
         self.observer_count = 0
         self._world_map = None   # Optional[WorldMap] — gesetzt nach Welt-Download
         self._shot_grid = None   # Optional[ObstacleGrid] — Broad-Phase für simulate_shot_path (P1)
         self._link_map = {}      # face-Index → Ziel-face-Index (Teleporter), aus _world_map.links
-        self._tele_solid_boxes: list = []  # Teleporter-Posts+Crossbar als BoxObstacle (Kollision)
+        self._tele_solid_boxes = []  # Teleporter-Posts+Crossbar als BoxObstacle (Kollision)
         self._teleporting_until = 0.0      # P3-NAV-02: PS_TELEPORTING-Ende + Re-Trigger-Sperre
 
     def _init_nav(self):
         """Navigation: Pfad-Queue, NAV_JUMP/NAV_TELE, COMBAT-Eskalations-Episode."""
         self._nav_graph = None   # Optional[NavGraph] — aus _world_map gebaut
-        self._nav_path: list = []      # [(wx, wy, layer_z), ...] — aktuelle Pfad-Queue
+        self._nav_path = []      # [(wx, wy, layer_z), ...] — aktuelle Pfad-Queue
         self._nav_goal = None          # Optional[Tuple[float, float]] — aktuelles Ziel
         self._nav_jump_return_state = None   # AIState nach NAV_JUMP-Landung
-        self._nav_jump_target_z: float = 0.0  # Erwartet-Landeebene für NAV_JUMP-Fehlschlagerkennung
-        self._nav_jump_cooldowns: dict = {}  # (round_x, round_y, z) → expiry_time (NAV-14)
+        self._nav_jump_target_z = 0.0  # Erwartet-Landeebene für NAV_JUMP-Fehlschlagerkennung
+        self._nav_jump_cooldowns = {}  # (round_x, round_y, z) → expiry_time (NAV-14)
         # NAV_TELE: direkter Endanflug in die Teleporter-Mitte (P3-NAV-02)
-        self._nav_tele_cooldowns: dict = {}  # (round_cx, round_cy) → expiry_time
+        self._nav_tele_cooldowns = {}  # (round_cx, round_cy) → expiry_time
         self._nav_tele_center = None         # Optional[Tuple[float, float]] — aktive Tor-Mitte
-        self._nav_tele_start: float = 0.0    # Engage-Zeit (monotonic) für Timeout
+        self._nav_tele_start = 0.0    # Engage-Zeit (monotonic) für Timeout
         self._nav_tele_return_state = None   # AIState nach Querung/Abbruch
         # COMBAT-Eskalation bei per Sprung unerreichbarem (zu hohem) Gegner ohne A*-Pfad
-        self._unreach_target: Optional[int] = None   # pid der laufenden Episode (None = keine)
-        self._unreach_phase: int = 0                 # 0=Re-Target 1=Direkt 2/3=Reposition
-        self._unreach_until: float = 0.0             # Phasen-Deadline (time.monotonic)
-        self._unreach_replan_at: float = 0.0         # Drossel für Hintergrund-Replan
-        self._combat_avoid: dict = {}                # pid → expiry_time (gemiedene Ziele)
-        self._recent_flag_targets: collections.deque = collections.deque(maxlen=10)  # (round_x, round_y)
-        self._wp_start_time: Optional[float] = None  # Zeit seit aktuellem WP-Ziel
-        self._wp_fail_count: int = 0                 # aufeinanderfolgende WP-Timeouts
-        self._wp_timeout: float = 3.0                # per-WP Timeout (berechnet in bot/ai/navigation.py)
+        self._unreach_target = None   # pid der laufenden Episode (None = keine)
+        self._unreach_phase = 0                 # 0=Re-Target 1=Direkt 2/3=Reposition
+        self._unreach_until = 0.0             # Phasen-Deadline (time.monotonic)
+        self._unreach_replan_at = 0.0         # Drossel für Hintergrund-Replan
+        self._combat_avoid = {}                # pid → expiry_time (gemiedene Ziele)
+        self._recent_flag_targets = collections.deque(maxlen=10)  # (round_x, round_y)
+        self._wp_start_time = None  # Zeit seit aktuellem WP-Ziel
+        self._wp_fail_count = 0                 # aufeinanderfolgende WP-Timeouts
+        self._wp_timeout = 3.0                # per-WP Timeout (berechnet in bot/ai/navigation.py)
 
     def _init_shots(self):
         """Shot-Tracking (Recv-Thread schreibt, Game-Loop liest)."""
         # Shot-Tracking
-        self._shots:          Dict[Tuple[int, int], Shot] = {}
-        self._ricochet_paths: Dict[Tuple[int, int], List] = {}
+        self._shots = {}
+        self._ricochet_paths = {}
         self._shots_lock = threading.Lock()
 
     def _init_async_plan(self):
@@ -255,32 +323,32 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # P4-INF-01: Asynchrone Pfadplanung (Zweit-Thread). Der gecachte NavGraph ist nach der
         # Reentranz-Umstellung parallel beplanbar; der Worker bekommt nur Plain-Value-Snapshots.
         self._async_plan_lock   = threading.Lock()
-        self._async_plan_thread: Optional[threading.Thread] = None
-        self._async_plan_result: Optional[tuple] = None   # (gen,gx,gy,gz,cap,sx,sy,path)
-        self._async_plan_goal:   Optional[Tuple[float, float]] = None  # in-flight-Ziel (Cancel-Vergleich)
+        self._async_plan_thread = None
+        self._async_plan_result = None   # (gen,gx,gy,gz,cap,sx,sy,path)
+        self._async_plan_goal = None  # in-flight-Ziel (Cancel-Vergleich)
         self._async_cancel       = threading.Event()      # kooperatives Cancel der laufenden Vollsuche
         self._plan_gen           = 0                      # monoton; invalidiert veraltete Ergebnisse
 
     def _init_ai_state(self):
         """KI-Grundzustand (Ziel, Dodge, Sprung)."""
         # KI — Grundzustand
-        self.target_pos:    Optional[Tuple[float, float]] = None
-        self.target_player: Optional[int] = None
-        self._target_paused_since: Optional[float] = None  # seit wann das aktuelle Ziel pausiert (Warte-Timer)
+        self.target_pos = None
+        self.target_player = None
+        self._target_paused_since = None  # seit wann das aktuelle Ziel pausiert (Warte-Timer)
         self._dodging        = False
         self._dodge_until    = 0.0
         self._dodge_dir      = 0.0
-        self._threat_detected_at: float = 0.0
-        self._last_threat_id:      Optional[Tuple[int, int]] = None
-        self._evade_cleared_shots: dict                       = {}
+        self._threat_detected_at = 0.0
+        self._last_threat_id = None
+        self._evade_cleared_shots = {}
         self._jumping        = False
         self._jump_ang_vel   = 0.0
-        self._pre_fall_state: "AIState" = AIState.IDLE
-        self._bounce_next:   float = 0.0
-        self._z_attack_mode: bool = False
-        self._z_attack_fire_z: float = 0.0
-        self._z_attack_retry_after:  float = 0.0
-        self._tact_jump_retry_after: float = 0.0
+        self._pre_fall_state = AIState.IDLE
+        self._bounce_next = 0.0
+        self._z_attack_mode = False
+        self._z_attack_fire_z = 0.0
+        self._z_attack_retry_after = 0.0
+        self._tact_jump_retry_after = 0.0
 
     def _init_debug(self, debug_no_shoot, debug_no_jump, debug_log_path, debug_log_shot,
                     debug_log_dodge, debug_log_flag, debug_log_tele):
@@ -297,76 +365,76 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
     def _init_flags(self, good_flags, bad_flags, limited_flags, debug_target_flag):
         """Flag-Strategie + Flag-Tracking."""
         # Flag-Strategie
-        self.own_flag: str = ""
+        self.own_flag = ""
         self.good_flags = set(good_flags) if good_flags is not None else set(GOOD_FLAGS_DEFAULT)
         self.bad_flags  = set(bad_flags)  if bad_flags  is not None else set(BAD_FLAGS_DEFAULT)
-        self._limited_flags: set[str] = set(limited_flags) if limited_flags else set()
-        self._shots_remaining: int = -1
-        self._last_notschuss_threat: tuple | None = None
+        self._limited_flags = set(limited_flags) if limited_flags else set()
+        self._shots_remaining = -1
+        self._last_notschuss_threat = None
         if debug_target_flag:
             self.good_flags = {debug_target_flag}
             self.bad_flags.discard(debug_target_flag)
             if self._debug_log_flag:
                 logger.debug("[%s] Flagge: Ziel-Flag: %s", self.callsign, debug_target_flag)
-        self._own_flag_since: float = 0.0
-        self._last_drop_attempt: float = 0.0
-        self._drop_bad_flag_delay: float = 1.0
+        self._own_flag_since = 0.0
+        self._last_drop_attempt = 0.0
+        self._drop_bad_flag_delay = 1.0
 
         # Flag-Tracking
-        self.flags: Dict[int, FlagInfo] = {}
-        self._last_grab_attempt: float = 0.0
+        self.flags = {}
+        self._last_grab_attempt = 0.0
 
     def _init_runtime_state(self):
         """GM-Tracking, State Machine, Sende-Kadenz, Tick-Memo, Lebenszyklus-Flags."""
         # GM-Tracking
-        self._active_gm: Optional[dict] = None
-        self._gm_need_update: bool = False
-        self._gm_send_at:    Optional[float] = None
-        self._gm_resend_at:  Optional[float] = None
+        self._active_gm = None
+        self._gm_need_update = False
+        self._gm_send_at = None
+        self._gm_resend_at = None
 
         # Server-Zeitbasis
-        self._server_time_offset: float = 0.0
+        self._server_time_offset = 0.0
 
         # Bewegungs-Flags
-        self._move_reverse: bool = False
+        self._move_reverse = False
 
         # Taktischer Übersprung
-        self._jump_pending: bool = False
-        self._tactical_jump_until: float = 0.0
-        self._last_jump_at: float = 0.0
-        self._escape_jump_ang_vel: Optional[float] = None
-        self._dodge_forward: bool = False
-        self._dodge_reverse: bool = False
+        self._jump_pending = False
+        self._tactical_jump_until = 0.0
+        self._last_jump_at = 0.0
+        self._escape_jump_ang_vel = None
+        self._dodge_forward = False
+        self._dodge_reverse = False
 
         # Stuck-Erkennung
         self._last_pos_check_time = 0.0
         self._last_pos_check      = [0.0, 0.0]
 
         # COMBAT-Stall-Watchdog: None = nicht scharf
-        self._stall_check_at: Optional[float] = None   # Deadline des Beobachtungsfensters
-        self._stall_anchor: list = [0.0, 0.0]          # Position beim Armieren
-        self._stall_mode: Optional[str] = None         # aktives Manöver: "REV" | "PATH" | None
-        self._stall_until: float = 0.0                 # Sicherheits-Deadline des Manövers
-        self._stall_rev_start: list = [0.0, 0.0]       # Startposition des Rückwärts-Manövers
-        self._stall_rev_dist: float = 0.0              # Soll-Rückwärtsdistanz (10–15 u)
+        self._stall_check_at = None   # Deadline des Beobachtungsfensters
+        self._stall_anchor = [0.0, 0.0]          # Position beim Armieren
+        self._stall_mode = None         # aktives Manöver: "REV" | "PATH" | None
+        self._stall_until = 0.0                 # Sicherheits-Deadline des Manövers
+        self._stall_rev_start = [0.0, 0.0]       # Startposition des Rückwärts-Manövers
+        self._stall_rev_dist = 0.0              # Soll-Rückwärtsdistanz (10–15 u)
 
         # State Machine
-        self._ai_state: AIState = AIState.IDLE
-        self._landing_shot_until: float = 0.0
-        self._landing_aim_pos: Optional[Tuple[float, float]] = None
-        self._landing_hit_z: float = 0.0   # Interzeptionshöhe für LANDING_SHOT (P4-TAC-07)
-        self._landing_second_shot_at: Optional[float] = None   # Zeitpunkt des menschlichen "Doppelklick"-Nachschusses
-        self._rico_aim_cache: Optional[Tuple[float, int, Optional[Tuple[float, bool]]]] = None
-        self._indirect_hold_until: Optional[float] = None   # Zeit-Cap fürs Indirekt-Schuss-Halten (C)
+        self._ai_state = AIState.IDLE
+        self._landing_shot_until = 0.0
+        self._landing_aim_pos = None
+        self._landing_hit_z = 0.0   # Interzeptionshöhe für LANDING_SHOT (P4-TAC-07)
+        self._landing_second_shot_at = None   # Zeitpunkt des menschlichen "Doppelklick"-Nachschusses
+        self._rico_aim_cache = None
+        self._indirect_hold_until = None   # Zeit-Cap fürs Indirekt-Schuss-Halten (C)
 
-        self._next_server_update: float = 0.0
-        self._server_update_interval: float = 1.0 / SERVER_UPDATE_RATE_HZ
-        self._tick_count: int = 0
+        self._next_server_update = 0.0
+        self._server_update_interval = 1.0 / SERVER_UPDATE_RATE_HZ
+        self._tick_count = 0
         # P4a: Per-Tick-Memo für teure, mehrfach pro Tick identisch aufgerufene
         # Wahrnehmungs-Queries (_get_floor_z/_has_los_to_enemy/_muzzle_clear).
         # Keys enthalten alle Eingaben (Position etc.) → reiner Funktions-Memo;
         # wird am Anfang jedes Game-Loop-Ticks geleert. Nur Main-Thread.
-        self._tick_memo: Dict = {}
+        self._tick_memo = {}
 
         self._running          = False
         self._stop_event       = threading.Event()
@@ -375,11 +443,11 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # Verbindungsverlust endet (Server-Close/Reset/MsgSuperKill) — kein Absturz, aber
         # auch kein bewusster Stop. Steuert den Exit-Code (BOT_EXIT_CONN_LOST) für den Manager.
         self._connection_lost  = False
-        self._round_over_until: float | None = None  # Endzeit der Endstand-Linger-Phase
-        self._exploding_until: float = 0.0   # Endzeit der Explosions-Animation (PS_EXPLODING senden)
-        self._game_over: bool = False        # Server-Rundenende-Zustand (aus MsgTimeUpdate/MsgScoreOver)
-        self._round_over: bool = False       # echtes Rundenende NACH dem Spielen (Managed: Exit→Manager-Rejoin)
-        self._has_spawned: bool = False      # hat der Bot diese Session schon gespielt? (Reconnect-Gate)
+        self._round_over_until = None  # Endzeit der Endstand-Linger-Phase
+        self._exploding_until = 0.0   # Endzeit der Explosions-Animation (PS_EXPLODING senden)
+        self._game_over = False        # Server-Rundenende-Zustand (aus MsgTimeUpdate/MsgScoreOver)
+        self._round_over = False       # echtes Rundenende NACH dem Spielen (Managed: Exit→Manager-Rejoin)
+        self._has_spawned = False      # hat der Bot diese Session schon gespielt? (Reconnect-Gate)
         self.on_player_count_changed = None
 
     def _init_handlers(self):

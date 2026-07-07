@@ -14,8 +14,10 @@ from bot.ai.perception import PerceptionMixin
 from bot.ai.targeting import TargetingMixin
 from bot.ai.tactics import TacticsMixin
 from bot.ai.shooting import ShootingMixin
+from mypy_extensions import trait
 
 
+@trait
 class BZBotAI(CapabilityMixin, PhysicsMixin, StateMachineMixin, CombatMixin,
               NavigationMixin, PerceptionMixin, TargetingMixin, TacticsMixin,
               ShootingMixin):

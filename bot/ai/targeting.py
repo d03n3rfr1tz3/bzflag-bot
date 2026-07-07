@@ -7,13 +7,28 @@ import time
 import logging
 
 from bzflag.protocol import MsgGrabFlag
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    TANK_RADIUS,
+    FLAG_GRAB_RADIUS,
+    IDENTIFY_RANGE,
+    WP_TIMEOUT_BASE,
+    WP_TIMEOUT_SCALE,
+    UNREACH_AVOID_PENALTY,
+    ST_GM_PENALTY,
+    ENEMY_STALE_S,
+)
+from bot.models import PlayerInfo
 from bot.util import _angle_diff
 
 logger = logging.getLogger("bzbot")
 
 
-class TargetingMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class TargetingMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _is_foe(self, info: "PlayerInfo", in_sight: bool) -> bool:
@@ -169,7 +184,7 @@ class TargetingMixin:
         # ── Fall A: Bot hat keine Flagge ─────────────────────────────────
         if self.own_flag == "":
             best_d: float = float("inf")
-            best_pos = None
+            best_pos: tuple[float, ...] | None = None
             _dropped = getattr(self, '_dropped_neutrals', ())
             _recent  = getattr(self, '_recent_flag_targets', ())
             for fi in list(self.flags.values()):

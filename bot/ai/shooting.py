@@ -9,14 +9,30 @@ from typing import Optional, Tuple
 
 from bzflag.protocol import MsgShotBegin
 from bzflag.shot_physics import (simulate_shot_path, can_ricochet, _segment_hits_obb_3d)
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    THIEF_AD_RANGE,
+    SHOOT_INTERVAL_RANDOM_MAX,
+    MIN_BURST_INTERVAL,
+    GM_BURST_INTERVAL,
+    OPTIMAL_RANGE,
+    RICO_AIM_CACHE_TTL,
+    RICO_AIM_MAX,
+    TELE_AIM_Z_TOL,
+    INDIRECT_HOLD_S,
+    HIT_RADIUS,
+)
 from bot.util import _angle_diff
 from bot.models import AIState
 
 logger = logging.getLogger("bzbot")
 
 
-class ShootingMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class ShootingMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _set_next_shoot_after_fire(self, now: float) -> None:

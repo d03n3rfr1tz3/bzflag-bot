@@ -3,12 +3,19 @@
 import math
 import random
 
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    ON_TOP_EPS,
+)
 from bot.models import AIState
 from bzflag.intersect import rect_rect_overlap
 
 
-class PhysicsMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class PhysicsMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _run_physics(self, dt: float, now: float) -> None:

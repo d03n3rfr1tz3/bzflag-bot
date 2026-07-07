@@ -5,11 +5,29 @@ import random
 from typing import Optional
 
 from bzflag.shot_physics import (ray_teleporter_crossing)
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    NAV_WALL_STEEP_DEG,
+    DODGE_DIST,
+    RICO_DODGE_LOOKAHEAD,
+    HIT_RADIUS,
+    AHEAD_HALF_ANGLE,
+    RADAR_SKIP_DEFAULT,
+    RADAR_SKIP_CL,
+    RADAR_COOLDOWN_DEFAULT,
+    RADAR_COOLDOWN_CL,
+    PLAYER_LOS_TTL_S,
+    RADAR_RANGE,
+    TARGET_FOV,
+)
 from bot.util import _angle_diff
 
 
-class PerceptionMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class PerceptionMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _effective_fov(self) -> float:

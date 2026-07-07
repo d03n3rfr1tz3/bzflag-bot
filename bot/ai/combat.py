@@ -4,15 +4,44 @@ import math
 import random
 import time
 import logging
+from typing import Optional
 
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    NAV_CELL_SIZE,
+    NAV_WALL_PROBE_DIST,
+    COMBAT_STALL_WIN_MIN,
+    COMBAT_STALL_WIN_MAX,
+    COMBAT_STALL_MIN_DIST,
+    COMBAT_STALL_REV_MIN,
+    COMBAT_STALL_REV_MAX,
+    COMBAT_STALL_WP_MIN,
+    COMBAT_STALL_WP_MAX,
+    COMBAT_STALL_TIMEOUT,
+    COMBAT_REPLAN_RETRY,
+    UNREACH_DIRECT_TIME,
+    UNREACH_AVOID_TIME,
+    UNREACH_REPOS_RADIUS,
+    UNREACH_REPOS_TIMEOUT,
+    COMBAT_DIST_DEADZONE,
+    HIT_RADIUS,
+    DODGE_REACT_DELAY,
+    IB_REACT_MULTIPLIER,
+    M_REACT_MULTIPLIER,
+    CS_REACT_MULTIPLIER,
+    PAUSE_WAIT_S,
+)
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
 
 logger = logging.getLogger("bzbot")
 
 
-class CombatMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class CombatMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _tick_combat(self, now: float) -> None:
@@ -468,7 +497,7 @@ class CombatMixin:
         self._nav_goal = None
 
     def _setup_dodge(self, threat, now: float, time_to_impact: float,
-                     dodge_dir: float, orig_diff: float = None) -> None:
+                     dodge_dir: float, orig_diff: Optional[float] = None) -> None:
         """Setzt Dodge-Variablen mit vorberechneter Ausweich-Richtung (60°-gecapped).
         orig_diff: Winkel von best_perp zu azimuth vor dem Cap — bestimmt fwd/rev."""
         self._dodge_dir = dodge_dir

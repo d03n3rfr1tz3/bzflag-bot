@@ -193,6 +193,19 @@ bzflag-bot/
 └── README.md
 ```
 
+## Kompilieren mit mypyc
+
+Installation von mypy und genereller Test der Python-Typen:
+```bash
+pip install mypy
+mypy --namespace-packages bot bzflag
+```
+
+Tatsächliches Kompilieren mit mypyc
+```bash
+mypyc --namespace-packages bot bzflag
+```
+
 ## Tests ausführen
 
 ```bash
@@ -201,7 +214,6 @@ pytest tests/ -v
 ```
 
 Einzelne Kategorien testen:
-
 ```bash
 pytest tests/ -v -k "dodge"   # Ausweich- und Sprung-Tests
 pytest tests/ -v -k "sw"      # Shockwave-Tests

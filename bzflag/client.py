@@ -141,6 +141,7 @@ class BZFlagClient:
         self.log_unhandled = True
 
         self._handlers: Dict[int, List[Callable]] = {}
+        self._on_game_settings: Callable[..., None] | None = None
 
         # Join-Synchronisation
         self._ev_accepted = threading.Event()
@@ -149,9 +150,10 @@ class BZFlagClient:
         self._world_bytes  = 0
         self._world_buf:  bytearray = bytearray()
         self._world_hash: str = ""
+        self._world_half_cache: float = 0.0
 
         # Callback: on_world_ready(WorldMap) — gesetzt von bzbot.py
-        self.on_world_ready = None
+        self.on_world_ready: Callable[..., None] | None = None
 
         # Eingebaute Handler
         self.add_handler(MsgAccept,           self._h_accept)
@@ -355,12 +357,14 @@ class BZFlagClient:
 
         if use_udp:
             try:
+                assert self._udp_sock is not None  # use_udp impliziert _udp_sock gesetzt
                 self._udp_sock.sendto(data, self._server_addr or (self.host, self.port))
             except OSError as exc:
                 logger.error("UDP-Sendefehler 0x%04x: %s", code, exc)
         else:
             with self._send_lock:
                 try:
+                    assert self._sock is not None  # TCP-Pfad läuft nur nach connect()
                     self._sock.setblocking(True)
                     self._sock.sendall(data)
                 except OSError as exc:
@@ -392,6 +396,7 @@ class BZFlagClient:
     def _recv_loop_tcp(self) -> None:
         """TCP-Empfangs-Thread: liest Pakete aus dem Stream und dispatcht sie."""
         buf = b""
+        assert self._sock is not None  # Thread startet erst nach erfolgreichem connect()
         self._sock.settimeout(1.0)
         while self.running:
             try:
@@ -500,7 +505,7 @@ class BZFlagClient:
     def _h_game_settings(self, code: int, payload: bytes) -> None:
         """MsgGameSettings: leitet Payload an optionalen Callback weiter; antwortet mit MsgWantWHash."""
         logger.debug("MsgGameSettings (%d B) – sende MsgWantWHash", len(payload))
-        if hasattr(self, "_on_game_settings"):
+        if self._on_game_settings is not None:
             self._on_game_settings(payload)
         self.send(MsgWantWHash, b"")
 

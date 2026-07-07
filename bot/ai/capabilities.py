@@ -2,10 +2,26 @@
 
 import math
 
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    TANK_WIDTH,
+    TANK_RADIUS_FACTOR,
+    TANK_RADIUS,
+    _TINY_FACTOR,
+    _NARROW_HW,
+    OPTIMAL_RANGE,
+    OPTIMAL_RANGE_MG,
+    OPTIMAL_RANGE_SW,
+    OPTIMAL_RANGE_GM,
+    JUMP_COOLDOWN,
+)
 
 
-class CapabilityMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class CapabilityMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _effective_half_width(self) -> float:

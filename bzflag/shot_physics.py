@@ -500,7 +500,7 @@ def simulate_shot_path(pos: Tuple[float, float, float],
         # Finde nächstes Ereignis: Obstacles + Weltgrenzen + Teleporter-Querungen
         best_t = time_left + 1.0   # sentinel > time_left
         best_n = (0.0, 0.0, 0.0)
-        best_tele: Optional[Tuple[int, int]] = None  # (ziel_teleporter_index, ziel_face) oder None
+        best_tele: Optional[Tuple[int, int, int, int]] = None  # (eintritt_ti, eintritt_face, ziel_ti, ziel_face) oder None
 
         if not phase_walls:
             # Weltgrenzen

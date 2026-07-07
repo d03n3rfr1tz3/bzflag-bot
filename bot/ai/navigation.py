@@ -8,14 +8,30 @@ from typing import Tuple
 
 from bzflag.nav_graph import JUMP_EDGE_TOL
 from bzflag.shot_physics import (ray_teleporter_crossing, teleport_through)
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    NAV_CELL_SIZE,
+    TELEPORT_TIME,
+    WP_TIMEOUT_BASE,
+    WP_TIMEOUT_SCALE,
+    NAV_JUMP_Z_TOL,
+    NAV_TELE_ENGAGE_DIST,
+    NAV_ASYNC_TRIGGER_MS,
+    NAV_ASYNC_MAX_EXPANSIONS,
+    NAV_ASYNC_MAX_MS,
+    NAV_ASYNC_RESYNC_TOL,
+)
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
 
 logger = logging.getLogger("bzbot")
 
 
-class NavigationMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class NavigationMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _wp_reach_radius(self) -> float:

@@ -10,14 +10,26 @@ from bzflag.shot_physics import (_segment_hits_obb_3d, _extend_segment)
 from bzflag.protocol import (
     MsgKilled,
 )
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    TANK_RADIUS,
+    RESPAWN_DELAY,
+    HIT_RADIUS,
+    KILL_REASON_SHOT,
+    KILL_REASON_RUNOVER,
+    KILL_REASON_GENOCIDED,
+)
 from bot.models import Shot, AIState
 from bot.util import _wrap, _segment_point_dist3d
 
 logger = logging.getLogger("bzbot")
 
 
-class HitDetectionMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class HitDetectionMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot.py verschoben (Track 4/W5)."""
 
     def _hitbox_half_dims(self) -> Tuple[float, float, float]:

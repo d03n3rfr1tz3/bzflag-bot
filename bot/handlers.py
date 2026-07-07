@@ -10,21 +10,35 @@ from bzflag.shot_physics import (simulate_shot_path, build_link_map, can_ricoche
 from bzflag.world_map import teleporter_solid_boxes
 from bzflag.obstacle_grid import ObstacleGrid, LOS_GRID_PAD
 from bzflag.protocol import (
-    PLAYER_TYPE_COMPUTER, TEAM_OBSERVER, TEAM_RABBIT, TEAM_HUNTER, MsgKilled, MsgAddPlayer,
-    MsgPlayerUpdate, MsgPlayerUpdateSmall, MsgSetVar, MsgFlagUpdate,
-    MsgMessage, MsgGameTime, MsgGMUpdate, MsgNearFlag,
-    MsgTransferFlag, MsgScoreOver, MsgTeleport, MsgPause,
-    PS_ALIVE, PS_FALLING, PS_EXPLODING, PS_FLAG_ACTIVE,
+    PLAYER_TYPE_COMPUTER, TEAM_OBSERVER, TEAM_RABBIT, TEAM_HUNTER,
+    MsgKilled, MsgTransferFlag,
+    PS_ALIVE, PS_FALLING, PS_FLAG_ACTIVE,
     unpack_uint8, unpack_uint16, unpack_int16, unpack_uint32,
     unpack_vec3, unpack_float, unpack_string, CallSignLen,
 )
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    SERVER_UPDATE_RATE_HZ,
+    SHOOT_INTERVAL_RANDOM_MAX,
+    EXPLODE_TIME,
+    ROUND_END_LINGER,
+    HIT_RADIUS,
+    SMALL_SCALE,
+    SMALL_MAX_DIST,
+    SMALL_MAX_VEL,
+    KILL_REASON_GENOCIDED,
+    FLAG_NAME_TO_ABBR,
+)
 from bot.models import Shot, PlayerInfo, FlagInfo, AIState
 
 logger = logging.getLogger("bzbot")
 
 
-class HandlersMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class HandlersMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot.py verschoben (Track 4/W5)."""
 
     def _on_game_settings(self, payload: bytes) -> None:
@@ -522,7 +536,7 @@ class HandlersMixin:
         _tele_phase = (_has_teles and _phases_walls
                        and not shot.is_gm and not shot.is_sw)
         path_segs = None
-        _tlog = [] if self._debug_log_tele else None
+        _tlog: list | None = [] if self._debug_log_tele else None
         if _tele_phase or (self._world_map is not None
                 and (_tele_route
                      or _can_ricochet_shot(shot.flag_abbr, shot.is_gm, shot.is_sw,
@@ -882,7 +896,9 @@ class HandlersMixin:
             return
         attr, cast, guard, fmt, hook = entry
         try:
-            v = float(val)
+            # int | float: int-Server-Vars werden unten als int gespeichert; mypyc verbietet
+            # den Repräsentationswechsel einer nur-float-Variable (Track 5).
+            v: int | float = float(val)
         except ValueError:
             return
         if cast is int:

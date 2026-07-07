@@ -4,14 +4,26 @@ import math
 import random
 import logging
 
-from bot.constants import *  # noqa: F401,F403
+from bot.constants import (
+    NAV_CELL_SIZE,
+    NAV_JUMP_Z_TOL,
+    OPTIMAL_RANGE,
+    TACT_JUMP_CLEARANCE,
+    TACT_JUMP_REACTION_S,
+    HIT_RADIUS,
+)
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
 
 logger = logging.getLogger("bzbot")
 
 
-class TacticsMixin:
+from mypy_extensions import trait
+from bot._bot_base import BZBotBase
+
+
+@trait
+class TacticsMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _jump_launch_vz(self, cur_vz: float) -> float:
