@@ -314,7 +314,7 @@ class BZBotBase:
         raise NotImplementedError
     def _has_los_to_enemy(self, target_pid: int) -> bool:
         raise NotImplementedError
-    def _has_los_to_point(self, x: float, y: float, z: float) -> bool:
+    def _has_los_to_point(self, ex: float, ey: float, ez: float) -> bool:
         raise NotImplementedError
     def _has_presence(self) -> bool:
         raise NotImplementedError
