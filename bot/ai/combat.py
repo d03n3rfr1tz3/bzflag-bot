@@ -348,6 +348,9 @@ class CombatMixin(BZBotBase):
 
         # ── Phase 0 — Prio 1: anderes erreichbares Ziel ───────────────────
         if self._unreach_phase == 0:
+            # B7: abgelaufene Einträge beim Einfügen mit ausfiltern (seltener Pfad, verhindert
+            # Leak über lange Sessions — analog _evade_cleared_shots/_nav_jump_cooldowns).
+            self._combat_avoid = {k: v for k, v in self._combat_avoid.items() if v > now}
             self._combat_avoid[tgt] = now + UNREACH_AVOID_TIME
             alt = self._find_target_player()
             if alt is not None and alt != tgt:

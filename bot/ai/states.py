@@ -437,9 +437,12 @@ class StateMachineMixin(BZBotBase):
                 # Fix EV2: Per-Schuss-Grace — denselben Schuss 1 s ignorieren damit nach
                 # dem Early-Exit weder EVADING noch DODGE_JUMP neu ausgelöst werden.
                 if self._last_threat_id is not None:
+                    # B7: abgelaufene Einträge beim Einfügen mit ausfiltern (seltener Pfad) —
+                    # sonst leakt das Dict über eine lange Session (nie sonst aufgeräumt).
+                    self._evade_cleared_shots = {k: v for k, v in self._evade_cleared_shots.items() if v > now}
                     self._evade_cleared_shots[self._last_threat_id] = now + EVADE_CLEAR_GRACE
                 self._last_threat_id = None
-                
+
                 if getattr(self, '_debug_log_dodge', False):
                     logger.debug("[%s] Ausweichen: Bedrohung vorbei – frühzeitiger EVADING-Exit", self.callsign)
                 if self.target_player is not None and self._has_presence():
@@ -476,9 +479,11 @@ class StateMachineMixin(BZBotBase):
         # Fix EV2: Per-Schuss-Grace — denselben Schuss 1 s ignorieren damit nach
         # dem Early-Exit weder EVADING noch DODGE_JUMP neu ausgelöst werden.
         if self._last_threat_id is not None:
+            # B7: abgelaufene Einträge beim Einfügen mit ausfiltern (siehe oben).
+            self._evade_cleared_shots = {k: v for k, v in self._evade_cleared_shots.items() if v > now}
             self._evade_cleared_shots[self._last_threat_id] = now + EVADE_CLEAR_GRACE
         self._last_threat_id = None
-        
+
         if self._ai_state == AIState.JUMP_WINDUP:
             if self._jump_pending:
                 self._execute_jump()

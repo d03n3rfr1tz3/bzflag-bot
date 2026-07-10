@@ -513,7 +513,11 @@ class NavigationMixin(BZBotBase):
                     return
                 if not self._nav_jump_geometry_ok(wp):
                     wp_key = (round(wp[0]), round(wp[1]), wp[2])
-                    self._nav_jump_cooldowns[wp_key] = time.monotonic() + 30.0
+                    _now = time.monotonic()
+                    # B7: abgelaufene Einträge beim Einfügen mit ausfiltern (Muster wie in
+                    # states.py._tick_nav_jump_align — verhindert Leak über lange Sessions).
+                    self._nav_jump_cooldowns = {k: v for k, v in self._nav_jump_cooldowns.items() if v > _now}
+                    self._nav_jump_cooldowns[wp_key] = _now + 30.0
                     self._nav_path = []
                     self._nav_goal = None
                     self._wp_start_time = None
