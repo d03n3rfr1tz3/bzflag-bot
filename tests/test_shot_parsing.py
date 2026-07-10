@@ -256,13 +256,18 @@ def test_gm_own_shot_no_kill(bot):
     (b"GM",     "_gm_ad_life"),
     (b"MG",     "_mgun_ad_life"),
     (b"F\x00",  "_rfire_ad_life"),
+    (b"L\x00",  "_laser_ad_life"),
+    (b"TH",     "_thief_ad_life"),
 ])
 def test_incoming_shot_lifetime_applies_adlife(bot, flag, attr):
     """Wie der echte BZFlag-Client justiert der Bot die Server-Lifetime pro Flagge
     mit *<flag>AdLife nach (SW/GM/L/MG/F/TH). Basis-Lifetime aus dem Paket = 3,5s."""
     from bzflag.protocol import MsgShotBegin
     bot.player_id = 1
-    bot.pos_x = 500.0; bot.pos_y = 0.0; bot.pos_z = 0.0 # weit weg → kein Sofort-Treffer/Punktblank
+    # quer zur Schussachse (+x) versetzen: weit weg UND nicht im Strahl — ein
+    # Laser reicht mit AdVel/AdLife 17 500u weit, pos_x=500 auf der Achse
+    # würde den Sofort-Kill auslösen
+    bot.pos_x = 500.0; bot.pos_y = 500.0; bot.pos_z = 0.0
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=3,
@@ -273,6 +278,55 @@ def test_incoming_shot_lifetime_applies_adlife(bot, flag, attr):
     with bot._shots_lock:
         s = bot._shots[(2, 3)]
     assert s.lifetime == pytest.approx(3.5 * getattr(bot, attr))
+
+
+@pytest.mark.parametrize("flag,attr", [
+    (b"L\x00",  "_laser_ad_vel"),
+    (b"TH",     "_thief_ad_shot_vel"),
+    (b"MG",     "_mgun_ad_vel"),
+    (b"F\x00",  "_rfire_ad_vel"),
+])
+def test_incoming_shot_velocity_applies_advel(bot, flag, attr):
+    """Wie der echte BZFlag-Client skaliert der Bot die Fremdschuss-Velocity pro
+    Flagge mit *<flag>AdVel nach — den GANZEN Vektor inkl. Tank-Anteil
+    (SegmentedShotStrategy: `f.shot.vel[i] *= <flag>AdVel`)."""
+    from bzflag.protocol import MsgShotBegin
+    bot.player_id = 1
+    bot.pos_x = 500.0; bot.pos_y = 500.0; bot.pos_z = 0.0  # quer zur Schussachse
+    bot.alive = True
+    payload = _build_shot_packet(
+        shooter_id=2, shot_id=5,
+        pos=(0.0, 0.0, 1.025), vel=(50.0, 10.0, -5.0),
+        flag_type=flag, lifetime=3.5,
+    )
+    bot._on_shot_begin(MsgShotBegin, payload)
+    with bot._shots_lock:
+        s = bot._shots[(2, 5)]
+    m = getattr(bot, attr)
+    assert s.vel[0] == pytest.approx(50.0 * m, rel=1e-5)
+    assert s.vel[1] == pytest.approx(10.0 * m, rel=1e-5)
+    assert s.vel[2] == pytest.approx(-5.0 * m, rel=1e-5)
+
+
+@pytest.mark.parametrize("flag", [b"\x00\x00", b"GM"])
+def test_incoming_shot_velocity_unscaled(bot, flag):
+    """Normale Kugel und GM behalten die rohe Server-Velocity: der Client
+    skaliert dort nichts nach (GM wird live per MsgGMUpdate nachgeführt)."""
+    from bzflag.protocol import MsgShotBegin
+    bot.player_id = 1
+    bot.pos_x = 500.0; bot.pos_y = 500.0; bot.pos_z = 0.0
+    bot.alive = True
+    payload = _build_shot_packet(
+        shooter_id=2, shot_id=6,
+        pos=(0.0, 0.0, 1.025), vel=(50.0, 10.0, -5.0),
+        flag_type=flag, lifetime=3.5,
+    )
+    bot._on_shot_begin(MsgShotBegin, payload)
+    with bot._shots_lock:
+        s = bot._shots[(2, 6)]
+    assert s.vel[0] == pytest.approx(50.0)
+    assert s.vel[1] == pytest.approx(10.0)
+    assert s.vel[2] == pytest.approx(-5.0)
 
 
 def test_incoming_normal_shot_lifetime_unchanged(bot):

@@ -537,7 +537,27 @@ class HandlersMixin(BZBotBase):
         if flag_abbr == b"GM":   return base * self._gm_ad_life
         if flag_abbr == b"MG":   return base * self._mgun_ad_life
         if flag_abbr == b"F\x00": return base * self._rfire_ad_life
+        if flag_abbr == b"L\x00": return base * self._laser_ad_life
+        if flag_abbr == b"TH":   return base * self._thief_ad_life
         return base
+
+    def _incoming_shot_velocity(self, flag_abbr: bytes, vx: float, vy: float,
+                                vz: float) -> "tuple[float, float, float]":
+        """Client-treue Velocity eines Fremdschusses.
+
+        Gegenstück zu `_incoming_shot_lifetime`: der Client skaliert im
+        Strategy-Konstruktor den GANZEN Vel-Vektor inkl. Tank-Anteil
+        (`f.shot.vel[i] *= <flag>AdVel`, SegmentedShotStrategy.cxx). Ohne die
+        Nachjustierung wäre z.B. die simulierte Laser-Reichweite 100× zu kurz
+        (350u statt 35 000u) — Abpraller ab dem zweiten würden nie treffen.
+        GM bleibt roh: die Rakete hat kein AdVel und wird live nachgeführt
+        (MsgGMUpdate). Parallel zu `_effective_shot_speed` (eigene Flagge)."""
+        if   flag_abbr == b"L\x00": m = self._laser_ad_vel
+        elif flag_abbr == b"TH":    m = self._thief_ad_shot_vel
+        elif flag_abbr == b"MG":    m = self._mgun_ad_vel
+        elif flag_abbr == b"F\x00": m = self._rfire_ad_vel
+        else:                       return vx, vy, vz
+        return vx * m, vy * m, vz * m
 
     def _on_shot_begin(self, code: int, payload: bytes) -> None:
         """Registriert neuen Schuss; Sofort-Check für Laser und SW."""
@@ -553,6 +573,10 @@ class HandlersMixin(BZBotBase):
         flag_type  = payload[off:off+2];           off += 2
         lifetime   = unpack_float(  payload, off)
         base_life  = lifetime if lifetime > 0 else self._shot_lifetime
+        # Client-treue Nachjustierung VOR jeder Verwendung: Shot.vel, die
+        # Pfad-Simulation und der Gerade-Linien-Fallback des Sofort-Checks
+        # lesen alle dieselben Locals.
+        vx, vy, vz = self._incoming_shot_velocity(flag_type, vx, vy, vz)
         shot = Shot(shooter_id=shooter, shot_id=shot_id,
                     pos=[px, py, pz], vel=[vx, vy, vz],
                     fire_time=time.monotonic(),

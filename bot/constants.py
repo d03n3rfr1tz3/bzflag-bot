@@ -93,8 +93,8 @@ SR_RADIUS_MULT: Final = 0.8    # ↔ _srRadiusMult ↔ self._sr_radius_mult
 
 # ── Schuss-Typ-Multiplikatoren (via _on_set_var überschreibbar) ───────────
 MGUN_AD_RATE: Final = 10.0     # _mGunAdRate  (reloadTime / MGUN_AD_RATE = MG-Reload) ↔ self._mgun_ad_rate
-MGUN_AD_LIFE: Final = 1.5      # _mGunAdLife  (× shotRange = MG-Reichweite) ↔ self._mgun_ad_life
-MGUN_AD_VEL: Final = 0.1      # _mGunAdVel   (= 1/_mGunAdRate; × shotSpeed) ↔ self._mgun_ad_vel
+MGUN_AD_LIFE: Final = 0.1      # _mGunAdLife  (= 1/_mGunAdRate; × shotLifetime) ↔ self._mgun_ad_life
+MGUN_AD_VEL: Final = 1.5      # _mGunAdVel   (× shotSpeed = MG-Schussgeschwindigkeit) ↔ self._mgun_ad_vel
 RFIRE_AD_RATE: Final = 2.0      # _rFireAdRate (F- und TR-Reload-Divisor) ↔ self._rfire_ad_rate
 RFIRE_AD_VEL: Final = 1.5      # _rFireAdVel  (× shotSpeed = TR-Schussgeschwindigkeit) ↔ self._rfire_ad_vel
 RFIRE_AD_LIFE: Final = 0.5      # _rFireAdLife (= 1/_rFireAdRate; × shotRange) ↔ self._rfire_ad_life
