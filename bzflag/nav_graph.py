@@ -16,6 +16,7 @@ import heapq
 import logging
 import math
 import time
+from collections import deque
 from typing import Dict, List, Optional, Tuple
 
 from .world_map import (BoxObstacle, WorldMap,
@@ -520,7 +521,6 @@ class NavGraph:
         me = ASTAR_MAX_EXPANSIONS if max_expansions is None else max_expansions
         mm = ASTAR_MAX_MS if max_ms is None else max_ms
 
-        open_heap = [(0.0, 0, start)]
         g_score   = {start: 0.0}
         came_from: Dict[Tuple, Optional[Tuple]] = {start: None}
         closed:   set = set()
@@ -530,6 +530,11 @@ class NavGraph:
         # zurück (rammt das Gebäude statt das Tor zu nehmen).
         best_node = start
         best_h    = _h(self.layers[start[0]], start[1], start[2], gx, gy, goal_z)
+        # P7: h wird zusammen mit dem Knoten im Heap-Tupel mitgeführt (f, counter, h, node) —
+        # spart die h-Neuberechnung (cell_to_world + hypot) bei jedem Pop; der Start-Push nutzt
+        # das bereits berechnete best_h. Die Vergleichssemantik bleibt korrekt: counter ist pro
+        # Push eindeutig, der Heap-Vergleich erreicht h/node also nie.
+        open_heap = [(0.0, 0, best_h, start)]
         t_deadline = time.perf_counter() + mm / 1000.0
 
         def _best_effort(grund: str) -> List[Tuple]:
@@ -553,13 +558,12 @@ class NavGraph:
             return []
 
         while open_heap:
-            f, _, current = heapq.heappop(open_heap)
+            f, _, h_cur, current = heapq.heappop(open_heap)
 
             if current in closed:
                 continue
             closed.add(current)
 
-            h_cur = _h(self.layers[current[0]], current[1], current[2], gx, gy, goal_z)
             if h_cur < best_h:
                 best_h, best_node = h_cur, current
 
@@ -619,7 +623,7 @@ class NavGraph:
                     came_from[neighbor] = current
                     h = _h(self.layers[lid], nix, niy, gx, gy, goal_z)
                     counter += 1
-                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, neighbor))
+                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, h, neighbor))
 
             # ── Vertikale Nachbarn (on-the-fly) ───────────────────────────
             for neighbor, cost in self._vertical_neighbors(lid, ix, iy, wx, wy, layer,
@@ -631,7 +635,7 @@ class NavGraph:
                     n_lid, n_ix, n_iy = neighbor
                     h = _h(self.layers[n_lid], n_ix, n_iy, gx, gy, goal_z)
                     counter += 1
-                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, neighbor))
+                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, h, neighbor))
 
             # ── Gleich-hohe Nachbar-Layer (berührende Dach-Flächen, on-the-fly) ──
             for neighbor, cost in self._same_z_neighbors(lid, ix, iy, wx, wy, layer):
@@ -642,7 +646,7 @@ class NavGraph:
                     n_lid, n_ix, n_iy = neighbor
                     h = _h(self.layers[n_lid], n_ix, n_iy, gx, gy, goal_z)
                     counter += 1
-                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, neighbor))
+                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, h, neighbor))
 
             # ── Teleporter-Portal-Kante (P3-NAV-02, vorberechnet, O(1)-Lookup) ──
             edge = self._teleport_edges.get(current)
@@ -655,7 +659,7 @@ class NavGraph:
                     n_lid, n_ix, n_iy = neighbor
                     h = _h(self.layers[n_lid], n_ix, n_iy, gx, gy, goal_z)
                     counter += 1
-                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, neighbor))
+                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, h, neighbor))
 
         return []
 
@@ -1211,7 +1215,6 @@ def _point_in_rotated_box(obs: BoxObstacle, x: float, y: float, margin: float = 
 def _nearest_walkable(layer: FloorLayer, ix: int, iy: int,
                        max_r: int = 6) -> Tuple[int, int]:
     """BFS: nächste begehbare Zelle in layer ausgehend von (ix, iy)."""
-    from collections import deque
     if (0 <= ix < layer.n_x and 0 <= iy < layer.n_y and
             layer.walkable[iy][ix]):
         return ix, iy
