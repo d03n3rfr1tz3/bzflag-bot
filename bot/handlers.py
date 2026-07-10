@@ -187,6 +187,8 @@ class HandlersMixin(BZBotBase):
             logger.info("[%s] Spieler beigetreten: %r (Menschen: %d)",
                         self.callsign, callsign, self.human_count)
             self._notify_count()
+        # unconditional: auch Zuschauer (Observer) zaehlen als Anwesenheit fuer _has_presence
+        self._recompute_presence()
 
     def _on_remove_player(self, code: int, payload: bytes) -> None:
         """Entfernt Spieler; dekrementiert human_count wenn Mensch."""
@@ -211,6 +213,8 @@ class HandlersMixin(BZBotBase):
             logger.info("[%s] Spieler verlassen: %r (Menschen: %d)",
                         self.callsign, info.callsign, self.human_count)
             self._notify_count()
+        # unconditional: auch Zuschauer (Observer) zaehlen als Anwesenheit fuer _has_presence
+        self._recompute_presence()
 
     def _on_grab_flag(self, code: int, payload: bytes) -> None:
         """Aktualisiert Flag-Zustand."""
@@ -347,6 +351,7 @@ class HandlersMixin(BZBotBase):
         # Driftet er (Add/Remove-Asymmetrie) auf 0, würde der Bot sonst dauerhaft — auch über
         # Respawn — nicht mehr schießen (_maybe_shoot: human_count==0 → kein Schuss).
         self.human_count = sum(1 for p in self.players.values() if p.is_human)
+        self._recompute_presence()
         # State Machine: Spawn → Seeking oder Idle je nach Anwesenheit (Mitspieler ODER Zuschauer)
         self._ai_state = AIState.SEEKING if self._has_presence() else AIState.IDLE
         logger.info("[%s] Gespawnt bei (%.1f, %.1f, %.1f) → %s",

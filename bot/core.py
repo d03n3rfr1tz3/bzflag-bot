@@ -286,6 +286,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._link_map = {}      # face-Index → Ziel-face-Index (Teleporter), aus _world_map.links
         self._tele_solid_boxes = []  # Teleporter-Posts+Crossbar als BoxObstacle (Kollision)
         self._teleporting_until = 0.0      # P3-NAV-02: PS_TELEPORTING-Ende + Re-Trigger-Sperre
+        # Event-getriebener Anwesenheits-Cache (statt 60-Hz-Scan in _has_presence):
+        # nur bei Add/Remove/Callsign-Liste neu berechnet, siehe _recompute_presence.
+        self._presence = False
 
     def _init_nav(self):
         """Navigation: Pfad-Queue, NAV_JUMP/NAV_TELE, COMBAT-Eskalations-Episode."""
@@ -718,7 +721,13 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
             if info.is_human and self._is_bot_callsign(info.callsign):
                 info.is_human = False
         self.human_count = sum(1 for p in list(self.players.values()) if p.is_human)
+        self._recompute_presence()
         self._notify_count()
+
+    def _recompute_presence(self) -> None:
+        """Berechnet den Anwesenheits-Cache (_presence) neu — nur bei Add/Remove/
+        Callsign-Listen-Update aufgerufen, NICHT pro Tick (siehe _has_presence)."""
+        self._presence = any(not self._is_bot_callsign(p.callsign) for p in list(self.players.values()))
 
     def _emit_status(self) -> None:
         """Managed-Modus: sendet den aktuellen Spielerstand als getaggte stdout-Zeile

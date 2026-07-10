@@ -204,12 +204,12 @@ class CapabilityMixin(BZBotBase):
     def _has_presence(self) -> bool:
         """True, wenn mindestens ein MENSCH (Mitspieler ODER Zuschauer) anwesend ist.
 
-        Leitet die Anwesenheit direkt aus der Spielerliste ab (robust gegen Zähler-Drift):
-        jeder Eintrag, dessen Callsign KEIN Bot ist (eigener Name, Manager-Liste, Prefix),
-        ist ein Mensch — egal ob aktiver Mitspieler oder reiner Zuschauer (Observer). Eigene
-        Bots (Peer-Tanks, der Manager-Fallback-Observer) zählen NICHT als Anwesenheit; nur
-        menschliche Anwesenheit lässt die Tanks aus dem IDLE-Modus wechseln."""
-        return any(not self._is_bot_callsign(p.callsign) for p in list(self.players.values()))
+        Wird bei 60 Hz mehrfach pro Tick abgefragt (u.a. _maybe_shoot) — daher nur noch ein
+        Read des event-getrieben gepflegten Caches (_recompute_presence bei Add/Remove/
+        Callsign-Listen-Update), kein Scan der Spielerliste mehr pro Aufruf. Ein einzelner
+        bool-Attribut-Read ist unter der GIL atomar, ein Race mit dem Recv-Thread (der
+        _presence schreibt) liefert also höchstens einen für einen Tick veralteten Wert."""
+        return self._presence
 
     def _can_drive_through_obstacles(self) -> bool:
         """True wenn Bot mit aktueller Flagge durch Hindernisse fahren darf (OO u.a.)."""

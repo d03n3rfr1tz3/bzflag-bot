@@ -32,6 +32,8 @@ def _add_observer(bot, pid, callsign):
     from bot.models import PlayerInfo
     from bzflag.protocol import TEAM_OBSERVER
     bot.players[pid] = PlayerInfo(callsign=callsign, team=TEAM_OBSERVER, is_human=False)
+    # Test-Helper befuellt players direkt -> Anwesenheits-Cache manuell nachziehen (siehe make_player).
+    bot._recompute_presence()
 
 
 def test_has_presence_with_human_player(bot):
@@ -54,10 +56,26 @@ def test_has_presence_only_peer_bots(bot):
     from bot.models import PlayerInfo
     bot.players[7] = PlayerInfo(callsign="Bot_02", team=2, is_human=False)   # Peer-Bot
     bot.players[1] = PlayerInfo(callsign="TestBot", team=2, is_human=False)  # eigener Bot
+    bot._recompute_presence()
     assert bot._has_presence() is False
 
 
 def test_has_presence_empty(bot):
+    assert bot._has_presence() is False
+
+
+def test_recompute_presence_human_then_bot_only(bot):
+    """_presence ist event-getrieben (COMMIT 1): players direkt befuellt + explizites
+    _recompute_presence() muss denselben Wert liefern wie die alte Live-Berechnung."""
+    from bot.models import PlayerInfo
+    bot.players[2] = PlayerInfo(callsign="Player2", team=2, is_human=True)
+    bot._recompute_presence()
+    assert bot._has_presence() is True
+
+    bot.players.clear()
+    bot.players[1] = PlayerInfo(callsign="TestBot", team=2, is_human=False)   # eigener Bot
+    bot.players[7] = PlayerInfo(callsign="Bot_02", team=2, is_human=False)    # Peer-Bot
+    bot._recompute_presence()
     assert bot._has_presence() is False
 
 
@@ -98,6 +116,8 @@ def _add_peer_bot_foe(bot, pid=2, pos=(50.0, 0.0, 0.0)):
     from conftest import make_player
     foe = make_player(bot, pid=pid, pos=pos, is_human=False, flag="")
     foe.callsign = "Bot_02"
+    # Callsign nach make_player() geaendert -> Anwesenheits-Cache erneut nachziehen.
+    bot._recompute_presence()
     return foe
 
 

@@ -71,6 +71,9 @@ def make_player(bot, pid, pos=(50.0, 0.0, 0.0), is_human=True, flag="", alive=Tr
     info.alive = alive
     info.last_seen = time.monotonic()
     bot.players[pid] = info
+    # Test-Helper befuellt players direkt (ohne den Handler-Pfad) -> Anwesenheits-
+    # Cache manuell nachziehen, sonst bleibt _has_presence() auf dem alten Stand.
+    bot._recompute_presence()
     return info
 
 

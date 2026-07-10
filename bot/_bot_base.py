@@ -123,6 +123,7 @@ class BZBotBase:
     _own_flag_since: Any
     _plan_gen: Any
     _pre_fall_state: Any
+    _presence: Any
     _recent_flag_targets: Any
     _reconnect_needed: Any
     _reload_time: Any
@@ -356,6 +357,8 @@ class BZBotBase:
     def _poll_async_plan(self) -> None:
         raise NotImplementedError
     def _recompute_gm_min_range(self) -> None:
+        raise NotImplementedError
+    def _recompute_presence(self) -> None:
         raise NotImplementedError
     def _report_killed(self, shot: Shot) -> None:
         raise NotImplementedError
