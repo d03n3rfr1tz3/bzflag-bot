@@ -65,6 +65,8 @@ class PhysicsMixin(BZBotBase):
         Flaggen-Boden zentral hier: OO phast durch Gebäude → landet/fällt immer auf den Weltboden
         (z=0). BU gräbt sich NUR am Boden ein (auf einem Dach trägt das Dach, also nur dort sinkt
         der Bot auf BURROW_DEPTH)."""
+        if not self.alive:
+            return 0.0
         if self.own_flag == "OO":
             return 0.0
         # P4a: Per-Tick-Memo (3–5 identische Aufrufe pro 60-Hz-Tick). Der Key
