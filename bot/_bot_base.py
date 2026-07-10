@@ -350,6 +350,8 @@ class BZBotBase:
         raise NotImplementedError
     def _own_flag_bytes(self) -> bytes:
         raise NotImplementedError
+    def _phantom_shot_harmless(self, shot: Shot) -> bool:
+        raise NotImplementedError
     def _plan_path(self, goal_x: float, goal_y: float, goal_z: float | None=None, *, cap_wps: int | None=None) -> None:
         raise NotImplementedError
     def _poll_async_plan(self) -> None:

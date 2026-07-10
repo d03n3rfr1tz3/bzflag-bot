@@ -140,6 +140,8 @@ class PerceptionMixin(BZBotBase):
             for shot in self._shots.values():
                 if shot.is_expired(now): continue
                 if shot.shooter_id == self.player_id: continue
+                # Phantom-Schüsse (Wire-Flag PZ) treffen nur gezonede Ziele → keine Bedrohung
+                if self._phantom_shot_harmless(shot): continue
                 # Ricochet-Schüsse: Richtung nach Bounce unklar → nur Segment-Cache prüfen
                 if (shot.shooter_id, shot.shot_id) in self._ricochet_paths:
                     continue
@@ -192,6 +194,9 @@ class PerceptionMixin(BZBotBase):
                     continue
                 shot = self._shots.get((pid, sid))
                 if shot is None or shot.is_expired(now):
+                    continue
+                # Phantom-Schüsse: auch der Phase-Pfad-Cache ist keine Bedrohung
+                if self._phantom_shot_harmless(shot):
                     continue
                 if self.own_flag == "BU" and self.pos[2] < 0.0:
                     continue
