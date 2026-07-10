@@ -234,6 +234,8 @@ class BZBotBase:
     # ── Geteilte Methoden (Stubs; reale Impl. in den Mixins) ─────────────
     def _advance_path(self, *, timed_out: bool=False) -> None:
         raise NotImplementedError
+    def _any_incoming_threat(self, now: float, vels) -> bool:
+        raise NotImplementedError
     def _apply_bounds(self, dt: float, half: float) -> None:
         raise NotImplementedError
     def _apply_movement_caps(self, speed: float, ang_vel: float):

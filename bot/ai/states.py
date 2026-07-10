@@ -414,10 +414,11 @@ class StateMachineMixin(BZBotBase):
         if self._ai_state == AIState.EVADING:
             fwd_vx = math.cos(self.azimuth) * self._tank_speed
             fwd_vy = math.sin(self.azimuth) * self._tank_speed
-            if (self._find_incoming_shot(now)[0] is None
-                    and self._find_incoming_shot(now, bot_vel=(0.0, 0.0))[0] is None
-                    and self._find_incoming_shot(now, bot_vel=(fwd_vx, fwd_vy))[0] is None
-                    and self._find_incoming_shot(now, bot_vel=(-fwd_vx, -fwd_vy))[0] is None):
+            # P3: ein Scan über alle Schüsse statt vier separater _find_incoming_shot-Aufrufe
+            # (je ein Shots-Lock + voller Schuss-/Ricochet-Scan) mit identischer Bedrohungslogik.
+            if not self._any_incoming_threat(now, (
+                    (self.vel[0], self.vel[1]), (0.0, 0.0),
+                    (fwd_vx, fwd_vy), (-fwd_vx, -fwd_vy))):
                 self._dodging = False
                 self._dodge_forward = False
                 self._dodge_reverse = False
