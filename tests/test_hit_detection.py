@@ -108,6 +108,60 @@ def test_normalshot_miss(bot):
     assert not _was_killed(bot)
 
 
+# ── PhantomZone: Phantom-Schüsse gezoneder Gegner ────────────────────────────
+
+class TestPhantomShotHarmless:
+    """Wire-Flag „PZ" = Schütze war beim Feuern gezoned (sein Client nullt das
+    Flag sonst). Phantom-Schüsse treffen nur ebenfalls gezonede Ziele
+    (LocalPlayer::checkHit: „zoned shots only kill zoned tanks") — der Bot ist
+    nie gezoned, darf also weder daran sterben noch ausweichen. SB bleibt als
+    wanddurchdringender Schuss unverändert eine echte Bedrohung."""
+
+    def test_pz_shot_does_not_kill(self, bot):
+        """Geometrie wie test_normalshot_direct_hit, aber Wire-Flag PZ → kein Tod."""
+        bot.pos = [0.0, 0.0, 0.0]
+        make_shot(bot, pos=(2.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+                  flag_abbr=b"PZ")
+        _resolve_incoming_shots(bot)
+        assert not _was_killed(bot)
+
+    def test_sb_shot_still_kills(self, bot):
+        """Kontrolltest: identische Geometrie mit SB → Treffer wie bisher."""
+        bot.pos = [0.0, 0.0, 0.0]
+        make_shot(bot, pos=(2.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+                  flag_abbr=b"SB")
+        _resolve_incoming_shots(bot)
+        assert _was_killed(bot)
+
+    def test_pz_shot_not_a_threat(self, bot):
+        """Kein Dodge-Auslöser: _find_incoming_shot ignoriert Phantom-Schüsse."""
+        bot.pos = [0.0, 0.0, 0.0]
+        make_shot(bot, pos=(50.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0),
+                  flag_abbr=b"PZ")
+        shot, t = bot._find_incoming_shot(time.monotonic())
+        assert shot is None and t == float("inf")
+
+    def test_pz_shot_phase_path_not_a_threat(self, bot):
+        """Auch der gecachte Phase-Pfad (Teleporter-Karten) ist keine Bedrohung."""
+        from bzflag.shot_physics import Segment
+        bot.pos = [0.0, 0.0, 0.0]
+        now = time.monotonic()
+        s = make_shot(bot, pos=(50.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0),
+                      flag_abbr=b"PZ", fire_time=now)
+        bot._ricochet_paths[(s.shooter_id, s.shot_id)] = [Segment(
+            50.0, 0.0, 1.025, -300.0, 0.0, 1.025, now, now + 3.5)]
+        shot, _ = bot._find_incoming_shot(now)
+        assert shot is None
+
+    def test_pz_shot_stays_tracked_until_expiry(self, bot):
+        """Der Schuss bleibt in _shots (MsgShotEnd-Buchhaltung), wird nur ignoriert."""
+        bot.pos = [0.0, 0.0, 0.0]
+        s = make_shot(bot, pos=(2.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+                      flag_abbr=b"PZ")
+        _resolve_incoming_shots(bot)
+        assert (s.shooter_id, s.shot_id) in bot._shots
+
+
 def test_normalshot_expired_no_hit(bot):
     bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     # Shot lifetime already expired at fire_time - 1

@@ -206,6 +206,16 @@ Tatsächliches Kompilieren mit mypyc
 mypyc --namespace-packages bot bzflag
 ```
 
+**Wichtig:** `mypy-extensions` ist eine **Laufzeit-Abhängigkeit** — die `@trait`-Mixins
+importieren es auch im unkompilierten Betrieb (Entwicklung/Tests). `pip install mypy` bringt
+es automatisch mit; in Umgebungen ohne mypy (z. B. schlanke Runtime-Container) muss es
+explizit installiert werden:
+```bash
+pip install mypy-extensions
+```
+Details zu den mypyc-Idiomen (Traits, `bot/_bot_base.py`, statisches `__all__`):
+DEVELOPER.md, Sektion 12.
+
 ## Tests ausführen
 
 ```bash
