@@ -689,5 +689,3 @@ class ShootingMixin(BZBotBase):
                 "initial_target": self.target_player,
             }
             self._gm_need_update = True
-            self._gm_send_at     = now + max(self._gm_activation_time - 0.005, 0.005)
-            self._gm_resend_at   = None

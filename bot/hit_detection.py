@@ -313,7 +313,6 @@ class HitDetectionMixin(BZBotBase):
         self._dodging = False
         self._dodge_forward = self._dodge_reverse = False
         self._gm_need_update = False
-        self._gm_send_at = self._gm_resend_at = None
         self._transition_to(AIState.DEAD)
         _reason = KILL_REASON_GENOCIDED if shot.flag_abbr == b"G\x00" else KILL_REASON_SHOT
         payload = (
@@ -361,7 +360,6 @@ class HitDetectionMixin(BZBotBase):
         self._escape_jump_ang_vel = None
         self._dodge_forward = self._dodge_reverse = False
         self._gm_need_update = False
-        self._gm_send_at = self._gm_resend_at = None
         self._transition_to(AIState.DEAD)
         payload = (
             struct.pack(">B", killer_id)

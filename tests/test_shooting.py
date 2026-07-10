@@ -162,8 +162,8 @@ class TestGMTargeting:
 class TestGMNeedUpdate:
     """Schritt 5: needUpdate-Pattern statt periodisches Senden."""
 
-    def test_shot_sets_need_update_and_send_at(self, bot):
-        """Nach GM-Schuss: _gm_need_update=True, _gm_send_at 5ms vor _gmActivationTime, kein Resend."""
+    def test_shot_sets_need_update(self, bot):
+        """Nach GM-Schuss: _gm_need_update=True."""
         bot.own_flag = "GM"
         bot._max_shots = 1
         bot._shot_slot = 0
@@ -172,8 +172,6 @@ class TestGMNeedUpdate:
         bot._send_shot(t, az=0.0)
         assert bot._active_gm is not None
         assert bot._gm_need_update is True
-        assert bot._gm_send_at == pytest.approx(t + max(bot._gm_activation_time - 0.005, 0.005))
-        assert bot._gm_resend_at is None
 
     def test_target_change_marks_need_update(self, bot):
         """Wechsel von target_player während _active_gm setzt _gm_need_update=True.
@@ -187,8 +185,8 @@ class TestGMNeedUpdate:
             bot._gm_need_update = True
         assert bot._gm_need_update is True
 
-    def test_send_blocked_before_send_at(self, bot):
-        """Erstes GMUpdate wird nicht gesendet, bevor _gm_send_at erreicht ist."""
+    def test_send_happens_next_tick_after_shot(self, bot):
+        """Erstes GMUpdate wird im nächsten Tick nach dem Schuss gesendet."""
         bot.own_flag = "GM"
         bot._max_shots = 1
         bot._shot_slot = 0
@@ -196,13 +194,12 @@ class TestGMNeedUpdate:
         t = time.monotonic()
         bot._send_shot(t, az=0.0)
         bot.client.send.reset_mock()
-        # Vor _gm_send_at: kein Senden
-        if bot._gm_need_update and (bot._gm_send_at is None or t + 0.01 >= bot._gm_send_at):
-            bot._send_gm_update(t + 0.01)
-        # Direkter Check: _send_gm_update wurde NICHT durch die Gate-Logik aufgerufen
-        # Die Gate-Logik wird in der Hauptschleife angewendet (run_game_loop), hier nur prüfen
-        # dass _gm_send_at korrekt in der Zukunft liegt
-        assert bot._gm_send_at > t
+        # Tickschleifen-Bedingung (core.py): sendet sobald _gm_need_update gesetzt ist
+        if bot._active_gm is not None and bot._gm_need_update:
+            bot._send_gm_update(t)
+            bot._gm_need_update = False
+        assert bot.client.send.called
+        assert bot._gm_need_update is False
 
 
 # ---------------------------------------------------------------------------
@@ -363,8 +360,6 @@ class TestGmInitialTarget:
             "initial_target": 42,   # Ziel zum Abschusszeitpunkt
         }
         bot._gm_need_update = True
-        bot._gm_send_at = now - 0.1   # bereits fällig
-        bot._gm_resend_at = now + 0.5
         bot._send_gm_update(now)
         assert bot.client.send.called
         payload = bot.client.send.call_args[0][1]

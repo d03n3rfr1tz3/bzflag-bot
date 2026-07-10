@@ -407,8 +407,6 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # GM-Tracking
         self._active_gm = None
         self._gm_need_update = False
-        self._gm_send_at = None
-        self._gm_resend_at = None
 
         # Server-Zeitbasis
         self._server_time_offset = 0.0
@@ -587,10 +585,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
                 self._update_movement(dt_r, now, ai_tick=ai_tick)
                 self._maybe_shoot(now)
                 if self._active_gm is not None:
-                    if self._gm_need_update and (self._gm_send_at is None or now >= self._gm_send_at):
+                    if self._gm_need_update:
                         self._send_gm_update(now)
                         self._gm_need_update = False
-                        self._gm_send_at = None
                 if self.own_flag and self.own_flag not in self.good_flags:
                     held = now - self._own_flag_since
                     required = self._drop_bad_flag_delay if self.own_flag in self.bad_flags else 0.0
@@ -781,8 +778,6 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         if dt > self._shot_lifetime:
             self._active_gm = None
             self._gm_need_update = False
-            self._gm_send_at = None
-            self._gm_resend_at = None
             return
         px = gm["pos"][0] + gm["vel"][0] * dt
         py = gm["pos"][1] + gm["vel"][1] * dt

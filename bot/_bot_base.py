@@ -73,8 +73,6 @@ class BZBotBase:
     _gm_ad_life: Any
     _gm_min_range: Any
     _gm_need_update: bool
-    _gm_resend_at: Any
-    _gm_send_at: Any
     _gm_turn_angle: Any
     _gravity: Any
     _has_spawned: bool

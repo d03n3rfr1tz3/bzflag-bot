@@ -332,8 +332,6 @@ class HandlersMixin(BZBotBase):
         self._dodge_forward       = False
         self._dodge_reverse       = False
         self._gm_need_update      = False
-        self._gm_send_at          = None
-        self._gm_resend_at        = None
         self._landing_shot_until  = 0.0
         self._landing_hit_z       = 0.0
         self._landing_second_shot_at = None
@@ -379,7 +377,6 @@ class HandlersMixin(BZBotBase):
                 self._escape_jump_ang_vel = None
                 self._dodge_forward = self._dodge_reverse = False
                 self._gm_need_update      = False
-                self._gm_send_at = self._gm_resend_at = None
                 self._dropped_neutrals.clear()
                 self._recent_flag_targets.clear()
                 self._transition_to(AIState.DEAD)
