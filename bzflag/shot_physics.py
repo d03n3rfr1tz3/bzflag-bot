@@ -13,7 +13,7 @@ Koordinaten-Konvention: identisch zu world_map.py (BZFlag big-endian, Z nach obe
 
 import math
 import typing
-from typing import Optional, List, Tuple, TYPE_CHECKING
+from typing import Optional, List, Tuple, TYPE_CHECKING, Final
 
 from .world_map import BoxObstacle, TeleporterObstacle
 # Generische Geometrie-Primitive liegen jetzt in intersect.py (Port bzfs Intersect.cxx).
@@ -40,7 +40,7 @@ class Segment(typing.NamedTuple):
 # Physikalischer Mindestabstand (Einheiten) um Selbst-Treffer nach Bounce zu vermeiden.
 # Wird in simulate_shot_path() per eps = _EPSILON_DIST / speed in Sekunden umgerechnet,
 # damit Laser (100.000 u/s) keinen 100-Einheiten-Blindspot erhält.
-_EPSILON_DIST = 0.1
+_EPSILON_DIST: Final = 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +426,7 @@ def _world_boundary_hits(ox: float, oy: float, oz: float,
 # Hauptfunktion: Schuss-Pfad-Simulation
 # ---------------------------------------------------------------------------
 
-_MAX_BOUNCES_DEFAULT = 100  # BZFlag-Standard (SegmentedShotStrategy::makeSegments)
+_MAX_BOUNCES_DEFAULT: Final = 100  # BZFlag-Standard (SegmentedShotStrategy::makeSegments)
 
 
 def simulate_shot_path(pos: Tuple[float, float, float],

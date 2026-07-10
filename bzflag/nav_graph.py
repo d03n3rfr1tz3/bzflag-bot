@@ -17,7 +17,7 @@ import logging
 import math
 import time
 from collections import deque
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Final, List, Optional, Tuple
 
 from .world_map import (BoxObstacle, WorldMap,
                         teleporter_solid_boxes, teleporter_field_box)
@@ -33,21 +33,21 @@ logger = logging.getLogger("bzbot")
 # ---------------------------------------------------------------------------
 # Konstanten
 # ---------------------------------------------------------------------------
-CELL_SIZE    = 4             # Rastergröße in BZFlag-Einheiten
-TANK_MARGIN  = 3.5           # Rand-Puffer = ceil(TANK_HALF_DIAG≈3.31); physikalisch korrekte Mindestdistanz
-THIN_WALL_MARGIN = 1.4       # = TANK_WIDTH/2; reduzierter Rand-Puffer für dünne Wände, damit schmale
+CELL_SIZE: Final = 4             # Rastergröße in BZFlag-Einheiten
+TANK_MARGIN: Final = 3.5           # Rand-Puffer = ceil(TANK_HALF_DIAG≈3.31); physikalisch korrekte Mindestdistanz
+THIN_WALL_MARGIN: Final = 1.4       # = TANK_WIDTH/2; reduzierter Rand-Puffer für dünne Wände, damit schmale
                              # Laufstege seitlich an der Wand befahrbar bleiben (bewusst enger als TANK_MARGIN)
-TANK_HEIGHT  = 2.05          # BZFlag-Standard-Tankhöhe (half_height=1.0 + Spielraum)
+TANK_HEIGHT: Final = 2.05          # BZFlag-Standard-Tankhöhe (half_height=1.0 + Spielraum)
 # TANK_HALF_WIDTH: kanonische Definition seit W6 in obstacle_grid.py (re-importiert oben)
-JUMP_RANGE   = 95.0          # Max. aabb_dist für Sprung-Kanten (Abstiegsformel, dz≥5: max ~90u)
-JUMP_EDGE_TOL = 1.4          # = TANK_WIDTH/2: zulässiger Überhang des Tank-Mittelpunkts über
+JUMP_RANGE: Final = 95.0          # Max. aabb_dist für Sprung-Kanten (Abstiegsformel, dz≥5: max ~90u)
+JUMP_EDGE_TOL: Final = 1.4          # = TANK_WIDTH/2: zulässiger Überhang des Tank-Mittelpunkts über
                              # Plattformkanten. BZFlag-Physik: der Tank trägt/landet, solange auch
                              # nur ein Pixel seiner Hitbox aufliegt — der Mittelpunkt darf also um
                              # bis zu eine halbe Tankbreite über die Kante hinausragen. Gilt für den
                              # Absprung (Überhang am Quellrand) wie für die Landung (Front-Catch).
-MAX_ROOF_H   = 55.0          # Maximale Dach-Höhe für Roof-Layer (≈ 3 × max_jump_h)
-_ASTAR_WEIGHT = 1.5          # Weighted/Epsilon-optimal A*: 2–4× schneller, max. 50% suboptimal
-NAV_JUMP_UP_PENALTY = 150.0  # Sicherheits-Aufschlag auf Sprung-hoch-Kanten NUR auf Teleporter-Karten:
+MAX_ROOF_H: Final = 55.0          # Maximale Dach-Höhe für Roof-Layer (≈ 3 × max_jump_h)
+_ASTAR_WEIGHT: Final = 1.5          # Weighted/Epsilon-optimal A*: 2–4× schneller, max. 50% suboptimal
+NAV_JUMP_UP_PENALTY: Final = 150.0  # Sicherheits-Aufschlag auf Sprung-hoch-Kanten NUR auf Teleporter-Karten:
                              # ein verwundbarer Sprung-Arc ist riskanter als die Tor-Fahrt → der Bot nimmt
                              # bis ~150u Umweg zu einem Tor in Kauf. Verbietet Sprünge nicht (nur verteuert),
                              # nur-per-Sprung erreichbare Orte bleiben erreichbar.
@@ -66,7 +66,7 @@ ASTAR_MAX_MS = 125.0         # Wall-Clock-Budget pro A*-Suche (ms). Alle 1024 Ex
 DIRS_8 = [(-1, -1), (-1, 0), (-1, 1),
           (0,  -1),           (0,  1),
           (1,  -1), (1,  0), (1,  1)]
-_INF = float("inf")
+_INF: Final = float("inf")
 
 # Modul-Level Cache: world_hash → NavGraph
 _nav_cache: Dict[str, "NavGraph"] = {}

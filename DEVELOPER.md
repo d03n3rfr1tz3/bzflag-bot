@@ -1583,7 +1583,7 @@ Verbindung und Server-Kommunikation passieren in Tests nie.
 ```python
 def test_new_threat_behavior(bot):
     bot._ai_state = AIState.COMBAT
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     # Shot aufbauen:
     shot = Shot(shooter_id=1, shot_id=1, pos=[50.0, 0.0, 0.0],
                 vel=[-100.0, 0.0, 0.0], fire_time=time.monotonic(),
@@ -1596,13 +1596,14 @@ def test_new_threat_behavior(bot):
 **Physik-Test** (Beispiel: Decken-Kollision):
 ```python
 def test_ceiling_collision(bot):
-    # Bot aufsteigend unter einem Gebäude
-    bot.pos  = [0.0, 0.0, 5.0]
-    bot.vel  = [0.0, 0.0, 10.0]
+    # Bot aufsteigend unter einem Gebäude (self.pos/self.vel sind seit Track 5 skalare
+    # Attribute — pos_x/pos_y/pos_z, vel_x/vel_y/vel_z — statt Listen; s. Abschnitt 12)
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 5.0
+    bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 10.0
     obs = BoxObstacle(cx=0, cy=0, bottom_z=7.0, height=5.0, ...)
     bot._world_map = mock_world_map(boxes=[obs])
     bot._apply_obstacle_bounds(dt=0.02)
-    assert bot.vel[2] == 0.0    # Decken-Kollision gestoppt
+    assert bot.vel_z == 0.0    # Decken-Kollision gestoppt
 ```
 
 **Wichtig**: Vor dem Test `time.monotonic()` in einer Variable speichern und
@@ -1657,3 +1658,65 @@ class TestNavMeinekarte:
 ```
 
 Das Fixture `load_map_fixture(name)` ist in `tests/conftest.py` definiert.
+
+---
+
+## 12. Track 5: mypyc-Kompilierung
+
+Der Bot wird mit `mypyc --namespace-packages bot bzflag` zu nativen Erweiterungsmodulen
+kompiliert. mypyc kompiliert nur, was es beweisbar sauber typisieren kann — die folgenden
+Regeln haben sich dabei als notwendig erwiesen und gelten für neuen Code in `bot/`/`bzflag/`.
+
+### `getattr(self, "x", default)` vermeiden
+
+`getattr` mit Default erzwingt unter mypyc den generischen Objekt-Pfad statt des nativen
+Attribut-Slots und verhindert Typinferenz — IMMER direkten Attributzugriff (`self.x`)
+verwenden. Voraussetzung: das Attribut muss in `_bot_base.py::BZBotBase` deklariert UND in
+einer `bot/core.py::_init_*`-Methode garantiert gesetzt sein (sonst wirft der Direktzugriff
+unter mypyc `AttributeError`, wo `getattr` früher still den Default lieferte). Neue lazy
+erzeugte Attribute also immer gleich in `_init_*` initialisieren, nicht erst bei erster
+Verwendung. Ausnahme bleibt dynamischer Dispatch mit berechnetem Namen (Tabellen-Dispatch,
+z.B. `getattr(self, hook)()` in `bot/handlers.py::_apply_set_var`) — das ist kein
+Default-getattr und unter mypyc unproblematisch.
+
+Dieselbe Regel gilt für `getattr` auf fremde Objekte (z.B. `NavGraph`, `FloorLayer`): nur
+durch Direktzugriff ersetzen, wenn die Klasse das Attribut IMMER in `__init__` setzt.
+Fehlt es dann in einem Test-Stub, den Stub ergänzen statt den Produktionscode wieder
+aufzuweichen.
+
+### `Final`-Konstanten
+
+mypyc faltet mit `Final` annotierte Modul-Konstanten zur Compile-Zeit in den generierten
+Code — sie sind danach **nicht mehr per `monkeypatch.setattr("modul.NAME", ...)`
+patchbar** (der native Code liest den eingebrannten Wert, nicht das Modul-Attribut).
+Deshalb: heiße, nie von Tests gepatchte Konstanten (Geometrie-/Physik-/Timing-Werte in
+`bzflag/nav_graph.py`, `bzflag/obstacle_grid.py`, `bzflag/shot_physics.py`,
+`bot/constants.py`) sind mit `Final` annotiert (`CELL_SIZE: Final = 4`). Konstanten, die
+Tests aktiv patchen — aktuell `ASTAR_MAX_EXPANSIONS`/`ASTAR_MAX_MS`
+(`bzflag/nav_graph.py`, s. `tests/test_nav_graph.py`), `NAV_ASYNC_TRIGGER_MS`
+(`bot/constants.py`, s. `tests/test_async_plan.py`) und `TELE_AIM_Z_TOL`
+(`bot/constants.py`, s. `tests/test_teleporter.py`) — bleiben bewusst OHNE `Final`. Neue
+heiße Konstanten defaulten auf `Final`; wird eine später testseitig patchbar gebraucht,
+`Final` explizit weglassen und hier ergänzen.
+
+### GIL-Yield in langen nativen Schleifen
+
+Als interpretierter Bytecode gibt Python an Loop-Grenzen automatisch das GIL frei; als
+mypyc-natives Modul entfallen diese impliziten Yield-Punkte. Lange Schleifen in
+Zweit-Threads (z.B. die A*-Vollsuche des asynchronen Planers, `_astar` in
+`bzflag/nav_graph.py`) können dadurch den 60-Hz-Game-Loop-Thread verhungern lassen. Abhilfe:
+alle ~1024 Iterationen (nicht öfter — `time.sleep`/`perf_counter` sind nicht gratis) ein
+explizites `time.sleep(0)` einstreuen; das gibt das GIL frei, verhält sich interpretiert wie
+kompiliert identisch und ist im Schnellplan (selten >1024 Iterationen) vernachlässigbar.
+
+### Typisierung statt `Any` (M2a/M2b)
+
+`bot/_bot_base.py::BZBotBase` deklariert die über die Mixins geteilten Attribute. Ein
+Attribut bekommt einen konkreten Typ (`float`/`bool`/`int`/Container), NUR wenn es über
+ALLE Zuweisungen im Code hinweg repräsentationskonfliktfrei ist (grep-geprüft) — mypyc kann
+dann native Unboxing-Slots statt des generischen Objekt-Pfads erzeugen. Bei echtem
+Mischtyp (Optional/Union, Threads/Locks/Callbacks) bleibt das Attribut `Any`. Der eigene
+Tank-Zustand (`self.pos`/`self.vel`, ehemals 3-elementige Listen) ist aus demselben Grund
+in sechs skalare Attribute aufgelöst (`pos_x/pos_y/pos_z`, `vel_x/vel_y/vel_z`) — das
+betrifft NUR den eigenen Bot; `PlayerInfo.pos`/`Shot.pos` (andere Spieler/Schüsse,
+`bot/models.py`) bleiben unverändert Listen.

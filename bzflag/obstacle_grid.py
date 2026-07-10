@@ -9,17 +9,17 @@ die Grid-Konstanten, bestehende Importe bleiben gültig.
 """
 
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, Final, List, Tuple
 
 from .world_map import BoxObstacle
 
 # ---------------------------------------------------------------------------
 # Konstanten
 # ---------------------------------------------------------------------------
-TANK_HALF_WIDTH  = 1.4       # = TANK_WIDTH/2 (Normal-Tank); der Planer ist flaggen-agnostisch und
+TANK_HALF_WIDTH: Final = 1.4       # = TANK_WIDTH/2 (Normal-Tank); der Planer ist flaggen-agnostisch und
                              # deckungsgleich zur reaktiven Decken-Kollision (_effective_half_width)
-TANK_HALF_LENGTH = 3.0       # = TANK_LENGTH/2 (Normal-Tank); reichweitenbestimmend für die OBB-Kollision
-GRID_CELL = 16.0             # Zellgröße (u) des ObstacleGrid-Broad-Phase für die 60-Hz-Punkt-Queries
+TANK_HALF_LENGTH: Final = 3.0       # = TANK_LENGTH/2 (Normal-Tank); reichweitenbestimmend für die OBB-Kollision
+GRID_CELL: Final = 16.0             # Zellgröße (u) des ObstacleGrid-Broad-Phase für die 60-Hz-Punkt-Queries
                              # (get_floor_z, Wall-Slide/Decken-Kollision, Box-Innen-Check).
 # Polsterung der Box-AABB bei der Grid-Registrierung. Muss ≥ dem maximalen Prüf-Margin aller Konsumenten
 # sein. Seit der OBB-Kollision (Wall-Slide/Decken-Check) reicht die Tank-OBB bis zur HALB-LÄNGE — der
@@ -27,8 +27,8 @@ GRID_CELL = 16.0             # Zellgröße (u) des ObstacleGrid-Broad-Phase für
 # overhang ≤ HW) liegt darunter und bleibt korrekt. +0.01 Float-Sicherheit. Größer = mehr Kandidaten je
 # Zelle, aber nie False Negatives (die exakte Narrow-Phase entscheidet unverändert). Obese (O) ist — wie
 # in _effective_half_width — nicht modelliert.
-GRID_PAD  = 0.5 + math.hypot(TANK_HALF_LENGTH, TANK_HALF_WIDTH) + 0.01
-LOS_GRID_PAD = 0.5           # Pad des LoS-Ray-Grids (_los_grid). Die LoS-Narrow-Phase (Slab-Test) hat
+GRID_PAD: Final = 0.5 + math.hypot(TANK_HALF_LENGTH, TANK_HALF_WIDTH) + 0.01
+LOS_GRID_PAD: Final = 0.5           # Pad des LoS-Ray-Grids (_los_grid). Die LoS-Narrow-Phase (Slab-Test) hat
                              # Margin 0 → Pad nur zur Float-Robustheit an Zellgrenzen; kleiner Wert hält die
                              # Kandidatenzahl je durchquerter Zelle niedrig.
 
