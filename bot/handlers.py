@@ -609,6 +609,18 @@ class HandlersMixin(BZBotBase):
                 (py - self.pos[1])**2 +
                 (pz - tank_cz_sw)**2
             )
+            # Punktblank-Treffer: die Front in _resolve_incoming_shots startet erst bei
+            # _shockInRadius und wandert nur nach außen — ein Bot, der beim Abschuss
+            # bereits INNERHALB der Innenkugel steht, würde von dieser Front nie erfasst.
+            if shooter != self.player_id and _sw_dist <= self._shock_in_radius:
+                if self.own_flag == "SH":
+                    logger.info("[%s] SH-Schild absorbiert Punktblank-SW-Treffer von Spieler %d",
+                                self.callsign, shooter)
+                    self._try_drop_flag()
+                else:
+                    logger.info("[%s] Punktblank-SW-Treffer von Spieler %d (Shot %d)",
+                                self.callsign, shooter, shot_id)
+                    self._report_killed(shot)
 
     def _on_shot_end(self, code: int, payload: bytes) -> None:
         """Entfernt abgelaufenen Schuss."""

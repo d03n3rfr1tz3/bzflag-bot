@@ -176,6 +176,62 @@ def test_sw_own_shot_no_kill(bot):
     assert bot.alive is True
 
 
+def test_sw_point_blank_kill(bot):
+    """SW-Schuss startet bereits INNERHALB _shockInRadius (6u) → Sofort-Treffer,
+    weil die Wellenfront in _resolve_incoming_shots nur nach außen wandert und
+    diese Position sonst nie erfassen würde."""
+    from bzflag.protocol import MsgShotBegin, MsgKilled
+    bot.pos   = [0.0, 0.0, 0.0]
+    bot.alive = True
+    payload = _build_shot_packet(
+        shooter_id=2, shot_id=1,
+        pos=(3.0, 0.0, 1.025),   # 3u horizontal < shock_in_radius (6u)
+        vel=(0.0, 0.0, 0.0),
+        flag_type=b"SW", lifetime=3.5,
+    )
+    bot._on_shot_begin(MsgShotBegin, payload)
+    codes = [c[0][0] for c in bot.client.send.call_args_list]
+    assert MsgKilled in codes
+    assert bot.alive is False
+
+
+def test_sw_point_blank_own_shot_no_kill(bot):
+    """Eigener SW-Schuss punktblank tötet den Bot nicht (siehe test_sw_own_shot_no_kill,
+    hier explizit innerhalb _shockInRadius)."""
+    from bzflag.protocol import MsgShotBegin
+    bot.player_id = 2
+    bot.pos   = [0.0, 0.0, 0.0]
+    bot.alive = True
+    payload = _build_shot_packet(
+        shooter_id=2, shot_id=1,
+        pos=(3.0, 0.0, 1.025),
+        vel=(0.0, 0.0, 0.0),
+        flag_type=b"SW", lifetime=3.5,
+    )
+    bot._on_shot_begin(MsgShotBegin, payload)
+    bot.client.send.assert_not_called()
+    assert bot.alive is True
+
+
+def test_sw_point_blank_sh_survives_and_drops_flag(bot):
+    """Bot hält SH und steht punktblank in der SW-Killzone → überlebt, droppt Flag."""
+    from bzflag.protocol import MsgShotBegin, MsgDropFlag, MsgKilled
+    bot.pos      = [0.0, 0.0, 0.0]
+    bot.alive    = True
+    bot.own_flag = "SH"
+    payload = _build_shot_packet(
+        shooter_id=2, shot_id=1,
+        pos=(3.0, 0.0, 1.025),
+        vel=(0.0, 0.0, 0.0),
+        flag_type=b"SW", lifetime=3.5,
+    )
+    bot._on_shot_begin(MsgShotBegin, payload)
+    assert bot.alive is True
+    codes = [c[0][0] for c in bot.client.send.call_args_list]
+    assert MsgDropFlag in codes
+    assert MsgKilled not in codes
+
+
 def test_gm_own_shot_no_kill(bot):
     """Eigener GM-Schuss tötet den Bot nicht (kein Sofort-Kill beim Start)."""
     from bzflag.protocol import MsgShotBegin
