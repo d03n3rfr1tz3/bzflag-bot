@@ -328,7 +328,9 @@ class HitDetectionMixin(BZBotBase):
         # "RuntimeError: dictionary changed size during iteration".
         for pid, info in list(self.players.items()):
             if not info.alive: continue
-            if info.flag != "SR" and self.own_flag != "BU": continue
+            # BU wirkt nur eingegraben (pos[2] < 0), wie überall sonst im Code
+            # (_effective_tank_speed, _find_incoming_shot, _effective_optimal_range).
+            if info.flag != "SR" and not (self.own_flag == "BU" and self.pos[2] < 0.0): continue
             if now - info.last_seen > 1.0: continue
             dx = info.pos[0] - self.pos[0]
             dy = info.pos[1] - self.pos[1]

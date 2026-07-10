@@ -375,6 +375,40 @@ def test_sr_no_kill_when_bot_already_dead(bot):
     bot.client.send.assert_not_called()
 
 
+def test_bu_on_roof_not_overrun(bot):
+    """Bot trägt BU, steht aber auf einem Dach (pos[2] >= 0) → nicht überrollbar
+    durch normale (Nicht-SR-)Gegner — BU wirkt nur eingegraben."""
+    bot.pos      = [0.0, 0.0, 10.0]
+    bot.own_flag = "BU"
+    make_player(bot, pid=3, pos=(5.0, 0.0, 10.0), flag="")
+    bot._check_steamroller(time.monotonic())
+    bot.client.send.assert_not_called()
+    assert bot.alive
+
+
+def test_bu_burrowed_overrun(bot):
+    """Bot trägt BU und ist eingegraben (pos[2] < 0) → normaler naher Gegner
+    überrollt ihn (BU-Sonderfall: Steamroller-Check gilt dann auch ohne SR)."""
+    from bzflag.protocol import MsgKilled
+    bot.pos      = [0.0, 0.0, -1.32]
+    bot.own_flag = "BU"
+    make_player(bot, pid=3, pos=(5.0, 0.0, -1.32), flag="")
+    bot._check_steamroller(time.monotonic())
+    assert bot.client.send.called
+    assert bot.client.send.call_args[0][0] == MsgKilled
+    assert not bot.alive
+
+
+def test_sr_kills_burrowed_bu_bot_too(bot):
+    """SR-Verhalten unverändert: SR-Gegner überrollt auch einen eingegrabenen
+    BU-Bot (Regression-Guard nach der pos[2]-Bedingung)."""
+    bot.pos      = [0.0, 0.0, -1.32]
+    bot.own_flag = "BU"
+    make_player(bot, pid=3, pos=(5.0, 0.0, -1.32), flag="SR")
+    bot._check_steamroller(time.monotonic())
+    assert not bot.alive
+
+
 # ── Phase 2 ──────────────────────────────────────────────────────────────────
 
 class TestThiefFlagHit:

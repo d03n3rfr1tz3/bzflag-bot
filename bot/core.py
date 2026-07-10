@@ -449,6 +449,10 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._round_over = False       # echtes Rundenende NACH dem Spielen (Managed: Exit→Manager-Rejoin)
         self._has_spawned = False      # hat der Bot diese Session schon gespielt? (Reconnect-Gate)
         self.on_player_count_changed = None
+        # Zusatz-Callback nach _on_world_ready, z.B. Karten-Dump aus bzbot.py — mypyc-
+        # kompatibel statt Methoden-Monkeypatch (BZBot wird als native Klasse kompiliert,
+        # dort sind Methoden nicht per Instanz-Zuweisung überschreibbar).
+        self.on_world_ready_extra = None
 
     def _init_handlers(self):
         """Message-Handler beim Client registrieren."""

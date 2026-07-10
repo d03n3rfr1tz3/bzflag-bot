@@ -237,7 +237,7 @@ def _transition_to(self, state: AIState) -> None:
     if self._ai_state in _clear_on_exit and state in (AIState.SEEKING, AIState.IDLE):
         self._nav_path = []
         self._nav_goal = None
-    logger.debug("[%s] State: %s → %s", self.callsign, self._ai_state.name, state.name)
+    logger.info("[%s] State: %s → %s", self.callsign, self._ai_state.name, state.name)
     self._ai_state = state
 ```
 
@@ -362,7 +362,7 @@ NavGraph-Objekt.
 
 ### Ground-Layer
 
-Der Boden-Layer ist ein 2D-Raster über `±world_half` mit Zellgröße `CELL_SIZE=5u`.
+Der Boden-Layer ist ein 2D-Raster über `±world_half` mit Zellgröße `CELL_SIZE=4u`.
 
 ```python
 n = max(1, int(2.0 * world_half / CELL_SIZE))    # Anzahl Zellen pro Achse
@@ -508,10 +508,12 @@ globale Optimum sein — dafür expandiert der Algorithmus 2–4× weniger Knote
 Bei w=2.0 wären 100% Umwege möglich, was sichtbar wäre. 1.5 ist der empirische
 Sweet-Spot: In der Praxis liegt die Abweichung oft deutlich unter 50%.
 
-**Expansion-Limit (10.000 Knoten)**: Sicherheitsnetz gegen pathologische Karten
-mit vielen Engpässen. Bei `CELL_SIZE=5u` und `world_half=400u` gibt es
-≈(160×160)=25.600 Bodenzellen; 10.000 entspricht ≈40% davon. Wenn das Limit greift:
-Rückgabe `[]` → PTH-04-Fallback (Flucht-Wegpunkt).
+**Expansion-Limit (`ASTAR_MAX_EXPANSIONS=5000` Knoten)**: Sicherheitsnetz gegen
+pathologische Karten mit vielen Engpässen. Bei `CELL_SIZE=4u` und `world_half=400u`
+gibt es ≈(200×200)=40.000 Bodenzellen; 5.000 entspricht ≈12,5% davon. Wenn das
+Limit greift: kein leeres `[]`, sondern ein Best-Effort-Teilpfad zum bisher
+zielnächsten expandierten Knoten (siehe Kommentar zu `ASTAR_MAX_EXPANSIONS` in
+`bzflag/nav_graph.py`).
 
 **Heuristik `_h()`**:
 
@@ -580,8 +582,9 @@ SEEKING/COMBAT/IDLE → _plan_path() → nav_path = [(wx, wy, lz), ...]
                     └── nächster WP auf anderer Etage  → NAV_JUMP
 ```
 
-**`_wp_reach_radius()`**: gibt 2.0u zurück wenn der nächste WP nach dem aktuellen einen
-Höhenwechsel erfordert (NAV_JUMP-Präzision), sonst `WAYPOINT_RADIUS = 8.0u`.
+**`_wp_reach_radius()`**: gibt `NAV_CELL_SIZE = 4.0u` zurück wenn der nächste WP nach dem
+aktuellen einen Höhenwechsel erfordert (NAV_JUMP-Anlauf-Präzision), sonst
+`NAV_CELL_SIZE * 1.25 = 5.0u`.
 
 **`_insert_jump_runups`** (nav_graph.py): Wird in `plan_path` aufgerufen. Fügt **vor** jede
 Absprungzelle (Höhenwechsel > 1.5u) einen Run-up-WP ein — eine Zelle (CELL_SIZE) hinter der
@@ -615,7 +618,7 @@ sich selbst aus → Bot bleibt regungslos in NAV_JUMP_ALIGN hängen (war die Urs
 Standbild auf z=30"-Bugs).
 
 **COMBAT-spezifische Invarianten:**
-- Max. 8 WPs in `_nav_path` (nach jedem Replan auf 8 begrenzt, ≈40u bei CELL_SIZE=5u)
+- Max. 8 WPs in `_nav_path` (nach jedem Replan auf 8 begrenzt, ≈32u bei CELL_SIZE=4u)
 - `_skip_nav`-Bedingung (Direktziel-Modus): `_not_below_enemy = bot_z + TANK_HEIGHT > enemy_z`
   (Gegner nicht deutlich höher) **und** `dist < _dist_thresh`, wobei `_dist_thresh = SHOT_RANGE` bei
   freier LOS, sonst `optimal_range × 1.5`. Ist `_skip_nav` True → nav_path ignorieren, Direktanflug.

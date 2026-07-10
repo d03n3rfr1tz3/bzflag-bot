@@ -218,6 +218,7 @@ class BZBotBase:
     motto: Any
     observer_count: Any
     on_player_count_changed: Any
+    on_world_ready_extra: Any
     own_flag: Any
     player_id: Any
     players: Any

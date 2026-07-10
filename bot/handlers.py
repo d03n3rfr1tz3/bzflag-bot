@@ -77,7 +77,23 @@ class HandlersMixin(BZBotBase):
                 logger.info("[%s] shakeTimeout=%.1fs", self.callsign, self._drop_bad_flag_delay)
 
     def _on_world_ready(self, world_map) -> None:
-        """Callback nach Welt-Download: speichert WorldMap und baut NavGraph."""
+        """Callback nach Welt-Download: speichert WorldMap und baut NavGraph.
+
+        try/finally statt frühem return, damit on_world_ready_extra (Karten-Dump
+        aus bzbot.py) an JEDEM Austrittspunkt aufgerufen wird — auch bei
+        world_map=None (Parse-Fehler)."""
+        try:
+            self._on_world_ready_core(world_map)
+        finally:
+            cb = self.on_world_ready_extra
+            if cb is not None:
+                try:
+                    cb(world_map)
+                except Exception:
+                    logger.exception("[%s] on_world_ready_extra-Callback Fehler", self.callsign)
+
+    def _on_world_ready_core(self, world_map) -> None:
+        """Kern von _on_world_ready (siehe dort) — speichert WorldMap und baut NavGraph."""
         self._world_map = world_map
         self._shot_grid = None   # nie stale zur alten Welt (Rebuild unten)
         if world_map is None:
@@ -145,6 +161,16 @@ class HandlersMixin(BZBotBase):
         callsign = unpack_string(payload, off, CallSignLen)
         logger.debug("MsgAddPlayer: id=%d type=%d team=%d callsign=%r",
                      pid, ptype, team, callsign)
+        # Kann pid schon existieren (erneutes MsgAddPlayer derselben ID, z.B. Resync),
+        # muss der alte Eintrag zuerst raus — sonst zählen human_count/observer_count
+        # doppelt und driften dauerhaft auseinander (observer_count wird nirgends
+        # resynct). Analog zu _on_remove_player.
+        old = self.players.pop(pid, None)
+        if old is not None:
+            if old.team == TEAM_OBSERVER:
+                self.observer_count = max(0, self.observer_count - 1)
+            if old.is_human:
+                self.human_count = max(0, self.human_count - 1)
         is_bot = (ptype == PLAYER_TYPE_COMPUTER) or self._is_bot_callsign(callsign)
         is_obs = (team == TEAM_OBSERVER)
         self.players[pid] = PlayerInfo(
@@ -487,6 +513,26 @@ class HandlersMixin(BZBotBase):
         if self.player_id == new_rabbit:
             logger.info("[%s] Bot ist jetzt der Rabbit", self.callsign)
 
+    def _incoming_shot_lifetime(self, flag_abbr: bytes, base: float) -> float:
+        """Client-treue Lebensdauer eines Fremdschusses.
+
+        Der echte BZFlag-Client übernimmt die Server-Lifetime nicht 1:1, sondern
+        justiert sie pro Flagge im Strategy-Konstruktor mit `f.lifetime *= <flag>AdLife`
+        nach (ShockWave/GuidedMissle/SegmentedShot). Wir spiegeln genau diese sechs
+        Flaggen; alle Multiplikatoren folgen Server-Vars (MsgSetVar). Parallel zu
+        `_effective_shot_lifetime` (eigene Flagge), aber gekeyed auf `flag_abbr`-Bytes.
+
+        Wirkung SW: base(=reloadTime)·_shock_ad_life == _reload_time·_shock_ad_life
+        (siehe _recompute_sw_expand_speed) → der Shot verfällt exakt dann, wenn die
+        expandierende Front _shock_out_radius erreicht (BZFlags setExpired()); kein
+        Phantom-Kill-Ring nach dem sichtbaren Wellenende mehr.
+        """
+        if flag_abbr == b"SW":   return base * self._shock_ad_life
+        if flag_abbr == b"GM":   return base * self._gm_ad_life
+        if flag_abbr == b"MG":   return base * self._mgun_ad_life
+        if flag_abbr == b"F\x00": return base * self._rfire_ad_life
+        return base
+
     def _on_shot_begin(self, code: int, payload: bytes) -> None:
         """Registriert neuen Schuss; Sofort-Check für Laser und SW."""
         if len(payload) < 43: return
@@ -500,10 +546,11 @@ class HandlersMixin(BZBotBase):
         team       = unpack_int16(  payload, off); off += 2
         flag_type  = payload[off:off+2];           off += 2
         lifetime   = unpack_float(  payload, off)
+        base_life  = lifetime if lifetime > 0 else self._shot_lifetime
         shot = Shot(shooter_id=shooter, shot_id=shot_id,
                     pos=[px, py, pz], vel=[vx, vy, vz],
                     fire_time=time.monotonic(),
-                    lifetime=lifetime if lifetime > 0 else self._shot_lifetime,
+                    lifetime=self._incoming_shot_lifetime(flag_type, base_life),
                     team=team,
                     is_gm=(flag_type == b"GM"),
                     is_laser=(flag_type == b"L\x00"),
@@ -609,6 +656,18 @@ class HandlersMixin(BZBotBase):
                 (py - self.pos[1])**2 +
                 (pz - tank_cz_sw)**2
             )
+            # Punktblank-Treffer: die Front in _resolve_incoming_shots startet erst bei
+            # _shockInRadius und wandert nur nach außen — ein Bot, der beim Abschuss
+            # bereits INNERHALB der Innenkugel steht, würde von dieser Front nie erfasst.
+            if shooter != self.player_id and _sw_dist <= self._shock_in_radius:
+                if self.own_flag == "SH":
+                    logger.info("[%s] SH-Schild absorbiert Punktblank-SW-Treffer von Spieler %d",
+                                self.callsign, shooter)
+                    self._try_drop_flag()
+                else:
+                    logger.info("[%s] Punktblank-SW-Treffer von Spieler %d (Shot %d)",
+                                self.callsign, shooter, shot_id)
+                    self._report_killed(shot)
 
     def _on_shot_end(self, code: int, payload: bytes) -> None:
         """Entfernt abgelaufenen Schuss."""

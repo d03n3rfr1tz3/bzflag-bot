@@ -929,3 +929,53 @@ class TestPlayerTypeTeamConstants:
         )
         # Erste 4 Bytes: uint16 type, uint16 team (big-endian)
         assert payload[:4] == b"\x00\x00\x00\x05"
+
+
+# ---------------------------------------------------------------------------
+# B6: Zähler-Drift bei doppeltem MsgAddPlayer derselben ID
+# ---------------------------------------------------------------------------
+
+def _build_add_player_payload(pid: int, callsign: str, team: int):
+    """Baut ein MsgAddPlayer-Payload: pid(1) ptype(2) team(2) +6 Bytes, dann Callsign."""
+    from bzflag.protocol import PLAYER_TYPE_TANK, CallSignLen
+    return (bytes([pid]) + struct.pack(">H", PLAYER_TYPE_TANK)
+            + struct.pack(">H", team) + b"\x00" * 6
+            + callsign.encode("ascii").ljust(CallSignLen, b"\x00"))
+
+
+class TestAddPlayerCounterDrift:
+    """Erneutes MsgAddPlayer derselben ID (z.B. Resync) darf human_count/
+    observer_count nicht ein zweites Mal hochzählen."""
+
+    def test_duplicate_add_player_human_count_stays_one(self, bot):
+        from bzflag.protocol import MsgAddPlayer, TEAM_RED
+        payload = _build_add_player_payload(3, "Alice", TEAM_RED)
+        bot._on_add_player(MsgAddPlayer, payload)
+        assert bot.human_count == 2   # eigener Bot (Fixture) + Alice
+        bot._on_add_player(MsgAddPlayer, payload)   # dieselbe ID erneut
+        assert bot.human_count == 2
+
+    def test_duplicate_add_player_observer_count_stays_one(self, bot):
+        from bzflag.protocol import MsgAddPlayer, TEAM_OBSERVER
+        payload = _build_add_player_payload(4, "Watcher", TEAM_OBSERVER)
+        bot._on_add_player(MsgAddPlayer, payload)
+        assert bot.observer_count == 1
+        bot._on_add_player(MsgAddPlayer, payload)   # dieselbe ID erneut
+        assert bot.observer_count == 1
+
+    def test_add_player_different_ids_still_accumulate(self, bot):
+        """Regression-Guard: verschiedene IDs zählen weiterhin normal hoch."""
+        from bzflag.protocol import MsgAddPlayer, TEAM_RED
+        bot._on_add_player(MsgAddPlayer, _build_add_player_payload(3, "Alice", TEAM_RED))
+        bot._on_add_player(MsgAddPlayer, _build_add_player_payload(4, "Bob", TEAM_RED))
+        assert bot.human_count == 3   # eigener Bot (Fixture) + Alice + Bob
+
+    def test_add_player_team_change_updates_observer_count(self, bot):
+        """Wechselt eine erneut gemeldete ID von Observer zu Team → alter Observer-
+        Zähler wird abgebaut, kein doppelter Human-Zähler entsteht."""
+        from bzflag.protocol import MsgAddPlayer, TEAM_OBSERVER, TEAM_RED
+        bot._on_add_player(MsgAddPlayer, _build_add_player_payload(5, "Alice", TEAM_OBSERVER))
+        assert bot.observer_count == 1
+        bot._on_add_player(MsgAddPlayer, _build_add_player_payload(5, "Alice", TEAM_RED))
+        assert bot.observer_count == 0
+        assert bot.human_count == 2   # eigener Bot (Fixture) + Alice

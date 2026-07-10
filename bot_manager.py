@@ -577,15 +577,19 @@ class BotManager:
             # Gewünschte Anzahl VOR dem Stoppen bestimmen (Präsenz-Modell, Spieler behalten Vorrang).
             desired = self._desired_bot_count(time.monotonic())
 
+            # Snapshot VOR dem Leeren ziehen — sonst prüft die Warteschleife unten
+            # eine bereits geleerte Liste und wartet nie auf echte Prozess-Enden.
+            procs = list(self.bots)
+
             # Alle Bots herunterfahren (bereits beendete überspringt stop() von selbst).
-            for bot in list(self.bots):
+            for bot in procs:
                 bot.stop()
             with self._lock:
                 self.bots.clear()
 
             # Sicherstellen, dass wirklich kein Bot mehr läuft, bevor wir die Lücke öffnen.
             deadline = time.monotonic() + 10.0
-            while time.monotonic() < deadline and any(b.is_alive for b in self.bots):
+            while time.monotonic() < deadline and any(b.is_alive for b in procs):
                 time.sleep(0.1)
 
             # Lücke: dem Server Zeit geben, die Trennungen zu registrieren (count()==0).

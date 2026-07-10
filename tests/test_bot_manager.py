@@ -739,6 +739,60 @@ class TestRoundRestart:
         assert mgr._round_restart_active is False
         assert mgr._round_over_seen is False  # am Zyklusende verworfen
 
+    def test_round_restart_waits_for_real_process_end(self):
+        """Regression B5: die Warteschleife muss auf einen Snapshot der gestoppten
+        Prozesse warten statt auf self.bots, das vorher bereits geleert wird –
+        sonst prüft any(...) eine leere Liste und wartet nie (No-Op)."""
+        from bot_manager import BotManager, Config, BotProcess
+        cfg = Config(); cfg.min_bots = 1; cfg.max_bots = 1
+        mgr = BotManager(cfg)
+        b1 = MagicMock(spec=BotProcess); b1.is_alive = True; b1.callsign = "A"
+        mgr.bots = [b1]
+        mgr._human_count = 0
+
+        def _fake_stop():
+            # Simuliert Prozessende: erst nach stop() wird is_alive False.
+            b1.is_alive = False
+
+        b1.stop.side_effect = _fake_stop
+
+        with patch.object(mgr, "_start_bot"), \
+             patch.object(mgr, "_disconnect_observer_if_any"), \
+             patch("bot_manager.time.sleep") as sleep_mock:
+            mgr._round_restart()
+        # is_alive wurde durch stop() bereits vor der Warteschleife False – die
+        # Schleife darf daher gar nicht erst pollen (nur der abschließende
+        # ROUND_RESTART_GAP_S-Sleep bleibt übrig, kein 0.1s-Poll).
+        poll_calls = [c for c in sleep_mock.call_args_list if c.args[0] == 0.1]
+        assert poll_calls == []
+        assert mgr.bots == []
+
+    def test_round_restart_waits_while_process_still_alive(self):
+        """Bleibt ein Prozess im Snapshot länger 'alive', pollt die Warteschleife
+        tatsächlich (statt sofort durchzulaufen wie bei der leeren self.bots-Liste)."""
+        from bot_manager import BotManager, Config, BotProcess
+        cfg = Config(); cfg.min_bots = 1; cfg.max_bots = 1
+        mgr = BotManager(cfg)
+        b1 = MagicMock(spec=BotProcess); b1.is_alive = True; b1.callsign = "A"
+        mgr.bots = [b1]
+        mgr._human_count = 0
+
+        polls = {"n": 0}
+
+        def _fake_sleep(secs):
+            if secs == 0.1:
+                polls["n"] += 1
+                if polls["n"] >= 2:
+                    b1.is_alive = False   # Prozess "beendet sich" nach 2 Polls
+
+        with patch.object(mgr, "_start_bot"), \
+             patch.object(mgr, "_disconnect_observer_if_any"), \
+             patch("bot_manager.time.sleep", side_effect=_fake_sleep) as sleep_mock:
+            mgr._round_restart()
+        poll_calls = [c for c in sleep_mock.call_args_list if c.args[0] == 0.1]
+        assert len(poll_calls) == 2
+        assert mgr.bots == []
+
     def test_round_restart_keeps_human_slots_free(self):
         """Bei verbundenen Menschen werden entsprechend weniger Bots neu gestartet."""
         from bot_manager import BotManager, Config
