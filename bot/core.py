@@ -355,6 +355,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._z_attack_fire_z = 0.0
         self._z_attack_retry_after = 0.0
         self._tact_jump_retry_after = 0.0
+        # P8: Cache für _steep_wall_ahead — (expires_at, az, max_dist, result), 0.1s Gültigkeit.
+        self._steep_wall_cache = None
 
     def _init_debug(self, debug_no_shoot, debug_no_jump, debug_log_path, debug_log_shot,
                     debug_log_dodge, debug_log_flag, debug_log_tele):

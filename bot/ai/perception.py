@@ -2,6 +2,7 @@
 
 import math
 import random
+import time
 from typing import Optional
 
 from bzflag.shot_physics import (ray_teleporter_crossing)
@@ -381,7 +382,25 @@ class PerceptionMixin(BZBotBase):
         Wand in steilem Winkel (Einfallswinkel zur Oberfläche > NAV_WALL_STEEP_DEG → der Wall-Slide
         nullt dann fast den ganzen Vortrieb), liefert er die nach vorn gerichtete Wand-Tangente
         (Azimut) zum Entlanggleiten/Abdrehen. Sonst None: flacher Winkel (Gleiten ist ok) oder
-        freie Bahn. Slab-Mathematik wie _segment_clear; Box-angle deckt gedrehte Wände ab."""
+        freie Bahn. Slab-Mathematik wie _segment_clear; Box-angle deckt gedrehte Wände ab.
+
+        P8: Ergebnis 0.1s gecacht — läuft im sichtlosen COMBAT-Direktmodus bei 60 Hz (DDA-
+        Raycast + Slab-Tests), teils 2× pro Tick mit gleichem az (_execute_combat_move). 0.1s
+        ≈ 6 Ticks, der Bot bewegt sich dabei ≤2.5u — für eine 20u-Vorausschau tolerierbar."""
+        now = time.monotonic()
+        cache = self._steep_wall_cache
+        if cache is not None:
+            expires_at, az_cached, max_dist_cached, result = cache
+            if (now < expires_at
+                    and abs(_angle_diff(az, az_cached)) < math.radians(3)
+                    and abs(max_dist - max_dist_cached) < 1.0):
+                return result
+        result = self._steep_wall_ahead_raycast(az, max_dist)
+        self._steep_wall_cache = (now + 0.1, az, max_dist, result)
+        return result
+
+    def _steep_wall_ahead_raycast(self, az: float, max_dist: float) -> Optional[float]:
+        """Unveränderte Raycast-Logik von _steep_wall_ahead, jetzt hinter dessen 0.1s-Cache."""
         nav = getattr(self, "_nav_graph", None)
         if nav is None or max_dist <= 0.0:
             return None

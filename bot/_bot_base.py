@@ -163,6 +163,7 @@ class BZBotBase:
     _stall_rev_dist: Any
     _stall_rev_start: Any
     _stall_until: Any
+    _steep_wall_cache: Any
     _stop_event: Any
     _sw_expand_speed: Any
     _tact_jump_retry_after: Any
