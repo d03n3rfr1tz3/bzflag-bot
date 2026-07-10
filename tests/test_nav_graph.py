@@ -51,7 +51,7 @@ class TestFloorLayer:
         half = 25.0
         n = max(1, int(2.0 * half / CELL_SIZE))
         layer = FloorLayer(z=0.0, cx=0.0, cy=0.0, half_w=half, half_d=half,
-                           n_x=n, n_y=n, walkable=[[True]*n for _ in range(n)],
+                           n_x=n, n_y=n, walkable=[bytearray(b"\x01"*n) for _ in range(n)],
                            source_obstacle=None)
         ix, iy = layer.world_to_cell(0.0, 0.0)
         expected = int(half / CELL_SIZE)
@@ -60,7 +60,7 @@ class TestFloorLayer:
     def test_cell_to_world_round_trip(self):
         n = 8
         layer = FloorLayer(z=0.0, cx=0.0, cy=0.0, half_w=20.0, half_d=20.0,
-                           n_x=n, n_y=n, walkable=[[True]*n for _ in range(n)],
+                           n_x=n, n_y=n, walkable=[bytearray(b"\x01"*n) for _ in range(n)],
                            source_obstacle=None)
         for ix in range(n):
             for iy in range(n):
@@ -71,7 +71,7 @@ class TestFloorLayer:
     def test_contains_xy(self):
         n = 4
         layer = FloorLayer(z=0.0, cx=50.0, cy=50.0, half_w=10.0, half_d=10.0,
-                           n_x=n, n_y=n, walkable=[[True]*n for _ in range(n)],
+                           n_x=n, n_y=n, walkable=[bytearray(b"\x01"*n) for _ in range(n)],
                            source_obstacle=None)
         assert layer.contains_xy(50.0, 50.0)
         assert layer.contains_xy(55.0, 55.0)
@@ -591,7 +591,7 @@ class TestNAV19ArcOverhang:
         over = _make_box(x, 0.0, bz, 5.0, 5.0, 3.0)
         ng, ground, _roof, _t = self._ng_with(over)
         dst = FloorLayer(z=bz + 3.0, cx=x, cy=0.0, half_w=5.0, half_d=5.0,
-                         n_x=1, n_y=1, walkable=[[True]], source_obstacle=over)
+                         n_x=1, n_y=1, walkable=[bytearray(b"\x01")], source_obstacle=over)
         assert ng._arc_clears_overhangs(wx, 0.0, ground, dst, 1.0, 0.0, hspeed) is True
 
     def test_overhang_above_head_apex_ignored(self):
@@ -761,7 +761,7 @@ class TestAstarHeuristic3D:
     def _make_layer(self, z: float) -> FloorLayer:
         n = 4
         return FloorLayer(z=z, cx=0.0, cy=0.0, half_w=20.0, half_d=20.0,
-                          n_x=n, n_y=n, walkable=[[True]*n for _ in range(n)],
+                          n_x=n, n_y=n, walkable=[bytearray(b"\x01"*n) for _ in range(n)],
                           source_obstacle=None)
 
     def test_heuristic_z_component_adds_z_gap(self):
