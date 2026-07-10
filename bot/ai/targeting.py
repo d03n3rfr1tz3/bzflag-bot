@@ -64,7 +64,7 @@ class TargetingMixin(BZBotBase):
                 self.target_player = None
             else:
                 _tx, _ty = ep
-                _d = math.hypot(_tx - self.pos[0], _ty - self.pos[1])
+                _d = math.hypot(_tx - self.pos_x, _ty - self.pos_y)
                 _in_r = _d < self._effective_radar_range()
                 _in_s = False
                 # F5: Server-Basiswert (_shotRange) statt Konstante. Bewusst OHNE eigene
@@ -73,7 +73,7 @@ class TargetingMixin(BZBotBase):
                 # auf die ganze Karte ausdehnen. Deckungsgleich zum Zielwahl-Fenster
                 # in _find_target_player.
                 if _d < self._shot_range:
-                    _ang = math.atan2(_ty - self.pos[1], _tx - self.pos[0])
+                    _ang = math.atan2(_ty - self.pos_y, _tx - self.pos_x)
                     _in_s = abs(_angle_diff(_ang, self.azimuth)) < self._effective_fov()
                 if not _in_r and not _in_s:
                     self.target_player = None
@@ -110,14 +110,14 @@ class TargetingMixin(BZBotBase):
                 continue
             if _now - info.last_seen > ENEMY_STALE_S:   # zu lange nicht wahrgenommen → kein Re-Lock
                 continue                                # (Gegenstück zu _get_enemy_pos: kein Geist-Lock)
-            d = math.hypot(info.pos[0] - self.pos[0], info.pos[1] - self.pos[1])
+            d = math.hypot(info.pos[0] - self.pos_x, info.pos[1] - self.pos_y)
             in_radar = d < self._effective_radar_range() and self._enemy_visible_radar(info)
             in_sight = False
             # F5: Server-Basiswert (_shotRange) statt Konstante — Sicht-Zielfenster,
             # bewusst ohne Flaggen-Multiplikatoren (s. _validate_and_find_target).
             if d < self._shot_range and self._enemy_visible_window(info):
                 angle_to = math.atan2(
-                    info.pos[1] - self.pos[1], info.pos[0] - self.pos[0])
+                    info.pos[1] - self.pos_y, info.pos[0] - self.pos_x)
                 in_sight = (abs(_angle_diff(angle_to, self.azimuth)) < self._effective_fov()
                             and self._has_los_to_point(info.pos[0], info.pos[1],
                                                        info.pos[2] + self._tank_height * 0.5))
@@ -147,14 +147,14 @@ class TargetingMixin(BZBotBase):
     def _dist_to_target(self) -> float:
         """Euklidische Distanz zum aktuellen Wegpunkt; inf wenn kein Wegpunkt."""
         if not self.target_pos: return float("inf")
-        return math.hypot(self.target_pos[0] - self.pos[0],
-                          self.target_pos[1] - self.pos[1])
+        return math.hypot(self.target_pos[0] - self.pos_x,
+                          self.target_pos[1] - self.pos_y)
 
     def _flags_on_route_all(self, gx: float, gy: float,
                             detour: float = 40.0) -> list[tuple[float, float]]:
         """Wie _flags_on_route, aber ohne good_flags-Filter (alle on-ground Flags).
         Für flagless-Modus mit breiterem Detour-Radius."""
-        cx, cy = self.pos[0], self.pos[1]
+        cx, cy = self.pos_x, self.pos_y
         dx, dy = gx - cx, gy - cy
         dist2 = dx * dx + dy * dy
         if dist2 < 1.0:
@@ -195,7 +195,7 @@ class TargetingMixin(BZBotBase):
                 if any(fi.abbr == a and math.hypot(fi.pos[0]-dx, fi.pos[1]-dy) < 20.0
                        for a, dx, dy in _dropped):
                     continue
-                d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
+                d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
                 if d < best_d:
                     best_d = d
                     best_pos = (fi.pos[0], fi.pos[1], fi.pos[2])
@@ -207,7 +207,7 @@ class TargetingMixin(BZBotBase):
                     blocked = {k for k, v in self._nav_jump_cooldowns.items()
                                if v > time.monotonic()}
                     all_wps: list = []
-                    px, py, pz = self.pos[0], self.pos[1], self.pos[2]
+                    px, py, pz = self.pos_x, self.pos_y, self.pos_z
                     for fx, fy in via:
                         if nav:
                             seg = nav.plan_path(px, py, pz, fx, fy,
@@ -231,8 +231,8 @@ class TargetingMixin(BZBotBase):
                         self._wp_start_time = time.monotonic()
                         self._wp_fail_count = 0
                         self._wp_timeout = (WP_TIMEOUT_BASE
-                                            + math.hypot(all_wps[0][0] - self.pos[0],
-                                                         all_wps[0][1] - self.pos[1])
+                                            + math.hypot(all_wps[0][0] - self.pos_x,
+                                                         all_wps[0][1] - self.pos_y)
                                             * WP_TIMEOUT_SCALE)
                         return
                 self._plan_path(best_pos[0], best_pos[1], best_pos[2])
@@ -246,7 +246,7 @@ class TargetingMixin(BZBotBase):
             for fi in list(self.flags.values()):
                 if fi.status != 1:
                     continue
-                d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
+                d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
                 if d < IDENTIFY_RANGE and fi.abbr in self.good_flags and d < best_d_good:
                     if self._debug_log_flag:
                         logger.debug("[%s] Flagge: ID-B1 – gute Flagge %r d=%.1fu (< %.0fu)",
@@ -258,8 +258,8 @@ class TargetingMixin(BZBotBase):
                         logger.debug("[%s] Flagge: ID-B1 – keine gute Flagge %r d=%.1fu",
                                      self.callsign, fi.abbr, d)
             if best_pos_good is not None:
-                d_to_good = math.hypot(best_pos_good[0] - self.pos[0],
-                                       best_pos_good[1] - self.pos[1])
+                d_to_good = math.hypot(best_pos_good[0] - self.pos_x,
+                                       best_pos_good[1] - self.pos_y)
                 if self._debug_log_flag:
                     logger.debug("[%s] Flagge: ID-B1 – Drop-Kandidat (%.0f,%.0f) d=%.1fu cooldown=%.1fs",
                                  self.callsign, best_pos_good[0], best_pos_good[1], d_to_good,
@@ -281,7 +281,7 @@ class TargetingMixin(BZBotBase):
                     continue
                 if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
                     continue
-                d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
+                d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
                 # Innerhalb IDENTIFY_RANGE bereits als nicht-gut erkannte Flags überspringen
                 if d < IDENTIFY_RANGE and fi.abbr and fi.abbr not in self.good_flags:
                     continue
@@ -304,7 +304,7 @@ class TargetingMixin(BZBotBase):
         for _ in range(5):
             cx_ = random.uniform(-h, h)
             cy_ = random.uniform(-h, h)
-            cand_az = math.atan2(cy_ - self.pos[1], cx_ - self.pos[0])
+            cand_az = math.atan2(cy_ - self.pos_y, cx_ - self.pos_x)
             score = math.cos(abs(_angle_diff(cand_az, self.azimuth)))
             if score > best_score:
                 best_score, best_gx, best_gy = score, cx_, cy_
@@ -316,8 +316,8 @@ class TargetingMixin(BZBotBase):
         if now - self._last_grab_attempt < 0.5: return
         for fi in list(self.flags.values()):
             if fi.status != 1: continue
-            if abs(fi.pos[2] - self.pos[2]) > 0.5: continue
-            d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
+            if abs(fi.pos[2] - self.pos_z) > 0.5: continue
+            d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
             if d >= FLAG_GRAB_RADIUS: continue
             if d > TANK_RADIUS and not self._is_ahead(fi.pos[0], fi.pos[1]): continue
             self._last_grab_attempt = now

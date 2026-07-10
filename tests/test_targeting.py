@@ -32,7 +32,7 @@ def test_passive_mode_returns_none(bot):
 
 def test_normal_player_in_radar(bot):
     """Normaler Spieler 80u entfernt → in Radar (150u) → als Ziel gewählt."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = math.pi  # blickt nach links (weg vom Spieler)
     make_player(bot, pid=2, pos=(80.0, 0.0, 0.0))
     assert bot._find_target_player() == 2
@@ -40,7 +40,7 @@ def test_normal_player_in_radar(bot):
 
 def test_normal_player_in_fov(bot):
     """Spieler 200u entfernt, direkt voraus → in FOV und in Radar (400u) → Ziel."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = 0.0   # blickt in +x Richtung
     make_player(bot, pid=2, pos=(200.0, 0.0, 0.0))
     assert bot._find_target_player() == 2
@@ -49,7 +49,7 @@ def test_normal_player_in_fov(bot):
 def test_player_outside_both(bot):
     """Spieler jenseits RADAR_RANGE, genau rückwärts → weder Radar noch FOV."""
     from bot.constants import RADAR_RANGE
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = 0.0   # blickt in +x
     make_player(bot, pid=2, pos=(-(RADAR_RANGE + 10.0), 0.0, 0.0))   # hinter dem Bot, außer Reichweite
     assert bot._find_target_player() is None
@@ -62,7 +62,7 @@ def test_dead_player_not_targeted(bot):
 
 def test_human_preferred_over_bot(bot):
     """Gleiche Distanz: Mensch wird bevorzugt (score * 0.8)."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = math.pi  # blickt weg, beide per Radar erreichbar
     make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), is_human=True,  flag="")
     make_player(bot, pid=3, pos=(50.0, 1.0, 0.0), is_human=False, flag="")
@@ -73,7 +73,7 @@ def test_human_preferred_over_bot(bot):
 
 def test_stealth_in_radar_range_not_targetable(bot):
     """ST Spieler 80u entfernt, Bot blickt weg → Radar blockiert durch ST → kein Ziel."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = math.pi   # blickt von Spieler weg → nicht in FOV
     make_player(bot, pid=2, pos=(80.0, 0.0, 0.0), flag="ST")
     assert bot._find_target_player() is None
@@ -81,7 +81,7 @@ def test_stealth_in_radar_range_not_targetable(bot):
 
 def test_stealth_in_fov_is_targetable(bot):
     """ST Spieler 200u entfernt, direkt im FOV → optisch sichtbar → als Ziel erkannt."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = 0.0   # blickt in +x
     make_player(bot, pid=2, pos=(200.0, 0.0, 0.0), flag="ST")
     assert bot._find_target_player() == 2
@@ -89,7 +89,7 @@ def test_stealth_in_fov_is_targetable(bot):
 
 def test_stealth_outside_fov_and_in_radar_not_targetable(bot):
     """ST Spieler in Radar-Reichweite, aber außerhalb FOV → nicht targetbar."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = 0.0   # blickt in +x
     # Spieler 80u hinter dem Bot
     make_player(bot, pid=2, pos=(-80.0, 0.0, 0.0), flag="ST")
@@ -100,7 +100,7 @@ def test_stealth_outside_fov_and_in_radar_not_targetable(bot):
 
 def test_cloaking_in_radar_is_targetable(bot):
     """CL Spieler 80u entfernt, Bot blickt weg → Radar sichtbar trotz CL → Ziel."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = math.pi   # blickt von Spieler weg
     make_player(bot, pid=2, pos=(80.0, 0.0, 0.0), flag="CL")
     assert bot._find_target_player() == 2
@@ -111,7 +111,7 @@ def test_cloaking_outside_radar_not_targetable(bot):
     Fenster-Sicht → kein Ziel. (Das frühere 'nur im FOV, außerhalb Radar'-Regime existiert für
     radar-sichtbare Gegner nicht mehr, da RADAR_RANGE ≥ SHOT_RANGE.)"""
     from bot.constants import RADAR_RANGE
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = 0.0   # blickt in +x, direkt auf den Gegner
     make_player(bot, pid=2, pos=(RADAR_RANGE + 10.0, 0.0, 0.0), flag="CL")
     assert bot._find_target_player() is None
@@ -119,7 +119,7 @@ def test_cloaking_outside_radar_not_targetable(bot):
 
 def test_cloaking_in_both_targetable_via_radar(bot):
     """CL Spieler 80u entfernt, auch im FOV → Radar funktioniert → Ziel."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = 0.0
     make_player(bot, pid=2, pos=(80.0, 0.0, 0.0), flag="CL")
     assert bot._find_target_player() == 2
@@ -129,7 +129,7 @@ def test_cloaking_in_both_targetable_via_radar(bot):
 
 def test_closest_player_selected(bot):
     """Von mehreren Spielern im Radar wird der nächste gewählt."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = math.pi   # beide per Radar erreichbar
     make_player(bot, pid=2, pos=(50.0, 0.0, 0.0))    # 50u
     make_player(bot, pid=3, pos=(100.0, 0.0, 0.0))   # 100u
@@ -141,7 +141,7 @@ def test_closest_player_selected(bot):
 def test_stale_target_not_reacquired(bot):
     """Gegner >10s nicht wahrgenommen (CL, in Radar-Reichweite) → NICHT als Ziel gewählt.
     Sonst lockt der Bot auf einen eingefrorenen Geist, den _get_enemy_pos längst verworfen hat."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = math.pi   # blickt weg → nur Radar
     info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="CL")
     info.last_seen = time.monotonic() - 11.0   # > ENEMY_STALE_S
@@ -151,7 +151,7 @@ def test_stale_target_not_reacquired(bot):
 def test_combat_drops_stale_target(bot):
     """COMBAT mit veraltetem target_player → _validate_and_find_target räumt es ab (→ SEEKING),
     statt es über die rohe info.pos sofort wieder zu re-akquirieren."""
-    bot.pos     = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = math.pi
     info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="CL")
     info.last_seen = time.monotonic() - 11.0
@@ -167,8 +167,8 @@ class TestTargetRetention:
 
     def test_keep_target_at_80deg_off_axis(self, bot):
         """Bot az 80° weg vom Gegner → target_player bleibt gesetzt (90° Retention)."""
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.alive = True
         bot.human_count = 1
         # Gegner bei (80, 0) = Sichtweite, aber 80° seitlich
@@ -186,7 +186,7 @@ class TestTargetRetention:
         """EVADING-Regression: nach einem Dodge schaut der Bot ~60-80° vom (jetzt aus dem engen
         FoV gefallenen) Gegner weg. Auch ein ST-Gegner (kein Radar-Blip) bleibt Ziel, weil das
         Halten über die distanzbasierte Radar-Reichweite läuft, nicht über den FoV."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.alive = True
         bot.human_count = 1
         info = make_player(bot, 99, pos=(80.0, 0.0, 0.0), flag="ST")
@@ -200,8 +200,8 @@ class TestTargetRetention:
         """Gegner hinter Bot (>90°) und außerhalb Radar → target_player = None.
         Bot muss in SEEKING sein damit _validate_and_find_target läuft."""
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.alive = True
         bot.human_count = 1
         from bot.constants import RADAR_RANGE
@@ -269,29 +269,29 @@ class TestVisibilityPredicates:
 
 class TestShouldUpdatePlayer:
     def test_stealth_in_window_updates(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
         info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
         assert bot._should_update_player(info, 50.0, 0.0, 0.0, time.monotonic()) is True
 
     def test_stealth_occluded_no_update(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
         _block_los(bot)
         info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
         assert bot._should_update_player(info, 50.0, 0.0, 0.0, time.monotonic()) is False
 
     def test_stealth_out_of_fov_no_update(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = math.pi   # weggedreht
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = math.pi   # weggedreht
         info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
         assert bot._should_update_player(info, 50.0, 0.0, 0.0, time.monotonic()) is False
 
     def test_jamming_normal_no_radar(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = math.pi; bot.own_flag = "JM"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = math.pi; bot.own_flag = "JM"
         info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="")
         assert bot._should_update_player(info, 50.0, 0.0, 0.0, time.monotonic()) is False
 
     def test_radar_attention_thresholds(self, bot, monkeypatch):
         import random
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = math.pi   # Normal außer FoV → Radar-Pfad
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = math.pi   # Normal außer FoV → Radar-Pfad
         normal = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="")
         cl     = make_player(bot, pid=3, pos=(50.0, 0.0, 0.0), flag="CL")
         now = time.monotonic()
@@ -306,7 +306,7 @@ class TestShouldUpdatePlayer:
 
     def test_radar_cooldown_blocks_until_expiry(self, bot, monkeypatch):
         import random
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = math.pi
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = math.pi
         info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="")
         now = time.monotonic()
         monkeypatch.setattr(random, "random", lambda: 0.1)   # niedrig → Skip + Cooldown
@@ -338,7 +338,7 @@ def _count_los(bot, monkeypatch, results=None):
 class TestPlayerLosCache:
     def test_second_call_within_ttl_uses_cache(self, bot, monkeypatch):
         from bot.constants import PLAYER_LOS_TTL_S
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
         info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
         calls = _count_los(bot, monkeypatch)
         now = time.monotonic()
@@ -350,7 +350,7 @@ class TestPlayerLosCache:
     def test_cached_result_is_returned_not_recomputed(self, bot, monkeypatch):
         """Negatives Ergebnis bleibt bis TTL-Ablauf gültig, auch wenn die Sicht real frei würde."""
         from bot.constants import PLAYER_LOS_TTL_S
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
         info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
         calls = _count_los(bot, monkeypatch, results=[False, True])  # 1. blockiert, danach frei
         now = time.monotonic()
@@ -361,7 +361,7 @@ class TestPlayerLosCache:
         assert len(calls) == 2                       # nach Ablauf neu gerechnet
 
     def test_cache_is_per_player(self, bot, monkeypatch):
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
         a = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
         b = make_player(bot, pid=3, pos=(50.0, 5.0, 0.0), flag="ST")
         calls = _count_los(bot, monkeypatch)
@@ -373,7 +373,7 @@ class TestPlayerLosCache:
 
     def test_without_now_no_caching(self, bot, monkeypatch):
         """Targeting-Aufrufer (ohne now) rechnen exakt und berühren den Cache nicht."""
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
         info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
         calls = _count_los(bot, monkeypatch)
         assert bot._sees_in_window(info, 50.0, 0.0, 0.0) is True
@@ -386,12 +386,12 @@ class TestPlayerLosCache:
 
 class TestStealthAcquisitionLoS:
     def test_stealth_in_fov_clear_targetable(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
         make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
         assert bot._find_target_player() == 2
 
     def test_stealth_in_fov_occluded_not_targetable(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
         _block_los(bot)
         make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="ST")
         assert bot._find_target_player() is None
@@ -411,13 +411,13 @@ class TestShotRevealsShooter:
         assert bot._shot_visible_window(ib)    is True
 
     def test_normal_shot_reveals_regardless_of_los(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = math.pi   # weggedreht
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = math.pi   # weggedreht
         _block_los(bot)
         sh = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="")
         assert bot._shot_reveals_shooter(sh, 50.0, 0.0, 1.0) is True   # Radar-Schuss
 
     def test_ib_shot_only_reveals_in_window(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         sh = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0), flag="IB")
         bot.azimuth = 0.0
         assert bot._shot_reveals_shooter(sh, 50.0, 0.0, 1.0) is True    # im FoV, frei
@@ -426,7 +426,7 @@ class TestShotRevealsShooter:
 
     def test_shot_begin_jumps_occluded_stealth_shooter(self, bot):
         import struct
-        bot.pos = [0.0, 0.0, 0.0]; bot.player_id = 1; bot.azimuth = math.pi
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.player_id = 1; bot.azimuth = math.pi
         sh = make_player(bot, pid=7, pos=(10.0, 10.0, 0.0), flag="ST")   # alte Position
         sh.radar_blind_until = time.monotonic() + 5.0
         payload = (struct.pack(">f", time.monotonic()) + struct.pack(">B", 7)
@@ -485,5 +485,5 @@ class TestRadarRangeWorldHalf:
     def test_burrow_quarter_scales_with_world_half(self, bot):
         bot.world_half = 800.0
         bot.own_flag = "BU"
-        bot.pos = [0.0, 0.0, -1.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = -1.0
         assert bot._effective_radar_range() == pytest.approx(200.0)

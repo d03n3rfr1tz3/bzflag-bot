@@ -235,7 +235,7 @@ def test_compute_ricochet_aim_via_teleporter(bot):
     from unittest.mock import MagicMock
     from conftest import make_player
     teles, lmap = _pair()                 # t0@(0,0), t1@(50,0), achsparallel verlinkt
-    bot.pos = [-20.0, -20.0, 0.0]
+    bot.pos_x = -20.0; bot.pos_y = -20.0; bot.pos_z = 0.0
     bot.own_flag = ""
     bot._server_ricochet = False          # kein Abprall → Treffer NUR via Teleporter
     bot.world_half = 400.0
@@ -271,7 +271,7 @@ def test_compute_ricochet_aim_teleporter_hix_corner(bot):
     wm = load_map_fixture("hix")
     if wm is None:
         pytest.skip("hix-Fixture fehlt")
-    bot.pos = [382.0, 382.0, 0.0]
+    bot.pos_x = 382.0; bot.pos_y = 382.0; bot.pos_z = 0.0
     bot.own_flag = ""
     bot._server_ricochet = False              # Treffer NUR via Tor (kein Abprall)
     bot.world_half = wm.world_half
@@ -317,7 +317,7 @@ def test_compute_ricochet_aim_high_to_low_needs_z_tol(bot, monkeypatch):
     wm = load_map_fixture("hix")
     if wm is None:
         pytest.skip("hix-Fixture fehlt")
-    bot.pos = [382.0, 382.0, 30.0]            # am z=30-Eck-Tor
+    bot.pos_x = 382.0; bot.pos_y = 382.0; bot.pos_z = 30.0            # am z=30-Eck-Tor
     bot.own_flag = ""
     bot._server_ricochet = False              # Treffer NUR via Tor (kein Abprall)
     bot.world_half = wm.world_half
@@ -340,7 +340,7 @@ def test_indirect_shot_available(bot):
     wm = load_map_fixture("hix")
     if wm is None:
         pytest.skip("hix-Fixture fehlt")
-    bot.pos = [382.0, 382.0, 0.0]
+    bot.pos_x = 382.0; bot.pos_y = 382.0; bot.pos_z = 0.0
     bot.own_flag = ""
     bot._server_ricochet = False
     bot.world_half = wm.world_half
@@ -455,11 +455,11 @@ def test_check_teleport_crossing_ground(bot):
     teles, lmap = _pair()                     # t0@(0,0), t1@(50,0)
     _bot_world(bot, teles, lmap)
     bot.own_flag = ""
-    bot.pos = [2.0, 0.0, 3.0]                  # nach der Querung (x>0)
-    bot.vel = [25.0, 0.0, 0.0]
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0                  # nach der Querung (x>0)
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
-    assert bot.pos[0] == pytest.approx(50.0, abs=2.0)   # Sprung zum Ziel-Teleporter
-    assert bot.pos[2] == pytest.approx(3.0, abs=0.5)    # Z erhalten
+    assert bot.pos_x == pytest.approx(50.0, abs=2.0)   # Sprung zum Ziel-Teleporter
+    assert bot.pos_z == pytest.approx(3.0, abs=0.5)    # Z erhalten
     assert bot._teleporting_until == pytest.approx(101.0)
     sent = [c for c in bot.client.send.call_args_list if c.args[0] == MsgTeleport]
     assert sent, "MsgTeleport muss gesendet werden"
@@ -473,11 +473,11 @@ def test_check_teleport_crossing_preserves_jump(bot):
     bot.own_flag = ""
     bot._jumping = True
     state_before = bot._ai_state
-    bot.pos = [2.0, 0.0, 5.0]
-    bot.vel = [25.0, 0.0, 10.0]               # steigend
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 5.0
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 10.0               # steigend
     bot._check_teleport_crossing((-2.0, 0.0, 5.0), 100.0)
-    assert bot.pos[2] == pytest.approx(25.0, abs=0.6)   # 20 (Exit-Boden) + 5 (rel. Höhe)
-    assert bot.vel[2] == pytest.approx(10.0)            # vz unverändert → Sprung läuft weiter
+    assert bot.pos_z == pytest.approx(25.0, abs=0.6)   # 20 (Exit-Boden) + 5 (rel. Höhe)
+    assert bot.vel_z == pytest.approx(10.0)            # vz unverändert → Sprung läuft weiter
     assert bot._jumping is True                          # Sprung-State unangetastet
     assert bot._ai_state == state_before
 
@@ -488,11 +488,11 @@ def test_check_teleport_crossing_reverts_when_exit_blocked(bot):
                           half_w=5.0, half_d=5.0, height=10.0)
     _bot_world(bot, teles, lmap, boxes=[blocker])
     bot.own_flag = ""
-    bot.pos = [2.0, 0.0, 3.0]
-    bot.vel = [25.0, 0.0, 0.0]
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
-    assert bot.pos == [-2.0, 0.0, 3.0]        # revert auf alte Position
-    assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
+    assert (bot.pos_x, bot.pos_y, bot.pos_z) == (-2.0, 0.0, 3.0)   # revert auf alte Position
+    assert bot.vel_x == 0.0 and bot.vel_y == 0.0
     assert bot._teleporting_until == 0.0      # kein Teleport
     assert not [c for c in bot.client.send.call_args_list if c.args[0] == MsgTeleport]
 
@@ -501,11 +501,11 @@ def test_check_teleport_crossing_retrigger_guard(bot):
     teles, lmap = _pair()
     _bot_world(bot, teles, lmap)
     bot.own_flag = ""
-    bot.pos = [2.0, 0.0, 3.0]
-    bot.vel = [25.0, 0.0, 0.0]
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot._teleporting_until = 200.0
     bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)   # now < until → gesperrt
-    assert bot.pos == [2.0, 0.0, 3.0]
+    assert (bot.pos_x, bot.pos_y, bot.pos_z) == (2.0, 0.0, 3.0)
     assert not [c for c in bot.client.send.call_args_list if c.args[0] == MsgTeleport]
 
 
@@ -513,10 +513,10 @@ def test_check_teleport_crossing_pz_skips(bot):
     teles, lmap = _pair()
     _bot_world(bot, teles, lmap)
     bot.own_flag = "PZ"                        # PhantomZone togglet zoned (P4-FLG-03), kein Sprung
-    bot.pos = [2.0, 0.0, 3.0]
-    bot.vel = [25.0, 0.0, 0.0]
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
-    assert bot.pos == [2.0, 0.0, 3.0]
+    assert (bot.pos_x, bot.pos_y, bot.pos_z) == (2.0, 0.0, 3.0)
 
 
 def test_update_movement_invokes_crossing_check(bot):
@@ -525,17 +525,17 @@ def test_update_movement_invokes_crossing_check(bot):
     teles, lmap = _pair()
     _bot_world(bot, teles, lmap)
     bot.own_flag = ""
-    bot.pos = [-2.0, 0.0, 3.0]
-    bot.vel = [25.0, 0.0, 0.0]
-    bot._dispatch_movement = lambda dt, now, ai_tick=True: bot.pos.__setitem__(0, 2.0)
+    bot.pos_x = -2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+    bot._dispatch_movement = lambda dt, now, ai_tick=True: setattr(bot, "pos_x", 2.0)
     bot._update_movement(0.05, 100.0)
-    assert bot.pos[0] == pytest.approx(50.0, abs=2.0)   # zentral teleportiert
+    assert bot.pos_x == pytest.approx(50.0, abs=2.0)   # zentral teleportiert
 
 
 def test_resync_path_planned_teleport_keeps_exit_wp(bot):
     """Geplanter Teleport: Eintritts-WP liegt hinter uns → verworfen; Austritts-WP bleibt Ziel
     (kein Voll-Replan)."""
-    bot.pos = [50.0, 0.0, 0.0]
+    bot.pos_x = 50.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._nav_path = [(-1.0, 0.0, 0.0), (52.0, 0.0, 0.0), (60.0, 0.0, 0.0)]
     bot.target_pos = (-1.0, 0.0)
     bot._resync_path_after_teleport(-2.0, 0.0, 50.0, 0.0)
@@ -545,7 +545,7 @@ def test_resync_path_planned_teleport_keeps_exit_wp(bot):
 
 def test_resync_path_unplanned_teleport_clears(bot):
     """Ungeplanter Teleport: alle WPs liegen hinter uns → Pfad geleert (deferred Replan)."""
-    bot.pos = [50.0, 0.0, 0.0]
+    bot.pos_x = 50.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._nav_path = [(-1.0, 0.0, 0.0), (-5.0, 0.0, 0.0)]
     bot.target_pos = (-1.0, 0.0)
     bot._resync_path_after_teleport(-2.0, 0.0, 50.0, 0.0)
@@ -560,10 +560,10 @@ def test_apply_obstacle_bounds_wall_slide_post(bot):
     bot._world_map = MagicMock(); bot._world_map.boxes = []
     bot._tele_solid_boxes = teleporter_solid_boxes(t)
     bot.own_flag = ""
-    bot.pos = [-2.0, 4.5, 0.0]                 # vor dem Post bei (0,4.5)
-    bot.vel = [25.0, 0.0, 0.0]                 # fährt in den Post
+    bot.pos_x = -2.0; bot.pos_y = 4.5; bot.pos_z = 0.0                 # vor dem Post bei (0,4.5)
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0                 # fährt in den Post
     bot._apply_obstacle_bounds(0.05)
-    assert bot.vel[0] == pytest.approx(0.0)    # Wall-Slide: Vorwärts-Komponente gestoppt
+    assert bot.vel_x == pytest.approx(0.0)    # Wall-Slide: Vorwärts-Komponente gestoppt
 
 
 def test_apply_obstacle_bounds_ceiling_crossbar(bot):
@@ -573,11 +573,11 @@ def test_apply_obstacle_bounds_ceiling_crossbar(bot):
     bot._tele_solid_boxes = teleporter_solid_boxes(t)
     bot._nav_graph = None
     bot.own_flag = ""
-    bot.pos = [0.0, 0.0, 7.5]                  # Kopf knapp unter Crossbar (bottom_z=9)
-    bot.vel = [0.0, 0.0, 5.0]                  # steigend
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 7.5                  # Kopf knapp unter Crossbar (bottom_z=9)
+    bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 5.0                  # steigend
     bot._apply_obstacle_bounds(0.05)
-    assert bot.vel[2] == pytest.approx(0.0)    # Decken-Stopp
-    assert bot.pos[2] == pytest.approx(9.0 - bot._tank_height, abs=0.01)
+    assert bot.vel_z == pytest.approx(0.0)    # Decken-Stopp
+    assert bot.pos_z == pytest.approx(9.0 - bot._tank_height, abs=0.01)
 
 
 # ── Cross-Floor-Teleport: Bot bevorzugt das Tor statt zu springen ─────────────
@@ -630,7 +630,7 @@ def test_advance_path_drives_through_teleport_exit_not_jump(bot):
     exit_wp = (50.0, 0.0, 30.0)
     bot._nav_graph = _StubNav({(50.0, 0.0)})
     bot.own_flag = ""
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._ai_state = AIState.COMBAT
     bot._nav_path = [(0.0, 0.0, 0.0), exit_wp]   # [erreichter WP, Tor-Exit auf z=30]
     bot._advance_path()
@@ -645,7 +645,7 @@ def test_check_teleport_crossing_logs_usage(bot, caplog):
     _bot_world(bot, teles, lmap)
     bot.own_flag = ""
     bot._debug_log_tele = False
-    bot.pos = [2.0, 0.0, 3.0]; bot.vel = [25.0, 0.0, 0.0]
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0; bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     with caplog.at_level(logging.DEBUG, logger="bzbot"):
         bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
     assert any("Teleporter genutzt" in r.message for r in caplog.records
@@ -655,7 +655,7 @@ def test_check_teleport_crossing_logs_usage(bot, caplog):
     caplog.clear()
     bot._debug_log_tele = True
     bot._teleporting_until = 0.0
-    bot.pos = [2.0, 0.0, 3.0]; bot.vel = [25.0, 0.0, 0.0]
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0; bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     with caplog.at_level(logging.DEBUG, logger="bzbot"):
         bot._check_teleport_crossing((-2.0, 0.0, 3.0), 200.0)
     assert any("Tele-Detail" in r.message for r in caplog.records)     # mit Flag: Detail-DEBUG
@@ -700,14 +700,14 @@ def test_check_teleport_crossing_drive_through_lands_on_roof(bot):
     nx, ny = t.cx + 4.0 * c, t.cy + 4.0 * s
     # Voraussetzung: dieses Boden-Segment quert das Feld wirklich.
     assert ray_teleporter_crossing(ox, oy, oz, nx - ox, ny - oy, 0.0, t) is not None
-    bot.pos = [nx, ny, oz]
-    bot.vel = [c * 25.0, s * 25.0, 0.0]
+    bot.pos_x = nx; bot.pos_y = ny; bot.pos_z = oz
+    bot.vel_x = c * 25.0; bot.vel_y = s * 25.0; bot.vel_z = 0.0
     bot._teleporting_until = 0.0
     bot._check_teleport_crossing((ox, oy, oz), 100.0)
     assert bot._teleporting_until == pytest.approx(101.0), \
         "Fahr-Durchfahrt revertiert (kein Teleport) — _is_inside_obstacle wertet z=30 als 'innen'?"
-    assert bot.pos[2] == pytest.approx(30.0, abs=0.6), \
-        f"Fahr-Austritt nicht auf der z=30-Plattform: z={bot.pos[2]:.1f}"
+    assert bot.pos_z == pytest.approx(30.0, abs=0.6), \
+        f"Fahr-Austritt nicht auf der z=30-Plattform: z={bot.pos_z:.1f}"
 
 
 # ── P3-NAV-02 (NAV_TELE): direkter Endanflug in die Tor-Mitte ─────────────────
@@ -755,7 +755,7 @@ def test_advance_path_engages_nav_tele_at_tele_exit(bot):
 
     bot._nav_graph = _StubNav()
     bot.own_flag = ""
-    bot.pos = [50.0, 0.0, 0.0]                       # ~5u vor der Tor-Mitte (55,0)
+    bot.pos_x = 50.0; bot.pos_y = 0.0; bot.pos_z = 0.0                       # ~5u vor der Tor-Mitte (55,0)
     bot._ai_state = AIState.COMBAT
     bot._nav_path = [(50.0, 0.0, 0.0), (50.0, 0.0, 30.0)]  # [erreicht, Tor-Exit z=30]
     bot._advance_path()
@@ -770,7 +770,7 @@ def test_nav_tele_engage_guards(bot):
     from bot.constants import NAV_TELE_ENGAGE_DIST
     from bot.models import AIState
     bot.own_flag = ""
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._ai_state = AIState.COMBAT
     # zu weit → False, kein State-Wechsel
     assert bot._try_engage_nav_tele((NAV_TELE_ENGAGE_DIST + 5.0, 0.0)) is False
@@ -808,8 +808,8 @@ def test_nav_tele_drives_through_corner_gate(bot):
     bot._teleporting_until = 0.0
     c, s = math.cos(t.angle), math.sin(t.angle)
     # Bot mittenseitig ~5u vor der Tor-Mitte, ausgerichtet entlang der Querungsachse (zur Ecke).
-    bot.pos = [t.cx - 5.0 * c, t.cy - 5.0 * s, 0.0]
-    bot.vel = [0.0, 0.0, 0.0]
+    bot.pos_x = t.cx - 5.0 * c; bot.pos_y = t.cy - 5.0 * s; bot.pos_z = 0.0
+    bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot.azimuth = math.atan2(s, c)
     now = 100.0
     assert bot._try_engage_nav_tele((t.cx, t.cy)) is True
@@ -823,7 +823,7 @@ def test_nav_tele_drives_through_corner_gate(bot):
             crossed = True
             break
     assert crossed, "NAV_TELE hat das Tor nicht gequert (vor dem Tor stecken geblieben)"
-    assert bot.pos[2] == pytest.approx(30.0, abs=0.6), f"nicht auf z=30: {bot.pos[2]:.1f}"
+    assert bot.pos_z == pytest.approx(30.0, abs=0.6), f"nicht auf z=30: {bot.pos_z:.1f}"
     now += dt
     bot._update_movement(dt, now)              # nächster Tick erkennt Querung → Boden-State
     assert bot._ai_state in (AIState.SEEKING, AIState.COMBAT, AIState.IDLE)
@@ -836,7 +836,7 @@ def test_nav_tele_timeout_aborts_and_cooldowns(bot):
     from bot.models import AIState
     _bot_world(bot, [], {})                     # WorldMap ohne Teleporter → nie eine Querung
     bot.own_flag = ""
-    bot.pos = [0.0, 0.0, 0.0]; bot.vel = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0; bot.azimuth = 0.0
     bot._teleporting_until = 0.0
     bot._tele_solid_boxes = []
     bot._nav_path = [(0.0, 0.0, 0.0), (5.0, 0.0, 30.0)]

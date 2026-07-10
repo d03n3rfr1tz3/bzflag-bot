@@ -237,19 +237,19 @@ class TestBurrowFlag:
 
     def test_radar_full_when_no_burrow(self, bot):
         bot.own_flag = ""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         from bot.constants import RADAR_RANGE
         assert bot._effective_radar_range() == pytest.approx(RADAR_RANGE)
 
     def test_radar_full_when_burrow_above_ground(self, bot):
         bot.own_flag = "BU"
-        bot.pos = [0.0, 0.0, 0.0]  # nicht unterirdisch
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0  # nicht unterirdisch
         from bot.constants import RADAR_RANGE
         assert bot._effective_radar_range() == pytest.approx(RADAR_RANGE)
 
     def test_radar_reduced_when_burrowed(self, bot):
         bot.own_flag = "BU"
-        bot.pos = [0.0, 0.0, -1.0]  # unterirdisch
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = -1.0  # unterirdisch
         from bot.constants import RADAR_RANGE
         assert bot._effective_radar_range() == pytest.approx(RADAR_RANGE * 0.25)
 
@@ -257,27 +257,27 @@ class TestBurrowFlag:
         """BU-Flagge: Tank sinkt durch Schwerkraft auf BURROW_DEPTH."""
         from bot.constants import BURROW_DEPTH
         bot.own_flag = "BU"
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         now = time.monotonic()
         for _ in range(20):
             bot._run_physics(dt=0.1, now=now)
             now += 0.1
-        assert bot.pos[2] < 0.0
-        assert bot.pos[2] >= BURROW_DEPTH - 0.01
+        assert bot.pos_z < 0.0
+        assert bot.pos_z >= BURROW_DEPTH - 0.01
 
     def test_bu_drop_resets_z(self, bot):
         """_on_drop_flag bei BU: pos[2] wird auf 0 zurückgesetzt."""
         from bzflag.protocol import MsgDropFlag
         from bot.constants import BURROW_DEPTH
         bot.own_flag = "BU"
-        bot.pos = [0.0, 0.0, BURROW_DEPTH]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = BURROW_DEPTH
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.player_id = 1
         payload = struct.pack(">B", 1)  # pid = bot.player_id
         bot._on_drop_flag(MsgDropFlag, payload)
         assert bot.own_flag == ""
-        assert bot.pos[2] == pytest.approx(0.0)
+        assert bot.pos_z == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +611,7 @@ class TestTimeUpdate:
 def test_th_victim_sends_transfer_flag(bot):
     """TH-Treffer mit eigener Flagge → MsgTransferFlag gesendet, Bot lebt, own_flag bleibt."""
     from bzflag.protocol import MsgTransferFlag, MsgKilled
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.own_flag = "GM"
     bot.alive = True
     bot.client.send.reset_mock()
@@ -715,11 +715,11 @@ class TestExplosionAndFalling:
     def test_start_explosion_launches_up_capped(self, bot):
         """_start_explosion: Aufwärts-Velocity > 0, ≤ zMax-Cap, Horizontal-Momentum bleibt erhalten."""
         import math, time as _t
-        bot.vel = [3.0, -4.0, 0.0]
+        bot.vel_x = 3.0; bot.vel_y = -4.0; bot.vel_z = 0.0
         bot._start_explosion(_t.monotonic())
-        assert bot.vel[0] == 3.0 and bot.vel[1] == -4.0   # Horizontal erhalten
-        assert bot.vel[2] > 0.0
-        assert bot.vel[2] <= math.sqrt(-2.0 * 49.0 * bot._gravity) + 1e-6
+        assert bot.vel_x == 3.0 and bot.vel_y == -4.0   # Horizontal erhalten
+        assert bot.vel_z > 0.0
+        assert bot.vel_z <= math.sqrt(-2.0 * 49.0 * bot._gravity) + 1e-6
         assert bot._exploding_until > _t.monotonic()
 
     def test_normal_kill_enters_explosion_state(self, bot):
@@ -728,21 +728,21 @@ class TestExplosionAndFalling:
         from types import SimpleNamespace
         from bzflag.protocol import MsgKilled
         bot.alive = True
-        bot.vel = [5.0, 0.0, 0.0]
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.client.send.reset_mock()
         shot = SimpleNamespace(shooter_id=3, shot_id=7, flag_abbr=b"\x00\x00")
         bot._report_killed(shot)
         codes = [call[0][0] for call in bot.client.send.call_args_list]
         assert MsgKilled in codes
         assert bot._exploding_until > _t.monotonic()
-        assert bot.vel[2] > 0.0
+        assert bot.vel_z > 0.0
 
     def test_falling_bit_set_when_off_ground(self, bot):
         """_send_update lebend über Boden → PS_FALLING gesetzt (freier Fall, nicht nur Sprung)."""
         from bzflag.protocol import PS_FALLING
         bot.alive = True
         bot._jumping = False
-        bot.pos = [0.0, 0.0, 12.0]   # über dem Boden (kein NavGraph → floor 0)
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 12.0   # über dem Boden (kein NavGraph → floor 0)
         bot.client.send.reset_mock()
         bot._send_update()
         status = struct.unpack_from(">h", bot.client.send.call_args[0][1], 9)[0]
@@ -753,7 +753,7 @@ class TestExplosionAndFalling:
         from bzflag.protocol import PS_FALLING
         bot.alive = True
         bot._jumping = False
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.client.send.reset_mock()
         bot._send_update()
         status = struct.unpack_from(">h", bot.client.send.call_args[0][1], 9)[0]

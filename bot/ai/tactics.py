@@ -52,14 +52,14 @@ class TacticsMixin(BZBotBase):
                 _ep2 = self._get_enemy_pos(self.target_player)
                 if _ep2 is not None:
                     self.azimuth = math.atan2(
-                        _ep2[1] - self.pos[1], _ep2[0] - self.pos[0])
+                        _ep2[1] - self.pos_y, _ep2[0] - self.pos_x)
             self._jump_ang_vel = self.ang_vel
             if self._debug_log_dodge:
                 logger.debug("[%s] Ausweichen: Frontal-Sprung ang_vel=%.2f az=%.1f°",
                              self.callsign, self._jump_ang_vel, math.degrees(self.azimuth))
-        self.vel[0] = math.cos(self.azimuth) * self._tank_speed
-        self.vel[1] = math.sin(self.azimuth) * self._tank_speed
-        self.vel[2] = self._jump_launch_vz(self.vel[2])
+        self.vel_x = math.cos(self.azimuth) * self._tank_speed
+        self.vel_y = math.sin(self.azimuth) * self._tank_speed
+        self.vel_z = self._jump_launch_vz(self.vel_z)
         self._jumping = True
         self._jump_pending = False
         self._transition_to(AIState.JUMPING)
@@ -68,12 +68,12 @@ class TacticsMixin(BZBotBase):
         """WP-Erreichen prüfen; True wenn Aufrufer sofort return soll."""
         if self.target_pos is not None:
             tx, ty = self.target_pos
-            if math.hypot(tx - self.pos[0], ty - self.pos[1]) < self._wp_reach_radius():
+            if math.hypot(tx - self.pos_x, ty - self.pos_y) < self._wp_reach_radius():
                 nav_path = self._nav_path
                 # NAV_JUMP-Landekontrolle: zu großer Z-Unterschied = Fehlschlag
                 if (nav_path
                         and nav_path[0][2] - self._get_floor_z() > 1.5
-                        and abs(self.pos[2] - nav_path[0][2]) > NAV_JUMP_Z_TOL):
+                        and abs(self.pos_z - nav_path[0][2]) > NAV_JUMP_Z_TOL):
                     self._advance_path(timed_out=True)
                     return True
                 self._wp_fail_count = 0
@@ -98,9 +98,9 @@ class TacticsMixin(BZBotBase):
         if nav_path[1][2] - nav_path[0][2] <= 1.5:
             return False
         tx, ty = self.target_pos
-        if math.hypot(tx - self.pos[0], ty - self.pos[1]) > NAV_CELL_SIZE * 2.5:
+        if math.hypot(tx - self.pos_x, ty - self.pos_y) > NAV_CELL_SIZE * 2.5:
             return False  # nur ein kurzes Stück rückwärts, nicht über weite Strecken
-        diff = _angle_diff(math.atan2(ty - self.pos[1], tx - self.pos[0]), self.azimuth)
+        diff = _angle_diff(math.atan2(ty - self.pos_y, tx - self.pos_x), self.azimuth)
         return abs(diff) > math.radians(135)   # Anlaufpunkt liegt klar hinter dem Bot
 
     def _check_tactical_jump(self, now: float) -> bool:
@@ -126,10 +126,10 @@ class TacticsMixin(BZBotBase):
         # TACT-02: Ziel trägt Schockwelle → kein TactJump (Sprung führt in die SW-Kuppel)
         if info.flag == "SW":
             return False
-        z_diff = abs(info.pos[2] - self.pos[2])
+        z_diff = abs(info.pos[2] - self.pos_z)
         if z_diff > HIT_RADIUS:
             return False
-        dx, dy = ep[0] - self.pos[0], ep[1] - self.pos[1]
+        dx, dy = ep[0] - self.pos_x, ep[1] - self.pos_y
         dist = math.hypot(dx, dy)
         if dist < 5.0 or dist > OPTIMAL_RANGE * 2:
             return False
@@ -227,7 +227,7 @@ class TacticsMixin(BZBotBase):
         if ep is None:
             return False
         enemy_z = info.pos[2]
-        z_diff = enemy_z - self.pos[2]
+        z_diff = enemy_z - self.pos_z
         max_jump_h = self._effective_jump_height()
         if z_diff <= HIT_RADIUS or z_diff >= max_jump_h:
             return False
@@ -240,7 +240,7 @@ class TacticsMixin(BZBotBase):
         t_fire = (v0 - math.sqrt(disc)) / g_abs
         if t_fire <= 0.0:
             return False
-        az_target = math.atan2(ep[1] - self.pos[1], ep[0] - self.pos[0])
+        az_target = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
         return abs(_angle_diff(az_target, self.azimuth)) <= self._tank_turn_rate * t_fire
 
     def _check_z_attack_jump(self, now: float) -> bool:
@@ -260,7 +260,7 @@ class TacticsMixin(BZBotBase):
             return False
 
         enemy_z = info.pos[2]
-        z_diff = enemy_z - self.pos[2]
+        z_diff = enemy_z - self.pos_z
         max_jump_h = self._effective_jump_height()
 
         if z_diff <= HIT_RADIUS:
@@ -303,7 +303,7 @@ class TacticsMixin(BZBotBase):
         # Gegnerposition zum Feuer-Zeitpunkt vorhersagen
         pred_ex = ep[0] + info.vel[0] * t_fire
         pred_ey = ep[1] + info.vel[1] * t_fire
-        az_target = math.atan2(pred_ey - self.pos[1], pred_ex - self.pos[0])
+        az_target = math.atan2(pred_ey - self.pos_y, pred_ex - self.pos_x)
         az_target += random.uniform(-math.radians(2.5), math.radians(2.5))
         ang_diff = _angle_diff(az_target, self.azimuth)
         if abs(ang_diff) > self._tank_turn_rate * t_fire:
@@ -312,11 +312,11 @@ class TacticsMixin(BZBotBase):
             min(abs(ang_diff / max(t_fire, 0.001)), self._tank_turn_rate), ang_diff)
 
         # Sprung starten
-        self.vel[2] = self._jump_launch_vz(self.vel[2])
+        self.vel_z = self._jump_launch_vz(self.vel_z)
         self._jumping = True
         self._z_attack_mode = True
-        # ABSOLUTE Feuer-Höhe (Tick vergleicht gegen pos[2]); self.pos[2] ist die Absprunghöhe
-        self._z_attack_fire_z = self.pos[2] + fire_rel
+        # ABSOLUTE Feuer-Höhe (Tick vergleicht gegen pos[2]); self.pos_z ist die Absprunghöhe
+        self._z_attack_fire_z = self.pos_z + fire_rel
         self._transition_to(AIState.Z_ATTACK)
         logger.info("[%s] Z-Sprung", self.callsign)
         return True

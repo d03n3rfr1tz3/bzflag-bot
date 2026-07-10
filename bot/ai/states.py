@@ -62,7 +62,7 @@ class StateMachineMixin(BZBotBase):
         Der Crossing-Check läuft pathing-unabhängig in JEDEM Tick und für JEDEN State (wie die
         Hitbox-Detection) — auch wenn _dispatch_movement früh `return`t. So wird ein Teleporter
         auch per Direktpfad, Bounce oder TactJump-Sprung-Arc korrekt durchquert (P3-NAV-02)."""
-        old = (self.pos[0], self.pos[1], self.pos[2])
+        old = (self.pos_x, self.pos_y, self.pos_z)
         self._dispatch_movement(dt, now, ai_tick)
         self._check_teleport_crossing(old, now)
 
@@ -93,8 +93,8 @@ class StateMachineMixin(BZBotBase):
                           AIState.EVADING, AIState.LANDING_SHOT)
         if (self._ai_state in _GROUND_STATES
                 and not self._jumping
-                and self.vel[2] < -0.1
-                and self.pos[2] > self._get_floor_z() + 0.5):
+                and self.vel_z < -0.1
+                and self.pos_z > self._get_floor_z() + 0.5):
             self._pre_fall_state = self._ai_state
             self._jump_ang_vel = self.ang_vel   # Boden-Drehrate in Fall-Physik übertragen
             self._jumping = True   # verhindert Schwerkraft-Dopplung in _run_physics
@@ -134,12 +134,12 @@ class StateMachineMixin(BZBotBase):
                 self._tick_landing_shot(now)
             if not self._jumping:
                 # Position halten; aktiv auf Landepunkt drehen
-                self.vel[0] = 0.0
-                self.vel[1] = 0.0
+                self.vel_x = 0.0
+                self.vel_y = 0.0
                 if self._landing_aim_pos is not None:
                     ax, ay = self._landing_aim_pos
                     self._turn_toward(
-                        math.atan2(ay - self.pos[1], ax - self.pos[0]), dt)
+                        math.atan2(ay - self.pos_y, ax - self.pos_x), dt)
                 else:
                     self.ang_vel = 0.0
             return
@@ -176,35 +176,35 @@ class StateMachineMixin(BZBotBase):
                 if self._ai_state == AIState.IDLE and self.target_pos is None:
                     # IDLE geparkt: _move_to_target würde bei target_pos=None früh
                     # zurückkehren und Rest-Geschwindigkeit stehen lassen → explizit stoppen.
-                    self.vel[0]  = 0.0
-                    self.vel[1]  = 0.0
+                    self.vel_x  = 0.0
+                    self.vel_y  = 0.0
                     self.ang_vel = 0.0
                 else:
                     self._move_to_target(dt, half)
 
     def _tick_jumping(self, dt: float, now: float) -> None:
         """Sprungphysik (BZFlag: in der Luft keine Steuerung). LocalPlayer.cxx Z. 364-368."""
-        self.vel[2] += self._gravity * dt
-        self.pos[2] += self.vel[2] * dt
+        self.vel_z += self._gravity * dt
+        self.pos_z += self.vel_z * dt
         self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
-        self.pos[0] += self.vel[0] * dt
-        self.pos[1] += self.vel[1] * dt
+        self.pos_x += self.vel_x * dt
+        self.pos_y += self.vel_y * dt
         # Weltgrenzen-Clamp (kein Bounce im Sprung)
         half = self.world_half
-        self.pos[0] = max(-half, min(half, self.pos[0]))
-        self.pos[1] = max(-half, min(half, self.pos[1]))
+        self.pos_x = max(-half, min(half, self.pos_x))
+        self.pos_y = max(-half, min(half, self.pos_y))
 
         # WG: zusätzlicher Luftsprung beim Abwärtsbogen. Faithful zu doJump(): im Fallen wird die
         # Velocity nur additiv angehoben (v + vz, hier vz<0), kein voller neuer Bogen.
-        if self.own_flag == "WG" and self.vel[2] < 0 and self._can_jump(now):
-            self.vel[2] = self._jump_launch_vz(self.vel[2])
+        if self.own_flag == "WG" and self.vel_z < 0 and self._can_jump(now):
+            self.vel_z = self._jump_launch_vz(self.vel_z)
             self._wings_jumps_used += 1
 
         if self._is_landed():
-            self.pos[2] = self._get_floor_z()
-            self.vel[2] = 0.0
+            self.pos_z = self._get_floor_z()
+            self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
             self._last_jump_at = now
@@ -221,34 +221,34 @@ class StateMachineMixin(BZBotBase):
         Aufwärts-Velocity unter Schwerkraft, Horizontal-Momentum bleibt; bei Bodenkontakt liegen
         bleiben (vel[2]=0). Die Explosion läuft optisch bis _exploding_until weiter."""
         floor_z = self._get_floor_z()
-        self.vel[2] += self._gravity * dt
-        self.pos[2] = max(self.pos[2] + self.vel[2] * dt, floor_z)
-        if self.pos[2] <= floor_z + 1e-6:
-            self.pos[2] = floor_z
-            self.vel[2] = 0.0
-        self.pos[0] += self.vel[0] * dt
-        self.pos[1] += self.vel[1] * dt
+        self.vel_z += self._gravity * dt
+        self.pos_z = max(self.pos_z + self.vel_z * dt, floor_z)
+        if self.pos_z <= floor_z + 1e-6:
+            self.pos_z = floor_z
+            self.vel_z = 0.0
+        self.pos_x += self.vel_x * dt
+        self.pos_y += self.vel_y * dt
         half = self.world_half
-        self.pos[0] = max(-half, min(half, self.pos[0]))
-        self.pos[1] = max(-half, min(half, self.pos[1]))
+        self.pos_x = max(-half, min(half, self.pos_x))
+        self.pos_y = max(-half, min(half, self.pos_y))
 
     def _tick_nav_jump(self, dt: float, now: float) -> None:
         """Navigationssprung-Physik. Landet auf Ziel-Etage → return_state."""
-        self.vel[2] += self._gravity * dt
-        self.pos[2] += self.vel[2] * dt
+        self.vel_z += self._gravity * dt
+        self.pos_z += self.vel_z * dt
         self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)   # Lande-Drehung (am Absprung fixiert)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
-        self.pos[0] += self.vel[0] * dt
-        self.pos[1] += self.vel[1] * dt
+        self.pos_x += self.vel_x * dt
+        self.pos_y += self.vel_y * dt
         half = self.world_half
-        self.pos[0] = max(-half, min(half, self.pos[0]))
-        self.pos[1] = max(-half, min(half, self.pos[1]))
+        self.pos_x = max(-half, min(half, self.pos_x))
+        self.pos_y = max(-half, min(half, self.pos_y))
 
         if self._is_landed():
             floor_z = self._get_floor_z()
-            self.pos[2] = floor_z
-            self.vel[2] = 0.0
+            self.pos_z = floor_z
+            self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
             self._last_jump_at = now
@@ -284,10 +284,10 @@ class StateMachineMixin(BZBotBase):
             self.target_pos = None
             self._transition_to(ret)
             return
-        az_to_wp = math.atan2(wp[1] - self.pos[1], wp[0] - self.pos[0])
+        az_to_wp = math.atan2(wp[1] - self.pos_y, wp[0] - self.pos_x)
         diff = self._turn_toward(az_to_wp, dt)
-        self.vel[0] = 0.0
-        self.vel[1] = 0.0
+        self.vel_x = 0.0
+        self.vel_y = 0.0
         if abs(diff) <= math.pi / 36:
             self._initiate_nav_jump(wp)
 
@@ -320,15 +320,15 @@ class StateMachineMixin(BZBotBase):
             return
         # Direktfahrt: auf Mitte + Overshoot zielen (Overshoot → dünne Tor-Ebene sicher queren).
         cx, cy = center
-        ddx, ddy = cx - self.pos[0], cy - self.pos[1]
+        ddx, ddy = cx - self.pos_x, cy - self.pos_y
         d = math.hypot(ddx, ddy) or 1.0
         aim_x = cx + (ddx / d) * NAV_TELE_OVERSHOOT
         aim_y = cy + (ddy / d) * NAV_TELE_OVERSHOOT
-        target_az = math.atan2(aim_y - self.pos[1], aim_x - self.pos[0])
+        target_az = math.atan2(aim_y - self.pos_y, aim_x - self.pos_x)
         diff = self._turn_toward(target_az, dt)
         speed = self._effective_tank_speed() if abs(diff) < math.pi / 2 else 0.0
-        self.vel[0] = math.cos(self.azimuth) * speed
-        self.vel[1] = math.sin(self.azimuth) * speed
+        self.vel_x = math.cos(self.azimuth) * speed
+        self.vel_y = math.sin(self.azimuth) * speed
         self._apply_bounds(dt, self.world_half)
         if self._debug_log_tele:
             _t = time.monotonic()
@@ -337,30 +337,30 @@ class StateMachineMixin(BZBotBase):
                 logger.debug(
                     "[%s] NAV_TELE: pos=(%.1f,%.1f,%.1f) →Mitte(%.1f,%.1f) dist=%.1fu "
                     "spd=%.1f az=%.0f° innen=%s",
-                    self.callsign, self.pos[0], self.pos[1], self.pos[2], cx, cy, d,
+                    self.callsign, self.pos_x, self.pos_y, self.pos_z, cx, cy, d,
                     speed, math.degrees(self.azimuth), self._is_inside_obstacle())
 
     def _tick_z_attack(self, dt: float, now: float) -> None:
         """ZJ1-Sprungphysik. Nur aus COMBAT erreichbar; Landung → immer COMBAT."""
-        self.vel[2] += self._gravity * dt
-        self.pos[2] += self.vel[2] * dt
+        self.vel_z += self._gravity * dt
+        self.pos_z += self.vel_z * dt
         self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
-        self.pos[0] += self.vel[0] * dt
-        self.pos[1] += self.vel[1] * dt
+        self.pos_x += self.vel_x * dt
+        self.pos_y += self.vel_y * dt
         half = self.world_half
-        self.pos[0] = max(-half, min(half, self.pos[0]))
-        self.pos[1] = max(-half, min(half, self.pos[1]))
+        self.pos_x = max(-half, min(half, self.pos_x))
+        self.pos_y = max(-half, min(half, self.pos_y))
 
         if self._z_attack_mode:
-            if abs(self.pos[2] - self._z_attack_fire_z) < 1.5:
+            if abs(self.pos_z - self._z_attack_fire_z) < 1.5:
                 if self._next_shoot <= now and self._next_slot_ready(now):
                     _shoot = True
                     if self.target_player is not None:
                         _ep = self._get_enemy_pos(self.target_player)
                         if _ep is not None:
-                            _az_to_enemy = math.atan2(_ep[1] - self.pos[1], _ep[0] - self.pos[0])
+                            _az_to_enemy = math.atan2(_ep[1] - self.pos_y, _ep[0] - self.pos_x)
                             if abs(_angle_diff(self.azimuth, _az_to_enemy)) > math.radians(15):
                                 _shoot = False
                     if _shoot and self._can_shoot():
@@ -370,8 +370,8 @@ class StateMachineMixin(BZBotBase):
                     # schlechter Winkel → nächster Tick versucht erneut (Modus bleibt aktiv)
 
         if self._is_landed():
-            self.pos[2] = self._get_floor_z()
-            self.vel[2] = 0.0
+            self.pos_z = self._get_floor_z()
+            self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
             self._last_jump_at = now
@@ -383,20 +383,20 @@ class StateMachineMixin(BZBotBase):
         """Fall-Physik für unkontrollierten Fall vom Dach (analog _tick_jumping).
         Kein Lenken: vel[0]/vel[1] und azimuth bleiben committed.
         _jump_ang_vel wird nicht zurückgesetzt — bestehende Drehbewegung bleibt."""
-        self.vel[2] += self._gravity * dt
-        self.pos[2] += self.vel[2] * dt
+        self.vel_z += self._gravity * dt
+        self.pos_z += self.vel_z * dt
         self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
-        self.pos[0] += self.vel[0] * dt
-        self.pos[1] += self.vel[1] * dt
+        self.pos_x += self.vel_x * dt
+        self.pos_y += self.vel_y * dt
         half = self.world_half
-        self.pos[0] = max(-half, min(half, self.pos[0]))
-        self.pos[1] = max(-half, min(half, self.pos[1]))
+        self.pos_x = max(-half, min(half, self.pos_x))
+        self.pos_y = max(-half, min(half, self.pos_y))
 
         if self._is_landed():
-            self.pos[2] = self._get_floor_z()
-            self.vel[2] = 0.0
+            self.pos_z = self._get_floor_z()
+            self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
             # _last_jump_at nicht setzen — kein echter Sprung, kein Cooldown
@@ -413,7 +413,7 @@ class StateMachineMixin(BZBotBase):
         if self._ai_state == AIState.JUMP_WINDUP:
             incoming, _ = self._find_incoming_shot(now)
             if incoming is not None:
-                t_impact = incoming.time_to_closest(self.pos[0], self.pos[1])
+                t_impact = incoming.time_to_closest(self.pos_x, self.pos_y)
                 if t_impact < 0.1 and self.client.udp_active and self.player_id is not None:
                     self._send_shot(now, self.azimuth)
                     if self._debug_log_shot:
@@ -428,7 +428,7 @@ class StateMachineMixin(BZBotBase):
             # P3: ein Scan über alle Schüsse statt vier separater _find_incoming_shot-Aufrufe
             # (je ein Shots-Lock + voller Schuss-/Ricochet-Scan) mit identischer Bedrohungslogik.
             if not self._any_incoming_threat(now, (
-                    (self.vel[0], self.vel[1]), (0.0, 0.0),
+                    (self.vel_x, self.vel_y), (0.0, 0.0),
                     (fwd_vx, fwd_vy), (-fwd_vx, -fwd_vy))):
                 self._dodging = False
                 self._dodge_forward = False
@@ -466,8 +466,8 @@ class StateMachineMixin(BZBotBase):
             else:
                 self._turn_toward(self._dodge_dir, dt)
                 speed = self._tank_speed
-            self.vel[0] = math.cos(self.azimuth) * speed
-            self.vel[1] = math.sin(self.azimuth) * speed
+            self.vel_x = math.cos(self.azimuth) * speed
+            self.vel_y = math.sin(self.azimuth) * speed
             self._apply_bounds(dt, half)
             return
 
@@ -508,8 +508,8 @@ class StateMachineMixin(BZBotBase):
                         if self.target_player is not None else None)
                 if (info is not None and self._landing_aim_pos is not None
                         and self._can_shoot() and self._next_slot_ready(now)):
-                    _target_az = math.atan2(self._landing_aim_pos[1] - self.pos[1],
-                                            self._landing_aim_pos[0] - self.pos[0])
+                    _target_az = math.atan2(self._landing_aim_pos[1] - self.pos_y,
+                                            self._landing_aim_pos[0] - self.pos_x)
                     if abs(_angle_diff(_target_az, self.azimuth)) <= math.radians(25):
                         self._send_shot(now, self.azimuth)
                         self._set_next_shoot_after_fire(now)
@@ -539,13 +539,13 @@ class StateMachineMixin(BZBotBase):
                 _t_rem = (-info.vel[2] - math.sqrt(_disc)) / _g
                 if _t_rem > 0:
                     _dist_aim = math.hypot(
-                        self._landing_aim_pos[0] - self.pos[0],
-                        self._landing_aim_pos[1] - self.pos[1])
+                        self._landing_aim_pos[0] - self.pos_x,
+                        self._landing_aim_pos[1] - self.pos_y)
                     _tof = _dist_aim / max(self._effective_shot_speed(), 1.0)
                     if _t_rem <= _tof + 0.15:
                         _target_az = math.atan2(
-                            self._landing_aim_pos[1] - self.pos[1],
-                            self._landing_aim_pos[0] - self.pos[0])
+                            self._landing_aim_pos[1] - self.pos_y,
+                            self._landing_aim_pos[0] - self.pos_x)
                         _aligned = abs(_angle_diff(_target_az, self.azimuth)) <= math.radians(25)
                         if (_aligned and self._can_shoot()
                                 and now >= self._next_shoot and self._next_slot_ready(now)):
@@ -582,7 +582,7 @@ class StateMachineMixin(BZBotBase):
         # Bedrohung von ANDEREM Gegner
         threat, threat_t = self._find_incoming_shot(now)
         if threat is not None and threat.shooter_id != self.target_player:
-            t_impact = threat.time_to_closest(self.pos[0], self.pos[1])
+            t_impact = threat.time_to_closest(self.pos_x, self.pos_y)
             if (threat.shooter_id, threat.shot_id) in self._ricochet_paths:
                 t_impact = threat_t
             if t_impact < 0.4:
@@ -630,12 +630,12 @@ class StateMachineMixin(BZBotBase):
         if self._handle_threat(now):
             return
         if now - self._last_pos_check_time >= STUCK_WINDOW:
-            d = math.hypot(self.pos[0] - self._last_pos_check[0],
-                           self.pos[1] - self._last_pos_check[1])
+            d = math.hypot(self.pos_x - self._last_pos_check[0],
+                           self.pos_y - self._last_pos_check[1])
             if d < STUCK_MIN_DIST and self.target_pos is not None:
                 self._new_target()
             self._last_pos_check_time = now
-            self._last_pos_check = [self.pos[0], self.pos[1]]
+            self._last_pos_check = [self.pos_x, self.pos_y]
         self._check_opportunistic_grab(now)
         _prev = self.target_player
         self._validate_and_find_target()

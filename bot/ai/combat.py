@@ -104,7 +104,7 @@ class CombatMixin(BZBotBase):
         # Gilt nur für Schüsse mit pos=Abschussort — GM-pos ist bereits die aktuelle
         # Raketenposition, time_to_closest rechnet dort schon ab jetzt → nichts abziehen.
         _elapsed = 0.0 if threat.is_gm else max(0.0, now - threat.fire_time)
-        time_to_impact = max(0.0, threat.time_to_closest(self.pos[0], self.pos[1]) - _elapsed)
+        time_to_impact = max(0.0, threat.time_to_closest(self.pos_x, self.pos_y) - _elapsed)
         # Für Ricochet-Schüsse: Segment-basierte Zeit statt linearer Anfangsgeschwindigkeit
         if threat_key in self._ricochet_paths:
             time_to_impact = max(0.0, threat_t)
@@ -127,7 +127,7 @@ class CombatMixin(BZBotBase):
             if self._evade_cleared_shots.get(threat_key, 0.0) > now:
                 return False
             # Fix E3: DODGE_JUMP — defensiver Sprung, minimale Rotation
-            self.vel[2] = self._jump_launch_vz(self.vel[2])
+            self.vel_z = self._jump_launch_vz(self.vel_z)
             self._jumping = True
             jump_time = 2.0 * self._effective_jump_velocity() / max(abs(self._effective_gravity()), 0.001)
             if self.own_flag != "WG":
@@ -135,7 +135,7 @@ class CombatMixin(BZBotBase):
             if self.target_player is not None:
                 ep = self._get_enemy_pos(self.target_player)
                 if ep is not None:
-                    enemy_az = math.atan2(ep[1] - self.pos[1], ep[0] - self.pos[0])
+                    enemy_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
                     needed = _angle_diff(enemy_az, self.azimuth)
                     if abs(needed) > math.radians(135):
                         # Nur korrigieren wenn Rücken zum Gegner → sanfte Rotation
@@ -152,7 +152,7 @@ class CombatMixin(BZBotBase):
         else:
             if self._debug_log_shot:
                 logger.debug("[%s] Schuss: Notschuss – jumping=%s z=%.1f landed=%s flag=%s t_imp=%.3f",
-                             self.callsign, self._jumping, self.pos[2], self._is_landed(),
+                             self.callsign, self._jumping, self.pos_z, self._is_landed(),
                              self.own_flag, time_to_impact)
             if (self.client.udp_active
                     and self._last_notschuss_threat != threat_key
@@ -173,8 +173,8 @@ class CombatMixin(BZBotBase):
         shot_dir = math.atan2(threat.vel[1], threat.vel[0])
         perp_r = _wrap(shot_dir + math.pi / 2)
         perp_l = _wrap(shot_dir - math.pi / 2)
-        dot_r = ((self.pos[0] - sx) * math.cos(perp_r)
-                 + (self.pos[1] - sy) * math.sin(perp_r))
+        dot_r = ((self.pos_x - sx) * math.cos(perp_r)
+                 + (self.pos_y - sy) * math.sin(perp_r))
         best_perp = perp_r if dot_r > 0 else perp_l
         diff = _angle_diff(best_perp, self.azimuth)
         capped = _wrap(self.azimuth + math.copysign(min(abs(diff), math.radians(60)), diff))
@@ -188,8 +188,8 @@ class CombatMixin(BZBotBase):
         if ep is None:
             return
         info = self.players.get(self.target_player)
-        dx = ep[0] - self.pos[0]
-        dy = ep[1] - self.pos[1]
+        dx = ep[0] - self.pos_x
+        dy = ep[1] - self.pos_y
         dist = math.hypot(dx, dy)
         if dist < 1e-6:
             return
@@ -211,7 +211,7 @@ class CombatMixin(BZBotBase):
         enemy_z    = info.pos[2] if info is not None else 0.0
         # Gegner per Sprung unerreichbar (zu hoch)? → ggf. Eskalations-Zyklus (s.u.)
         _max_jump_h = self._effective_jump_height()
-        _too_high   = (enemy_z - self.pos[2]) >= _max_jump_h
+        _too_high   = (enemy_z - self.pos_z) >= _max_jump_h
         _stuck_active = (self._unreach_target is not None
                          and self._unreach_target == self.target_player)
         if not _too_high and _stuck_active:
@@ -220,13 +220,13 @@ class CombatMixin(BZBotBase):
         # Direktziel-Modus? (innerhalb Optimaldistanz + Gegner nicht deutlich höher). Wird hier
         # VOR dem Replan bestimmt, damit im Direktmodus gar keine (ungenutzte) A*-Planung läuft.
         _opt = self._effective_optimal_range()
-        _enemy_z = info.pos[2] if info is not None else self.pos[2]
+        _enemy_z = info.pos[2] if info is not None else self.pos_z
         _los_clear   = self._has_los_to_enemy(self.target_player)
         # F5: Server-Basiswert (_shotRange) statt Konstante; ohne Flaggen-Multiplikatoren,
         # sonst würde z.B. Laser den Direktmodus kartenweit aktivieren (nie mehr A*-Nav).
         _dist_thresh = self._shot_range if _los_clear else _opt * 1.1
         # Gegner nicht deutlich höher als der Bot (Bot-Oberkante über Gegner-Fußpunkt)?
-        _not_below_enemy = self.pos[2] + self._tank_height > _enemy_z
+        _not_below_enemy = self.pos_z + self._tank_height > _enemy_z
         # C: Bot unter erhöhtem Gegner mit verfügbarem Indirekt-Schuss → stehen & aufs Tor zielen
         # statt hochzuklettern, zeitlich gedeckelt (kein ewiges Festkleben). sobald die
         # Navigation durch Tore routet, wird genau diese Bedingung zur traverse-vs-shoot-Entscheidung.
@@ -237,7 +237,7 @@ class CombatMixin(BZBotBase):
         # fahren (z.B. dünne Trennwand auf einer Plattform), nicht stur rammen, sondern A* um die
         # Wand routen lassen. Nur den Nahkampf-Direktmodus aufbrechen, nicht den Indirekt-Halt.
         if _skip_nav and not _hold_indirect and not _los_clear and self._steep_wall_ahead(
-                math.atan2(aim_y - self.pos[1], aim_x - self.pos[0]),
+                math.atan2(aim_y - self.pos_y, aim_x - self.pos_x),
                 min(dist, NAV_WALL_PROBE_DIST)) is not None:
             _skip_nav = False
         replan_xy  = (nav_goal is None or math.hypot(ep[0] - nav_goal[0],
@@ -277,7 +277,7 @@ class CombatMixin(BZBotBase):
         if self._stall_watchdog(now, _los_clear, _hold_indirect, _stuck_active):
             return
         # Direktziel-Modus: distanzbasiert (Rückwärts / langsam / voll)
-        target_az = math.atan2(aim_y - self.pos[1], aim_x - self.pos[0])
+        target_az = math.atan2(aim_y - self.pos_y, aim_x - self.pos_x)
         _cache = self._rico_aim_cache
         _rico_drive = (_cache is not None
                        and _cache[1] == self.target_player
@@ -297,9 +297,9 @@ class CombatMixin(BZBotBase):
             speed = -self._tank_speed * 0.5
             _nav = self._nav_graph
             if _nav is not None and self._get_floor_z() > 0.5:
-                _nx = self.pos[0] + math.cos(self.azimuth) * speed * dt
-                _ny = self.pos[1] + math.sin(self.azimuth) * speed * dt
-                if _nav.get_floor_z(_nx, _ny, self.pos[2] + 0.1) < self._get_floor_z() - 1.0:
+                _nx = self.pos_x + math.cos(self.azimuth) * speed * dt
+                _ny = self.pos_y + math.sin(self.azimuth) * speed * dt
+                if _nav.get_floor_z(_nx, _ny, self.pos_z + 0.1) < self._get_floor_z() - 1.0:
                     speed = 0.0
         elif dist > _opt * 2:
             speed = self._tank_speed
@@ -310,20 +310,20 @@ class CombatMixin(BZBotBase):
         if speed > 0 and abs(self.ang_vel) > self._tank_turn_rate * 0.5:
             _nav = self._nav_graph
             if _nav is not None and self._get_floor_z() > 0.5:
-                _nx = self.pos[0] + math.cos(self.azimuth) * speed * dt
-                _ny = self.pos[1] + math.sin(self.azimuth) * speed * dt
-                if _nav.get_floor_z(_nx, _ny, self.pos[2] + 0.1) < self._get_floor_z() - 1.0:
+                _nx = self.pos_x + math.cos(self.azimuth) * speed * dt
+                _ny = self.pos_y + math.sin(self.azimuth) * speed * dt
+                if _nav.get_floor_z(_nx, _ny, self.pos_z + 0.1) < self._get_floor_z() - 1.0:
                     speed = 0.0
         speed, self.ang_vel = self._apply_movement_caps(speed, self.ang_vel)
-        self.vel[0] = math.cos(self.azimuth) * speed
-        self.vel[1] = math.sin(self.azimuth) * speed
+        self.vel_x = math.cos(self.azimuth) * speed
+        self.vel_y = math.sin(self.azimuth) * speed
         self._apply_bounds(dt, half)
         if self._debug_log_path and self._is_inside_obstacle():
             _t = time.monotonic()
             if _t - self._debug_obstacle_logged > 1.0:
                 self._debug_obstacle_logged = _t
                 logger.debug("[%s] Pfad: Kollision bei (%.0f,%.0f) Ziel:%s",
-                             self.callsign, self.pos[0], self.pos[1], self.target_pos)
+                             self.callsign, self.pos_x, self.pos_y, self.target_pos)
 
     def _combat_escalate(self, dt: float, half: float, ep, aim_x: float,
                          aim_y: float, enemy_z: float) -> bool:
@@ -399,10 +399,10 @@ class CombatMixin(BZBotBase):
     def _pick_reposition_point(self, ep) -> tuple:
         """Reposition-Zielpunkt ~UNREACH_REPOS_RADIUS entfernt, Winkel grob in Gegnerrichtung
         (±120°), auf Weltgrenzen geklemmt. Frischer A*-Start, ohne den Kampf zu verlassen."""
-        base_az = math.atan2(ep[1] - self.pos[1], ep[0] - self.pos[0])
+        base_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
         ang = base_az + random.uniform(-math.radians(120), math.radians(120))
-        rx = self.pos[0] + math.cos(ang) * UNREACH_REPOS_RADIUS
-        ry = self.pos[1] + math.sin(ang) * UNREACH_REPOS_RADIUS
+        rx = self.pos_x + math.cos(ang) * UNREACH_REPOS_RADIUS
+        ry = self.pos_y + math.sin(ang) * UNREACH_REPOS_RADIUS
         _m = self.world_half - 5.0
         return (max(-_m, min(_m, rx)), max(-_m, min(_m, ry)))
 
@@ -420,14 +420,14 @@ class CombatMixin(BZBotBase):
             return False
         if self._stall_check_at is None:         # frisch armieren
             self._stall_check_at = now + random.uniform(COMBAT_STALL_WIN_MIN, COMBAT_STALL_WIN_MAX)
-            self._stall_anchor = [self.pos[0], self.pos[1]]
+            self._stall_anchor = [self.pos_x, self.pos_y]
             return False
         if now < self._stall_check_at:
             return False
-        moved = math.hypot(self.pos[0] - self._stall_anchor[0], self.pos[1] - self._stall_anchor[1])
+        moved = math.hypot(self.pos_x - self._stall_anchor[0], self.pos_y - self._stall_anchor[1])
         if moved >= COMBAT_STALL_MIN_DIST:       # Fortschritt → frisches Fenster, kein Stall
             self._stall_check_at = now + random.uniform(COMBAT_STALL_WIN_MIN, COMBAT_STALL_WIN_MAX)
-            self._stall_anchor = [self.pos[0], self.pos[1]]
+            self._stall_anchor = [self.pos_x, self.pos_y]
             return False
         self._stall_check_at = None              # Stall → Manöver (re-armiert nach dessen Ende)
         return self._stall_fire(now)
@@ -446,7 +446,7 @@ class CombatMixin(BZBotBase):
         # KEIN Klippen-Check: von der Plattform zu fallen löst den Stall (erwünscht).
         self._stall_mode = "REV"
         self._stall_rev_dist = random.uniform(COMBAT_STALL_REV_MIN, COMBAT_STALL_REV_MAX)
-        self._stall_rev_start = [self.pos[0], self.pos[1]]
+        self._stall_rev_start = [self.pos_x, self.pos_y]
         self._stall_until = now + COMBAT_STALL_TIMEOUT
         return True
 
@@ -454,8 +454,8 @@ class CombatMixin(BZBotBase):
         ang = random.uniform(0.0, 2.0 * math.pi)
         r = NAV_CELL_SIZE * random.uniform(COMBAT_STALL_WP_MIN, COMBAT_STALL_WP_MAX)
         _m = self.world_half - 5.0
-        rx = max(-_m, min(_m, self.pos[0] + math.cos(ang) * r))
-        ry = max(-_m, min(_m, self.pos[1] + math.sin(ang) * r))
+        rx = max(-_m, min(_m, self.pos_x + math.cos(ang) * r))
+        ry = max(-_m, min(_m, self.pos_y + math.sin(ang) * r))
         self._plan_path(rx, ry, cap_wps=COMBAT_STALL_WP_MAX)
         if not self._nav_path:
             return False                          # kein Pfad → Fallback auf REV (s. _stall_fire)
@@ -469,8 +469,8 @@ class CombatMixin(BZBotBase):
         if self._stall_mode is None:
             return False
         if self._stall_mode == "REV":
-            driven = math.hypot(self.pos[0] - self._stall_rev_start[0],
-                                self.pos[1] - self._stall_rev_start[1])
+            driven = math.hypot(self.pos_x - self._stall_rev_start[0],
+                                self.pos_y - self._stall_rev_start[1])
             if driven >= self._stall_rev_dist or now >= self._stall_until:
                 self._stall_end()
                 return False
@@ -481,8 +481,8 @@ class CombatMixin(BZBotBase):
             speed = -self._effective_tank_speed() * 0.5
             self.ang_vel = 0.0
             speed, self.ang_vel = self._apply_movement_caps(speed, self.ang_vel)
-            self.vel[0] = math.cos(self.azimuth) * speed
-            self.vel[1] = math.sin(self.azimuth) * speed
+            self.vel_x = math.cos(self.azimuth) * speed
+            self.vel_y = math.sin(self.azimuth) * speed
             self._apply_bounds(dt, half)
             return True
         # PATH-Modus

@@ -96,7 +96,7 @@ def test_parse_own_shot_tracked(bot):
 def test_sw_no_instant_kill_on_parse(bot):
     """SW innerhalb Killzone: kein Instant-Kill beim Empfang — SW-Front kommt zeitbasiert."""
     from bzflag.protocol import MsgShotBegin
-    bot.pos   = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=1,
@@ -114,7 +114,7 @@ def test_sw_no_instant_kill_on_parse(bot):
 def test_sw_immediate_miss_too_far(bot):
     """SW fired 90u away → outside SHOCK_OUT_RADIUS (60u) → no kill."""
     from bzflag.protocol import MsgShotBegin
-    bot.pos   = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=1,
@@ -128,7 +128,7 @@ def test_sw_immediate_miss_too_far(bot):
 def test_laser_immediate_hit(bot):
     """Laser fired along x-axis directly through tank center → kill."""
     from bzflag.protocol import MsgShotBegin, MsgKilled
-    bot.pos   = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=1,
@@ -146,7 +146,7 @@ def test_laser_immediate_hit(bot):
 def test_laser_immediate_miss(bot):
     """Laser fired 20u to the side → perpendicular distance > HIT_RADIUS → no kill."""
     from bzflag.protocol import MsgShotBegin
-    bot.pos   = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=1,
@@ -163,7 +163,7 @@ def test_sw_own_shot_no_kill(bot):
     """Eigener SW-Schuss tötet den Bot nicht."""
     from bzflag.protocol import MsgShotBegin
     bot.player_id = 2
-    bot.pos   = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=1,
@@ -181,7 +181,7 @@ def test_sw_point_blank_kill(bot):
     weil die Wellenfront in _resolve_incoming_shots nur nach außen wandert und
     diese Position sonst nie erfassen würde."""
     from bzflag.protocol import MsgShotBegin, MsgKilled
-    bot.pos   = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=1,
@@ -200,7 +200,7 @@ def test_sw_point_blank_own_shot_no_kill(bot):
     hier explizit innerhalb _shockInRadius)."""
     from bzflag.protocol import MsgShotBegin
     bot.player_id = 2
-    bot.pos   = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=1,
@@ -216,7 +216,7 @@ def test_sw_point_blank_own_shot_no_kill(bot):
 def test_sw_point_blank_sh_survives_and_drops_flag(bot):
     """Bot hält SH und steht punktblank in der SW-Killzone → überlebt, droppt Flag."""
     from bzflag.protocol import MsgShotBegin, MsgDropFlag, MsgKilled
-    bot.pos      = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive    = True
     bot.own_flag = "SH"
     payload = _build_shot_packet(
@@ -236,7 +236,7 @@ def test_gm_own_shot_no_kill(bot):
     """Eigener GM-Schuss tötet den Bot nicht (kein Sofort-Kill beim Start)."""
     from bzflag.protocol import MsgShotBegin
     bot.player_id = 2
-    bot.pos   = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=1,

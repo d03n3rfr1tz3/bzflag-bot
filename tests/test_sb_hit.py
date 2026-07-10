@@ -142,7 +142,7 @@ class TestSbShotRouting:
     def test_sb_gets_teleported_phase_path(self, bot):
         """SB auf Teleporter-Karte: Pfad-Cache mit 2 Segmenten, Wand durchflogen."""
         self._wire_world(bot, boxes=[_wall()])
-        bot.pos = [0.0, 100.0, 0.0]                  # abseits der Schussbahn
+        bot.pos_x = 0.0; bot.pos_y = 100.0; bot.pos_z = 0.0                  # abseits der Schussbahn
         bot._on_shot_begin(0, _shot_payload(flag=b"SB"))
         segs = bot._ricochet_paths.get((2, 1))
         assert segs is not None and len(segs) == 2
@@ -152,7 +152,7 @@ class TestSbShotRouting:
     def test_normal_shot_still_stops_at_wall(self, bot):
         """Kontrast: Normal-Schuss auf derselben Karte endet an der Wand."""
         self._wire_world(bot, boxes=[_wall()])
-        bot.pos = [0.0, 100.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 100.0; bot.pos_z = 0.0
         bot._server_ricochet = False
         bot._on_shot_begin(0, _shot_payload(flag=b"\x00\x00"))
         segs = bot._ricochet_paths.get((2, 1))
@@ -162,7 +162,7 @@ class TestSbShotRouting:
     def test_pz_shooter_gets_phase_path(self, bot):
         """Phantom-Zone-Schütze: Normal-Flagge phased ebenfalls (inkl. Teleport)."""
         self._wire_world(bot, boxes=[_wall()])
-        bot.pos = [0.0, 100.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 100.0; bot.pos_z = 0.0
         p = make_player(bot, 2)
         p.is_phantom_zoned = True
         bot._on_shot_begin(0, _shot_payload(flag=b"\x00\x00"))
@@ -172,7 +172,7 @@ class TestSbShotRouting:
     def test_sb_without_teleporters_stays_uncached(self, bot):
         """Ohne Tore bleibt SB im geraden else-Zweig (kein Cache)."""
         self._wire_world(bot, with_teles=False)
-        bot.pos = [0.0, 100.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 100.0; bot.pos_z = 0.0
         bot._server_ricochet = True                  # selbst mit Rico: SB prallt nie ab
         bot._on_shot_begin(0, _shot_payload(flag=b"SB"))
         assert (2, 1) not in bot._ricochet_paths
@@ -187,7 +187,7 @@ class TestSbCapsule:
         now = time.monotonic()
         for flag, expect_dead in ((b"\x00\x00", False), (b"SB", True)):
             bot.alive = True
-            bot.pos = [0.0, 0.0, 0.0]
+            bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
             with bot._shots_lock:
                 bot._shots.clear(); bot._ricochet_paths.clear()
             make_shot(bot, shooter_id=2, shot_id=1,
@@ -202,7 +202,7 @@ class TestSbCapsule:
         for y, expect_dead in ((2.0, False), (1.8, True)):
             now = time.monotonic()
             bot.alive = True
-            bot.pos = [0.0, 0.0, 0.0]
+            bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
             bot._last_hit_check_t = now - 0.5
             bot._last_hit_check_pos = (0.0, 0.0, 0.0)
             with bot._shots_lock:
@@ -220,7 +220,7 @@ class TestSbCapsule:
         for flag, expect_dead in ((b"\x00\x00", False), (b"SB", True)):
             now = time.monotonic()
             bot.alive = True
-            bot.pos = [0.0, 0.0, 0.0]
+            bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
             bot._last_hit_check_t = now - 0.5
             bot._last_hit_check_pos = (0.0, 0.0, 0.0)
             with bot._shots_lock:
@@ -244,7 +244,7 @@ class TestLoadRobustHitWindow:
         letzte Check 0,5s — das echte Fenster deckt sie ab, der alte
         dt-geklemmte Test hätte sie übersprungen (away-skip)."""
         now = time.monotonic()
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._last_hit_check_t = now - 0.5
         bot._last_hit_check_pos = (0.0, 0.0, 0.0)
         # gefeuert vor 0,4s bei x=10 → quert den Tank bei now-0,3, jetzt x=-30
@@ -280,7 +280,7 @@ class TestLoadRobustHitWindow:
                                       ((0.0, 0.0, 0.0), False)):
             now = time.monotonic()
             bot.alive = True
-            bot.pos = [0.0, 0.0, 0.0]
+            bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
             bot._last_hit_check_t = now - 0.5
             bot._last_hit_check_pos = prev_pos
             with bot._shots_lock:
@@ -295,7 +295,7 @@ class TestLoadRobustHitWindow:
         """C2-Guard: unplausibel großer Eigen-Sprung (Teleport) → Korrektur
         entfällt, statischer Test, kein Falsch-Treffer."""
         now = time.monotonic()
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._last_hit_check_t = now - 0.5
         bot._last_hit_check_pos = (0.0, -200.0, 0.0)   # >> 2*speed*0.5+5
         make_shot(bot, shooter_id=2, shot_id=1,

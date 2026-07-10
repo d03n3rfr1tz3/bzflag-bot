@@ -55,12 +55,23 @@ def bot():
     b.client.udp_active = True
     b.player_id = 1
     b.alive = True
-    b.pos = [0.0, 0.0, 0.0]
-    b.vel = [0.0, 0.0, 0.0]
+    b.pos_x = 0.0; b.pos_y = 0.0; b.pos_z = 0.0
+    b.vel_x = 0.0; b.vel_y = 0.0; b.vel_z = 0.0
     b.own_flag = ""
     b.human_count = 1
     b._server_jumping = True   # Standard-Testkontext: Server erlaubt Springen (-j)
     return b
+
+
+def set_pos(bot, x, y, z):
+    """Track 5 (mypyc): bot.pos ist seit Commit 4 in drei skalare Attribute aufgelöst
+    (pos_x/pos_y/pos_z) — Helper für Tests, die die alte Listen-Zuweisung ersetzen."""
+    bot.pos_x = x; bot.pos_y = y; bot.pos_z = z
+
+
+def set_vel(bot, x, y, z):
+    """Siehe set_pos() — Pendant für vel_x/vel_y/vel_z."""
+    bot.vel_x = x; bot.vel_y = y; bot.vel_z = z
 
 
 def make_player(bot, pid, pos=(50.0, 0.0, 0.0), is_human=True, flag="", alive=True):

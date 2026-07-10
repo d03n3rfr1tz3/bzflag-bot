@@ -174,8 +174,11 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         """Eigener Tank-Zustand + Shot-Slots."""
         # Eigener Zustand
         self.player_id = None
-        self.pos       = [0.0, 0.0, 0.0]
-        self.vel       = [0.0, 0.0, 0.0]
+        # Track 5 (mypyc): skalare float-Attribute statt Listen — nativer Unboxing-Slot im
+        # 60-Hz-Physik-/Hit-Detection-Pfad (nur der EIGENE Tank; PlayerInfo/Shot.pos/vel bleiben
+        # Listen, s. DEVELOPER.md).
+        self.pos_x = 0.0; self.pos_y = 0.0; self.pos_z = 0.0
+        self.vel_x = 0.0; self.vel_y = 0.0; self.vel_z = 0.0
         self.azimuth   = 0.0
         self.ang_vel   = 0.0
         self.alive     = False
@@ -651,23 +654,23 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         if self.player_id is None:
             return
         # PS_FALLING = echter Luftzustand: Sprung, Abstieg, freier Fall (über Boden) und Explosions-Bogen
-        falling = self._jumping or self.pos[2] > self._get_floor_z() + 1e-6
+        falling = self._jumping or self.pos_z > self._get_floor_z() + 1e-6
         if time.monotonic() < self._exploding_until:
             status = PS_EXPLODING | (PS_FALLING if falling else 0)
-            vel, ang_vel = tuple(self.vel), 0.0
+            vel, ang_vel = (self.vel_x, self.vel_y, self.vel_z), 0.0
         elif self.alive:
             status = PS_ALIVE | (PS_FALLING if falling else 0) | (PS_FLAG_ACTIVE if self.own_flag else 0)
             if time.monotonic() < self._teleporting_until:
                 status |= PS_TELEPORTING   # P3-NAV-02: laufender Teleport
             if self._crossing_wall():
                 status |= PS_CROSSING   # OO durch Wand / Teleporter-Straddle → Client-Phasing-Effekt
-            vel, ang_vel = tuple(self.vel), self.ang_vel
+            vel, ang_vel = (self.vel_x, self.vel_y, self.vel_z), self.ang_vel
         else:
             return   # tot und keine laufende Explosion → kein Update (wie der echte Client)
         self._order += 1
         payload = build_player_update(
             player_id=self.player_id, order=self._order, status=status,
-            pos=tuple(self.pos), vel=vel,
+            pos=(self.pos_x, self.pos_y, self.pos_z), vel=vel,
             azimuth=self.azimuth, ang_vel=ang_vel,
             timestamp=time.monotonic() + self._server_time_offset)
         self.client.send(MsgPlayerUpdate, payload)
@@ -680,8 +683,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         if g < 0:
             vz = min(-0.5 * g * EXPLODE_TIME, math.sqrt(-2.0 * 49.0 * g))
         else:
-            vz = self.vel[2]
-        self.vel = [self.vel[0], self.vel[1], vz]
+            vz = self.vel_z
+        self.vel_z = vz
         self._exploding_until = now + EXPLODE_TIME
 
     def _send_teleport(self, source: int, target: int) -> None:
@@ -766,7 +769,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         if self.player_id is None or not self.own_flag: return
         self._last_drop_attempt = time.monotonic()
         self._last_grab_attempt = time.monotonic()  # 0.5s Grab-Cooldown nach Drop
-        self.client.send(MsgDropFlag, struct.pack(">fff", *self.pos))
+        self.client.send(MsgDropFlag, struct.pack(">fff", self.pos_x, self.pos_y, self.pos_z))
         if self._debug_log_flag:
             logger.debug("[%s] Flagge: MsgDropFlag gesendet (Flag=%r)", self.callsign, self.own_flag)
 

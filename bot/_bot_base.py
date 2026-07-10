@@ -228,12 +228,19 @@ class BZBotBase:
     player_id: Any
     players: Dict[int, PlayerInfo]
     port: int
-    pos: Any
+    # Track 5 (mypyc): eigener Tank-Zustand als skalare float-Attribute statt Listen-`pos`/`vel`
+    # (native Unboxing-Slots im 60-Hz-Physik-/Hit-Detection-Pfad). PlayerInfo.pos/vel und
+    # Shot.pos/vel (andere Spieler/Schüsse, bot/models.py) bleiben unverändert Listen.
+    pos_x: float
+    pos_y: float
+    pos_z: float
     target_player: Any
     target_pos: Any
     team: Any
     token: Any
-    vel: Any
+    vel_x: float
+    vel_y: float
+    vel_z: float
     world_half: float
 
     # ── Geteilte Methoden (Stubs; reale Impl. in den Mixins) ─────────────

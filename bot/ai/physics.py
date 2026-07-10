@@ -23,14 +23,14 @@ class PhysicsMixin(BZBotBase):
         Läuft jeden Tick unabhängig vom AI-State."""
         # BY: Auto-Bounce alle 0.2s
         if (self.own_flag == "BY" and not self._jumping
-                and self.pos[2] <= 0.1 and now >= self._bounce_next):
-            self.vel[2] = random.uniform(0.25, 1.0) * self._jump_velocity
+                and self.pos_z <= 0.1 and now >= self._bounce_next):
+            self.vel_z = random.uniform(0.25, 1.0) * self._jump_velocity
             # BY-01: Horizontalrichtung aus aktuellem Azimuth — nicht aus altem vel[0/1]
-            h_speed = math.hypot(self.vel[0], self.vel[1])
+            h_speed = math.hypot(self.vel_x, self.vel_y)
             if h_speed < 1.0:
                 h_speed = self._tank_speed * 0.5
-            self.vel[0] = math.cos(self.azimuth) * h_speed
-            self.vel[1] = math.sin(self.azimuth) * h_speed
+            self.vel_x = math.cos(self.azimuth) * h_speed
+            self.vel_y = math.sin(self.azimuth) * h_speed
             self._jumping = True
             self._jump_ang_vel = 0.0  # BZFlag: keine Steuerung in der Luft
             self._bounce_next = now + 0.2
@@ -41,19 +41,19 @@ class PhysicsMixin(BZBotBase):
         # BU sinkt nur AM BODEN auf BURROW_DEPTH (−1.32u), nicht auf Dächern; OO → immer 0.0.
         # Schwelle 1e-6 statt 0: verhindert Dead-Zone durch Floating-Point-Artefakte.
         _floor_z = self._get_floor_z()
-        if not self._jumping and self.pos[2] > _floor_z + 1e-6:
-            self.vel[2] = max(self.vel[2] + self._effective_gravity() * dt, -self._tank_speed)
-            self.pos[2] = max(self.pos[2] + self.vel[2] * dt, _floor_z)
-            if self.pos[2] <= _floor_z + 1e-6:
-                self.pos[2] = _floor_z
-                self.vel[2] = 0.0
+        if not self._jumping and self.pos_z > _floor_z + 1e-6:
+            self.vel_z = max(self.vel_z + self._effective_gravity() * dt, -self._tank_speed)
+            self.pos_z = max(self.pos_z + self.vel_z * dt, _floor_z)
+            if self.pos_z <= _floor_z + 1e-6:
+                self.pos_z = _floor_z
+                self.vel_z = 0.0
 
     def _is_landed(self) -> bool:
         """True wenn Bot auf dem Boden (oder einer Gebäude-Oberfläche) steht.
         Nur beim Abstieg (vel[2] <= 0.1) prüfen — kein Früh-Landen beim Aufstieg."""
-        if self.vel[2] > 0.1:
+        if self.vel_z > 0.1:
             return False
-        return self.pos[2] <= self._get_floor_z() + 0.1
+        return self.pos_z <= self._get_floor_z() + 0.1
 
     def _get_floor_z(self) -> float:
         """Höchste Bodenfläche unterhalb des Bots; 0.0 wenn kein NavGraph.
@@ -71,14 +71,14 @@ class PhysicsMixin(BZBotBase):
         # enthält Position+Flagge → Aufrufe NACH einer pos-Mutation im selben
         # Tick treffen einen neuen Key; Ergebnis bleibt verhaltensidentisch.
         memo = self._tick_memo
-        key = ("floor", self.pos[0], self.pos[1], self.pos[2], self.own_flag)
+        key = ("floor", self.pos_x, self.pos_y, self.pos_z, self.own_flag)
         if memo is not None:
             cached = memo.get(key)
             if cached is not None:
                 return cached
         nav = self._nav_graph
         floor = 0.0 if nav is None else nav.get_floor_z(
-            self.pos[0], self.pos[1], self.pos[2], overhang=self._effective_half_width())
+            self.pos_x, self.pos_y, self.pos_z, overhang=self._effective_half_width())
         if self.own_flag == "BU" and floor <= 0.0:
             floor = self._burrow_depth
         if memo is not None:
@@ -92,7 +92,7 @@ class PhysicsMixin(BZBotBase):
         world_map = self._world_map
         if world_map is None:
             return False
-        px, py, pz = self.pos[0], self.pos[1], self.pos[2]
+        px, py, pz = self.pos_x, self.pos_y, self.pos_z
         for obs in world_map.boxes:
             if obs.drive_through:
                 continue
@@ -133,7 +133,7 @@ class PhysicsMixin(BZBotBase):
         world_map = self._world_map
         if world_map is None:
             return False
-        px, py, pz = self.pos[0], self.pos[1], self.pos[2]
+        px, py, pz = self.pos_x, self.pos_y, self.pos_z
         _solid = world_map.boxes + self._tele_solid_boxes
         _nav = self._nav_graph
         _grid = _nav._solid_grid if _nav is not None else None
@@ -161,7 +161,7 @@ class PhysicsMixin(BZBotBase):
         world_map = self._world_map
         if world_map is None or not world_map.teleporters:
             return False
-        px, py, pz = self.pos[0], self.pos[1], self.pos[2]
+        px, py, pz = self.pos_x, self.pos_y, self.pos_z
         half_len = self._tank_length / 2.0
         half_w = self._effective_half_width()
         for tele in world_map.teleporters:
@@ -174,15 +174,15 @@ class PhysicsMixin(BZBotBase):
         return False
 
     def _apply_obstacle_bounds(self, dt: float) -> None:
-        """Wall-Sliding + Decken-Kollision: korrigiert self.vel/pos bei Gebäude-Kollision (60 Hz)."""
+        """Wall-Sliding + Decken-Kollision: korrigiert self.vel_*/pos_* bei Gebäude-Kollision (60 Hz)."""
         if self._can_drive_through_obstacles():
             return
         world_map = self._world_map
         if world_map is None:
             return
-        pz = self.pos[2]
-        px, py = self.pos[0], self.pos[1]
-        vx, vy = self.vel[0], self.vel[1]
+        pz = self.pos_z
+        px, py = self.pos_x, self.pos_y
+        vx, vy = self.vel_x, self.vel_y
         # P3-NAV-02: Teleporter-Posts + Crossbar als solide Boxen mitprüfen (Decken-Kollision von
         # unten gegen den Crossbar, Wall-Slide an den Posts). Das Querungsfeld bleibt frei.
         _solid = world_map.boxes + self._tele_solid_boxes
@@ -205,10 +205,10 @@ class PhysicsMixin(BZBotBase):
             if rect_rect_overlap(obs.cx, obs.cy, obs.angle, obs.half_w, obs.half_d,
                                  px, py, self.azimuth,
                                  self._tank_length / 2.0, self._effective_half_width()):
-                self.vel[2] = 0.0
+                self.vel_z = 0.0
                 _floor_z = self._burrow_depth if self.own_flag == "BU" else self._get_floor_z()
-                self.pos[2] = max(obs.bottom_z - self._tank_height, _floor_z)
-                pz = self.pos[2]
+                self.pos_z = max(obs.bottom_z - self._tank_height, _floor_z)
+                pz = self.pos_z
                 bot_top = pz + self._tank_height
                 break
         # ── XY-Wall-Sliding ───────────────────────────────────────────────────
@@ -260,21 +260,21 @@ class PhysicsMixin(BZBotBase):
             # Rück-Rotation local→world (cos_a/sin_a = cos/sin(angle))
             vx = lvx * cos_a - lvy * sin_a
             vy = lvx * sin_a + lvy * cos_a
-        self.vel[0] = vx
-        self.vel[1] = vy
+        self.vel_x = vx
+        self.vel_y = vy
 
     def _apply_bounds(self, dt: float, half: float) -> None:
         """Begrenzt Bot-Position auf Weltgrenzen; prallt von Wänden ab."""
         self._apply_obstacle_bounds(dt)
-        nx = self.pos[0] + self.vel[0] * dt
-        ny = self.pos[1] + self.vel[1] * dt
+        nx = self.pos_x + self.vel_x * dt
+        ny = self.pos_y + self.vel_y * dt
         bounced = False
         if not (-half < nx < half):
-            self.vel[0] = -self.vel[0]
+            self.vel_x = -self.vel_x
             nx = max(-half + 1, min(half - 1, nx))
             bounced = True
         if not (-half < ny < half):
-            self.vel[1] = -self.vel[1]
+            self.vel_y = -self.vel_y
             ny = max(-half + 1, min(half - 1, ny))
             bounced = True
         if bounced:
@@ -283,5 +283,5 @@ class PhysicsMixin(BZBotBase):
             # (auch EVADING/committed; in COMBAT würde ein sofortiger A*-Lauf hier _nav_goal
             # überschreiben). Nur noch ein Flag setzen, kein A*-Lauf im Physik-Pfad.
             self._bounce_replan = True
-        self.pos[0] = nx
-        self.pos[1] = ny
+        self.pos_x = nx
+        self.pos_y = ny

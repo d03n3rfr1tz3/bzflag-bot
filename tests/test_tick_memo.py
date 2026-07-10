@@ -16,26 +16,26 @@ from bot.constants import TANK_HEIGHT
 
 
 def test_floor_z_memo_hit_wins(bot):
-    bot.pos = [10.0, 20.0, 0.0]
+    bot.pos_x = 10.0; bot.pos_y = 20.0; bot.pos_z = 0.0
     bot._tick_memo[("floor", 10.0, 20.0, 0.0, bot.own_flag)] = 123.5
     assert bot._get_floor_z() == 123.5
 
 
 def test_floor_z_position_change_misses(bot):
-    bot.pos = [10.0, 20.0, 0.0]
+    bot.pos_x = 10.0; bot.pos_y = 20.0; bot.pos_z = 0.0
     bot._tick_memo[("floor", 10.0, 20.0, 0.0, bot.own_flag)] = 123.5
-    bot.pos[0] = 11.0
+    bot.pos_x = 11.0
     assert bot._get_floor_z() == 0.0   # kein NavGraph im Fixture → Weltboden
 
 
 def test_floor_z_stores_result(bot):
-    bot.pos = [1.0, 2.0, 0.0]
+    bot.pos_x = 1.0; bot.pos_y = 2.0; bot.pos_z = 0.0
     z = bot._get_floor_z()
     assert bot._tick_memo[("floor", 1.0, 2.0, 0.0, bot.own_flag)] == z
 
 
 def test_muzzle_clear_memo_hit_wins(bot):
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._tick_memo[("muzzle", 0.5, 0.0, 0.0, 0.0)] = False
     assert bot._muzzle_clear(0.5) is False
 

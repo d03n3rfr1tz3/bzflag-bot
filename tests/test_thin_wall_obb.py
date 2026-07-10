@@ -49,12 +49,12 @@ def _local_x(px, py):
 
 def _drive_into_wall(bot, z=15.0, ticks=400):
     """Fährt den Bot von der +local_x-Seite senkrecht in die Wand."""
-    bot.pos = [WX + CA * 12.0, WY + SA * 12.0, z]
-    bot.vel = [0.0, 0.0, 0.0]
+    bot.pos_x = WX + CA * 12.0; bot.pos_y = WY + SA * 12.0; bot.pos_z = z
+    bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot.azimuth = math.atan2(-SA, -CA)             # Heading in -local_x (in die Wand)
     for _ in range(ticks):
-        bot.vel[0] = math.cos(bot.azimuth) * bot._tank_speed
-        bot.vel[1] = math.sin(bot.azimuth) * bot._tank_speed
+        bot.vel_x = math.cos(bot.azimuth) * bot._tank_speed
+        bot.vel_y = math.sin(bot.azimuth) * bot._tank_speed
         bot._apply_bounds(1.0 / 60.0, 400.0)
 
 
@@ -63,7 +63,7 @@ def _drive_into_wall(bot, z=15.0, ticks=400):
 def test_drive_into_135_wall_keeps_obb_out(bot):
     _setup(bot, [_wall()])
     _drive_into_wall(bot)
-    lx = _local_x(bot.pos[0], bot.pos[1])
+    lx = _local_x(bot.pos_x, bot.pos_y)
     # Zentrum bleibt ~Halb-Länge (3,0) + Wand-Halb-Breite (0,5) draußen (war ohne Fix ~2,0).
     assert lx >= 3.3, f"Zentrum zu nah an der Wand: local_x={lx:.2f}"
     # Reale Tank-Nase (Zentrum − Halb-Länge Richtung Wand) bleibt auf der Bot-Seite (≥ -0,5).
@@ -78,11 +78,11 @@ def test_pressed_bot_not_shot_through_wall(bot):
     _drive_into_wall(bot)
     bot.player_id = 1
     bot.alive = True
-    z = bot.pos[2] + bot._tank_height * 0.5
+    z = bot.pos_z + bot._tank_height * 0.5
     # Gegner 60u auf der Gegenseite; Schuss zielt auf die Bot-Position.
     ex, ey = WX - CA * 60.0, WY - SA * 60.0
-    make_player(bot, 2, pos=(ex, ey, bot.pos[2]))
-    dx, dy = bot.pos[0] - ex, bot.pos[1] - ey
+    make_player(bot, 2, pos=(ex, ey, bot.pos_z))
+    dx, dy = bot.pos_x - ex, bot.pos_y - ey
     d = math.hypot(dx, dy)
     vx, vy = dx / d * bot._shot_speed, dy / d * bot._shot_speed
     now = time.monotonic()
@@ -108,9 +108,9 @@ def test_gm_does_not_hit_through_wall(bot):
     bot.player_id = 1
     bot.alive = True
     # Bot 3u auf +Seite, GM-Rakete 2u auf -Seite (Wand dazwischen), Distanz < eff_r.
-    bot.pos = [WX + CA * 2.5, WY + SA * 2.5, 15.0]   # dist zur GM = 4.0u < eff_r (~4.28)
+    bot.pos_x = WX + CA * 2.5; bot.pos_y = WY + SA * 2.5; bot.pos_z = 15.0   # dist zur GM = 4.0u < eff_r (~4.28)
     bot.azimuth = 0.0
-    z = bot.pos[2] + bot._tank_height * 0.5
+    z = bot.pos_z + bot._tank_height * 0.5
     gx, gy = WX - CA * 1.5, WY - SA * 1.5
     make_shot(bot, shooter_id=2, shot_id=7, pos=(gx, gy, z), vel=(CA * 5.0, SA * 5.0, 0.0),
               is_gm=True, flag_abbr=b"GM", gm_target_pid=1, fire_time=time.monotonic())
@@ -124,9 +124,9 @@ def test_gm_hits_without_wall_between(bot):
     _setup(bot, [])                                # keine Wand
     bot.player_id = 1
     bot.alive = True
-    bot.pos = [WX + CA * 2.5, WY + SA * 2.5, 15.0]   # dist zur GM = 4.0u < eff_r (~4.28)
+    bot.pos_x = WX + CA * 2.5; bot.pos_y = WY + SA * 2.5; bot.pos_z = 15.0   # dist zur GM = 4.0u < eff_r (~4.28)
     bot.azimuth = 0.0
-    z = bot.pos[2] + bot._tank_height * 0.5
+    z = bot.pos_z + bot._tank_height * 0.5
     gx, gy = WX - CA * 1.5, WY - SA * 1.5
     make_shot(bot, shooter_id=2, shot_id=7, pos=(gx, gy, z), vel=(CA * 5.0, SA * 5.0, 0.0),
               is_gm=True, flag_abbr=b"GM", gm_target_pid=1, fire_time=time.monotonic())
@@ -141,10 +141,10 @@ def test_floor_support_unchanged_on_narrow_platform(bot):
     dem Deck bis nahe an die Kante (überhängend), auch dicht an der Mittelwand."""
     _setup(bot, [_wall(), _deck()])
     # 4u von der Wandmitte (klar auf einer Deck-Hälfte, Deck-Halbbreite 8)
-    bot.pos = [WX + CA * 4.0, WY + SA * 4.0, 15.0]
+    bot.pos_x = WX + CA * 4.0; bot.pos_y = WY + SA * 4.0; bot.pos_z = 15.0
     assert bot._get_floor_z() == pytest.approx(15.0, abs=0.01)
     # nahe der Deck-Kante (7,5u) noch getragen
-    bot.pos = [WX + CA * 7.5, WY + SA * 7.5, 15.0]
+    bot.pos_x = WX + CA * 7.5; bot.pos_y = WY + SA * 7.5; bot.pos_z = 15.0
     assert bot._get_floor_z() == pytest.approx(15.0, abs=0.01)
 
 
@@ -154,14 +154,14 @@ def test_parallel_drive_along_wall_not_stuck(bot):
     _setup(bot, [_wall(), _deck()])
     # Startpunkt 3u von der Wandmitte, Heading entlang der Wand-Längsachse (ang + 90°)
     start = [WX + CA * 3.0, WY + SA * 3.0, 15.0]
-    bot.pos = list(start)
-    bot.vel = [0.0, 0.0, 0.0]
+    bot.pos_x, bot.pos_y, bot.pos_z = start
+    bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot.azimuth = ANG + math.pi / 2.0
     for _ in range(120):
-        bot.vel[0] = math.cos(bot.azimuth) * bot._tank_speed
-        bot.vel[1] = math.sin(bot.azimuth) * bot._tank_speed
+        bot.vel_x = math.cos(bot.azimuth) * bot._tank_speed
+        bot.vel_y = math.sin(bot.azimuth) * bot._tank_speed
         bot._apply_bounds(1.0 / 60.0, 400.0)
-    advanced = math.hypot(bot.pos[0] - start[0], bot.pos[1] - start[1])
+    advanced = math.hypot(bot.pos_x - start[0], bot.pos_y - start[1])
     assert advanced >= 10.0, f"Parallelfahrt blockiert: nur {advanced:.1f}u"
-    lx = _local_x(bot.pos[0], bot.pos[1])
+    lx = _local_x(bot.pos_x, bot.pos_y)
     assert lx >= 1.5, f"Tank in/durch die Wand gerutscht: local_x={lx:.2f}"

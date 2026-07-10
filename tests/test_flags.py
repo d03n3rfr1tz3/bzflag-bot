@@ -85,7 +85,7 @@ class TestFlagStrategy:
         b.client.udp_active = True
         b.player_id = 1
         b.alive = True
-        b.pos = [0.0, 0.0, 0.0]
+        b.pos_x = 0.0; b.pos_y = 0.0; b.pos_z = 0.0
 
         # V ist gut → behalten
         flag_bytes = b"V\x00"
@@ -214,7 +214,7 @@ class TestFlagGrabFOV:
         bot.human_count = 1
         bot.azimuth = 0.0  # schaut nach +X
         bot.flags[3] = FlagInfo(3, "GM", 1, [6.0, 0.0, 0.0])  # vor Bot, in FOV, in Radius
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._last_grab_attempt = 0.0
         bot._check_opportunistic_grab(time.monotonic())
         bot.client.send.assert_called()
@@ -224,7 +224,7 @@ class TestFlagGrabFOV:
         bot.human_count = 1
         bot.azimuth = 0.0  # schaut nach +X
         bot.flags[3] = FlagInfo(3, "GM", 1, [-6.0, 0.0, 0.0])  # HINTER Bot
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._last_grab_attempt = 0.0
         bot._check_opportunistic_grab(time.monotonic())
         bot.client.send.assert_not_called()
@@ -235,7 +235,7 @@ class TestFlagGrabFOV:
         bot.azimuth = 0.0
         # Flag unter Bot (< TANK_RADIUS=4.32) → keine FOV-Prüfung
         bot.flags[3] = FlagInfo(3, "GM", 1, [-2.0, 0.0, 0.0])  # hinter Bot aber sehr nah
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._last_grab_attempt = 0.0
         bot._check_opportunistic_grab(time.monotonic())
         bot.client.send.assert_called()
@@ -288,7 +288,7 @@ def test_opportunistic_grab_in_active_mode(bot):
     from bzflag.protocol import MsgGrabFlag
     bot.human_count = 1
     bot.flags[3] = FlagInfo(3, "GM", 1, [5.0, 0.0, 0.0])  # nah genug
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._last_grab_attempt = 0.0
     bot._check_opportunistic_grab(time.monotonic())
     assert bot.client.send.called
@@ -302,7 +302,7 @@ def test_no_grab_in_passive_mode(bot):
     from bot.models import FlagInfo
     bot.human_count = 0
     bot.flags[3] = FlagInfo(3, "GM", 1, [5.0, 0.0, 0.0])
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._last_grab_attempt = 0.0
     # _check_opportunistic_grab direkt ruft nur im Aktivmodus
     # es wird in _update_movement nur bei human_count > 0 aufgerufen
@@ -315,7 +315,7 @@ def test_grab_throttled(bot):
     """Zweiter Grab-Versuch < 0.5s wird nicht gesendet."""
     from bot.models import FlagInfo
     bot.flags[3] = FlagInfo(3, "GM", 1, [5.0, 0.0, 0.0])
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     now = time.monotonic()
     bot._last_grab_attempt = now - 0.1  # zu kürzlich
     bot._check_opportunistic_grab(now)
@@ -327,7 +327,7 @@ def test_no_grab_when_holding_flag(bot):
     from bot.models import FlagInfo
     bot.own_flag = "GM"
     bot.flags[3] = FlagInfo(3, "SW", 1, [5.0, 0.0, 0.0])
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._last_grab_attempt = 0.0
     bot._check_opportunistic_grab(time.monotonic())
     bot.client.send.assert_not_called()

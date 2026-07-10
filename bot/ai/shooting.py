@@ -56,7 +56,7 @@ class ShootingMixin(BZBotBase):
         als ein Z-Sprung)."""
         if info is None or self.own_flag in ("GM", "SW"):
             return False
-        if abs(info.pos[2] - self.pos[2]) <= HIT_RADIUS:
+        if abs(info.pos[2] - self.pos_z) <= HIT_RADIUS:
             return False                       # gleiche Höhe → Direktschuss reicht
         return self._has_teleporters() or self._server_ricochet
 
@@ -112,14 +112,14 @@ class ShootingMixin(BZBotBase):
                         nav = self._nav_graph
                         landing_z = (0.0 if nav is None
                                      else nav.get_floor_z(aim_x, aim_y, info.pos[2]))
-                        z_ref = self.pos[2] + self._muzzle_height
+                        z_ref = self.pos_z + self._muzzle_height
                         tol = HIT_RADIUS
                         t_aim = t_land
                         self._landing_hit_z = 0.0
                         z_reachable = True
-                        if landing_z - self.pos[2] > tol:
+                        if landing_z - self.pos_z > tol:
                             z_reachable = False           # P4-TAC-06: landet höher → unerreichbar
-                        elif self.pos[2] - landing_z > tol:
+                        elif self.pos_z - landing_z > tol:
                             # P4-TAC-07: landet tiefer → Mündungshöhen-Durchgang abfangen
                             dz = info.pos[2] - z_ref
                             disc2 = vz * vz - 2.0 * g * dz
@@ -131,11 +131,11 @@ class ShootingMixin(BZBotBase):
                                     aim_y = ep[1] + info.vel[1] * t_aim
                                     self._landing_hit_z = z_ref
                         landing_dist = math.hypot(
-                            aim_x - self.pos[0], aim_y - self.pos[1])
+                            aim_x - self.pos_x, aim_y - self.pos_y)
                         tof_to_landing = landing_dist / max(self._effective_shot_speed(), 1.0)
                         # Fix D: Drehtzeit-Feasibility + Reichweitencheck
                         aim_az_land = math.atan2(
-                            aim_y - self.pos[1], aim_x - self.pos[0])
+                            aim_y - self.pos_y, aim_x - self.pos_x)
                         turn_needed = abs(_angle_diff(aim_az_land, self.azimuth))
                         turn_time = turn_needed / max(self._tank_turn_rate, 1e-6)
                         can_aim = (z_reachable
@@ -248,7 +248,7 @@ class ShootingMixin(BZBotBase):
         if wmap is None:
             return None
 
-        bx, by, bz = self.pos[0], self.pos[1], self.pos[2]
+        bx, by, bz = self.pos_x, self.pos_y, self.pos_z
         ecx = predicted_pos[0] if predicted_pos else enemy.pos[0]
         ecy = predicted_pos[1] if predicted_pos else enemy.pos[1]
         ecz = enemy.pos[2] + self._tank_height * 0.5
@@ -383,7 +383,7 @@ class ShootingMixin(BZBotBase):
         self._send_shot(now, self.azimuth)
 
     def _maybe_shoot_sw(self, now: float, ep, info, dx: float, dy: float) -> None:
-        dz_abs = abs(info.pos[2] - self.pos[2]) if info is not None else 0.0
+        dz_abs = abs(info.pos[2] - self.pos_z) if info is not None else 0.0
         dist_3d = math.hypot(math.hypot(dx, dy), dz_abs)
         if self._shock_in_radius < dist_3d <= self._shock_out_radius:
             self._send_shot(now, self.azimuth)
@@ -395,7 +395,7 @@ class ShootingMixin(BZBotBase):
         aim_xy = self._compute_aim_point(ep, info, dx, dy, dist, now)
         if aim_xy is None:
             return
-        aim_angle = math.atan2(aim_xy[1] - self.pos[1], aim_xy[0] - self.pos[0])
+        aim_angle = math.atan2(aim_xy[1] - self.pos_y, aim_xy[0] - self.pos_x)
         st_target = info is not None and info.flag == "ST"
         if st_target:
             if not self._has_los_to_enemy(self.target_player):
@@ -413,12 +413,12 @@ class ShootingMixin(BZBotBase):
         # LoS-Zwang oben, nicht dieses Gate.)
         if not st_target:
             az = self.azimuth
-            mx = self.pos[0] + math.cos(az) * self._muzzle_front
-            my = self.pos[1] + math.sin(az) * self._muzzle_front
-            mz = self.pos[2] + self._muzzle_height
+            mx = self.pos_x + math.cos(az) * self._muzzle_front
+            my = self.pos_y + math.sin(az) * self._muzzle_front
+            mz = self.pos_z + self._muzzle_height
             ax = mx + math.cos(az) * self._gm_min_range
             ay = my + math.sin(az) * self._gm_min_range
-            ez = (info.pos[2] if info is not None else self.pos[2]) + self._tank_height * 0.5
+            ez = (info.pos[2] if info is not None else self.pos_z) + self._tank_height * 0.5
             if not (self._segment_clear(mx, my, mz, ax, ay, mz)
                     and self._segment_clear(ax, ay, mz, ep[0], ep[1], ez)):
                 return
@@ -431,7 +431,7 @@ class ShootingMixin(BZBotBase):
         self, now: float, ep, info, dx: float, dy: float, dist: float
     ) -> None:
         # Laser ist instant — kein _compute_aim_point(), direkt auf aktuelle Position
-        aim_angle = math.atan2(ep[1] - self.pos[1], ep[0] - self.pos[0])
+        aim_angle = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
         _indirect = False
         if not self._has_los_to_enemy(self.target_player) or self._cross_floor_indirect(info):
             _fb = self._own_flag_bytes()
@@ -452,7 +452,7 @@ class ShootingMixin(BZBotBase):
         if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(5):
             return
         if (not _indirect and info is not None
-                and abs(info.pos[2] - self.pos[2]) > self._tank_height * 0.7):
+                and abs(info.pos[2] - self.pos_z) > self._tank_height * 0.7):
             return
         self._send_shot(now, self.azimuth)
         self._set_next_shoot_after_fire(now)
@@ -462,7 +462,7 @@ class ShootingMixin(BZBotBase):
     ) -> None:
         if dist > THIEF_AD_RANGE:
             return
-        aim_angle = math.atan2(ep[1] - self.pos[1], ep[0] - self.pos[0])
+        aim_angle = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
         _indirect = False
         if not self._has_los_to_enemy(self.target_player) or self._cross_floor_indirect(info):
             _fb = self._own_flag_bytes()
@@ -481,7 +481,7 @@ class ShootingMixin(BZBotBase):
         if abs(_angle_diff(aim_angle, self.azimuth)) > math.radians(10):
             return
         if (not _indirect and info is not None
-                and abs(info.pos[2] - self.pos[2]) > self._tank_height * 0.7):
+                and abs(info.pos[2] - self.pos_z) > self._tank_height * 0.7):
             return
         self._send_shot(now, self.azimuth)
         self._set_next_shoot_after_fire(now)
@@ -503,12 +503,12 @@ class ShootingMixin(BZBotBase):
         aim_xy = self._compute_aim_point(ep, info, dx, dy, dist, now)
         if aim_xy is None:
             return
-        aim_angle = math.atan2(aim_xy[1] - self.pos[1], aim_xy[0] - self.pos[0])
+        aim_angle = math.atan2(aim_xy[1] - self.pos_y, aim_xy[0] - self.pos_x)
         if abs(_angle_diff(aim_angle, self.azimuth)) > self._fire_gate_rad(dist):
             return
         _warning = False
         if self._ai_state != AIState.LANDING_SHOT and info is not None:
-            z_diff = abs(info.pos[2] - self.pos[2])
+            z_diff = abs(info.pos[2] - self.pos_z)
             if z_diff > HIT_RADIUS:
                 _max_jump_h = self._effective_jump_height()
                 if z_diff >= _max_jump_h:
@@ -532,7 +532,7 @@ class ShootingMixin(BZBotBase):
         aim_xy = self._compute_aim_point(ep, info, dx, dy, dist, now)
         if aim_xy is None:
             return
-        aim_angle = math.atan2(aim_xy[1] - self.pos[1], aim_xy[0] - self.pos[0])
+        aim_angle = math.atan2(aim_xy[1] - self.pos_y, aim_xy[0] - self.pos_x)
         if self.own_flag == "WA":
             aim_angle += random.gauss(0, math.radians(4))
         _warning = False
@@ -573,7 +573,7 @@ class ShootingMixin(BZBotBase):
                 and self.own_flag not in ("GM", "SW")
                 and info is not None
                 and not _indirect):
-            z_diff = abs(info.pos[2] - self.pos[2])
+            z_diff = abs(info.pos[2] - self.pos_z)
             if z_diff > HIT_RADIUS:
                 _max_jump_h = self._effective_jump_height()
                 if z_diff >= _max_jump_h:
@@ -619,7 +619,7 @@ class ShootingMixin(BZBotBase):
                     # feuern. SW (radial) und SB (durchschlägt Wände) sind ausgenommen.
                     if self.own_flag not in ("SW", "SB") and not self._muzzle_clear(self.azimuth):
                         return
-                    dx, dy = ep[0] - self.pos[0], ep[1] - self.pos[1]
+                    dx, dy = ep[0] - self.pos_x, ep[1] - self.pos_y
                     dist = math.hypot(dx, dy)
                     if   self.own_flag == "SW": self._maybe_shoot_sw(now, ep, info, dx, dy)
                     elif self.own_flag == "GM": self._maybe_shoot_gm(now, ep, info, dx, dy, dist)
@@ -658,9 +658,9 @@ class ShootingMixin(BZBotBase):
         if self.own_flag == "SW":
             vx = vy = 0.0  # bzfs.cxx:4148 setzt shotSpeed=0; Non-Zero wird abgelehnt
         team_id = self.team if self.team not in (0xFFFF, 0xFFFE) else 0
-        muzzle_x = self.pos[0] + math.cos(az) * self._muzzle_front
-        muzzle_y = self.pos[1] + math.sin(az) * self._muzzle_front
-        muzzle_z = self.pos[2] + self._muzzle_height
+        muzzle_x = self.pos_x + math.cos(az) * self._muzzle_front
+        muzzle_y = self.pos_y + math.sin(az) * self._muzzle_front
+        muzzle_z = self.pos_z + self._muzzle_height
         if self._debug_log_shot:
             logger.debug("[%s] Schuss: Abgefeuert – muzzle=(%.3f,%.3f,%.3f) vel=(%.2f,%.2f) flag=%s",
                          self.callsign, muzzle_x, muzzle_y, muzzle_z, vx, vy, self.own_flag or "–")

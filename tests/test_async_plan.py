@@ -28,7 +28,7 @@ class _FakeNav:
 def _prep(bot, nav):
     bot._nav_graph = nav
     bot._nav_jump_cooldowns = {}
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.alive = True
     bot.own_flag = ""
 
@@ -139,7 +139,7 @@ def test_poll_discards_when_off_route(bot):
     _prep(bot, _FakeNav([]))
     bot.azimuth = 0.0
     bot._nav_path = ["SENTINEL"]
-    bot.pos = [100.0, 100.0, 0.0]                  # weit weg von der Route nahe Ursprung
+    bot.pos_x = 100.0; bot.pos_y = 100.0; bot.pos_z = 0.0                  # weit weg von der Route nahe Ursprung
     _seed(bot, gen=5, gx=10.0, gy=0.0,
           path=[(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (8.0, 0.0, 0.0)])
     bot._poll_async_plan()
@@ -150,7 +150,7 @@ def test_poll_resyncs_skips_traversed_prefix(bot):
     """Bot ist auf der Route vorgefahren → abgefahrener Prefix wird übersprungen, kein Zurückdrehen."""
     _prep(bot, _FakeNav([]))
     bot.azimuth = 0.0
-    bot.pos = [7.0, 0.0, 0.0]                       # mitten auf Segment (4,0)→(8,0)
+    bot.pos_x = 7.0; bot.pos_y = 0.0; bot.pos_z = 0.0                       # mitten auf Segment (4,0)→(8,0)
     path = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (8.0, 0.0, 0.0), (12.0, 0.0, 0.0)]
     _seed(bot, gen=5, gx=12.0, gy=0.0, path=path)
     bot._poll_async_plan()
