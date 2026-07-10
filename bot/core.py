@@ -776,15 +776,13 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         target_id = initial if initial is not None else (
             self.target_player if self.target_player is not None else 255
         )
-        payload = (
-            struct.pack(">B",   self.player_id)
-            + struct.pack(">H",   gm["shot_id"])
-            + struct.pack(">fff", px, py, pz)
-            + struct.pack(">fff", *gm["vel"])
-            + struct.pack(">f",   dt)
-            + struct.pack(">h",   gm["team"])
-            + struct.pack(">B",   target_id & 0xFF)
-        )
+        # Ein struct.pack statt sieben Einzel-packs + Konkatenation (P5, analog build_player_update).
+        vel = gm["vel"]
+        payload = struct.pack(">BH3f3ffhB",
+                               self.player_id, gm["shot_id"],
+                               px, py, pz,
+                               vel[0], vel[1], vel[2],
+                               dt, gm["team"], target_id & 0xFF)
         self.client.send(MsgGMUpdate, payload)
         logger.info("[%s] GMUpdate gesendet: target=%d (dt=%.2fs)",
                     self.callsign, target_id, dt)

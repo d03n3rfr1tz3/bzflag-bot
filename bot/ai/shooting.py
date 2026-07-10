@@ -632,17 +632,14 @@ class ShootingMixin(BZBotBase):
             logger.debug("[%s] Schuss: Abgefeuert – muzzle=(%.3f,%.3f,%.3f) vel=(%.2f,%.2f) flag=%s",
                          self.callsign, muzzle_x, muzzle_y, muzzle_z, vx, vy, self.own_flag or "–")
 
-        payload = (
-            struct.pack(">f",  now)
-            + struct.pack(">B", self.player_id)
-            + struct.pack(">H", shot_id)
-            + struct.pack(">fff", muzzle_x, muzzle_y, muzzle_z)
-            + struct.pack(">fff", vx, vy, 0.0)
-            + struct.pack(">f",  0.0)
-            + struct.pack(">h",  team_id)
-            + self._own_flag_bytes()
-            + struct.pack(">f",  self._shot_lifetime)
-        )
+        # Ein struct.pack statt neun Einzel-packs + Konkatenation (P5): big-endian (">")
+        # kennt kein Padding, das Byte-Layout bleibt identisch.
+        payload = struct.pack(">fBH3f3ffh2sf",
+                               now, self.player_id, shot_id,
+                               muzzle_x, muzzle_y, muzzle_z,
+                               vx, vy, 0.0,
+                               0.0, team_id, self._own_flag_bytes(),
+                               self._shot_lifetime)
         assert len(payload) == 43
         self.client.send(MsgShotBegin, payload)
         # Slot-Reload-Tracking: diesen Slot als belegt markieren
