@@ -425,6 +425,25 @@ def test_laser_many_bounces():
     assert len(segs) > 5
 
 
+def test_laser_many_bounces_between_wall_boxes():
+    """Laser pendelt zwischen zwei Wand-BOXEN (nicht nur Weltgrenzen):
+    Korridor 98u breit, Strahl bei 2° zur x-Achse → ≥10 Segmente, die
+    Abprallpunkte liegen auf den Wand-Innenflächen (x=1 / x=99)."""
+    walls = [_box(cx=0.0,   cy=0.0, hw=1.0, hd=250.0, height=20.0),
+             _box(cx=100.0, cy=0.0, hw=1.0, hd=250.0, height=20.0)]
+    a = math.radians(2.0)
+    segs = simulate_shot_path(
+        (5.0, -50.0, 1.0),
+        (100_000.0 * math.cos(a), 100_000.0 * math.sin(a), 0.0),
+        0.0, 0.35,
+        b"L\x00", walls, 400.0, True,
+    )
+    assert len(segs) >= 10
+    for seg in segs[1:10]:
+        assert (_approx(seg.px, 1.0, tol=1e-3) or _approx(seg.px, 99.0, tol=1e-3)), \
+            f"Segment startet nicht an einer Wand-Innenfläche: px={seg.px}"
+
+
 def test_segment_time_continuity():
     """Aufeinanderfolgende Segmente sind zeitlich lückenlos."""
     wall = _box(cx=50.0, cy=0.0, hw=5.0, hd=100.0, bz=0.0, height=10.0)

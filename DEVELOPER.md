@@ -866,6 +866,25 @@ Schusspfad-Simulation (`simulate_shot_path`, bis zu 100 Bounces) **vor** dem
 gemeinsame Eintragen von Shot + Ricochet-Pfad (Atomicität bleibt, Haltezeit µs statt ms —
 sonst blockiert der Recv-Thread die 60-Hz-Schleife bei Schuss-Bursts).
 
+### Client-treue Nachjustierung eingehender Schüsse (AdVel/AdLife)
+
+`MsgShotBegin` transportiert **Basis**-Velocity und **Basis**-Lifetime; der echte Client
+multipliziert beide lokal im Strategy-Konstruktor nach (`SegmentedShotStrategy.cxx`:
+`f.shot.vel[i] *= <flag>AdVel` — der ganze Vektor inkl. Tank-Anteil — und
+`f.lifetime *= <flag>AdLife`). Der Bot spiegelt das in `_on_shot_begin` direkt nach dem
+Parsen über zwei Helfer, bevor Shot-Objekt, Pfad-Simulation und Sofort-Check die Werte sehen:
+
+| Helfer | Flaggen | Multiplikatoren (Defaults) |
+|---|---|---|
+| `_incoming_shot_velocity` | L, TH, MG, F | ×1000 / ×8 / ×1,5 / ×1,5 |
+| `_incoming_shot_lifetime` | SW, GM, MG, F, L, TH | `_shockAdLife` usw.; L ×0,1, TH ×0,05 |
+
+GM bleibt bei beidem außen vor bzw. nur AdLife: die Rakete hat kein AdVel und wird live
+über `MsgGMUpdate` nachgeführt. Ohne diese Nachjustierung wäre die simulierte
+Laser-Reichweite 100× zu kurz (350u statt 35 000u) — der Sofort-Check sah dann nur
+Segmente für Direkttreffer bzw. einen nahen Abpraller, Mehrfach-Abpraller gingen wirkungslos
+durch den Bot (historischer Bug; Regression: `test_laser_multibounce.py`).
+
 ### Schuss-Segment und Normschuss
 
 Jeder Schuss hat eine `position_at(t)` Methode:
@@ -1560,6 +1579,7 @@ Verbindung und Server-Kommunikation passieren in Tests nie.
 | `test_shot_parsing.py` | `MsgShotBegin`-Parsing, SW/Laser/Thief Sofort-Check bei Spawn |
 | `test_hit_detection.py` | `_resolve_incoming_shots` für SW, GM, Laser, SR, Obesity, Narrow-OBB, PZ-Phantom |
 | `test_sb_hit.py` | SB-Treffer: Wand-Phasing (phase_walls), Längskapsel, Hit-Fenster |
+| `test_laser_multibounce.py` | L/TH-Mehrfach-Abpraller E2E: AdVel/AdLife-Nachjustierung, Korridor-Geometrie, Reichweiten-Grenzen |
 | `test_targeting.py` | `_find_target_player` mit Radar/FOV, Stealth, Cloaking, Team; P7-LoS-Cache |
 | `test_movement.py` | Waypoint-Navigation, Schwerkraft, BY-Flag, `_is_landed` |
 | `test_dodge_and_jump.py` | EVADING-Trigger, DODGE_JUMP, Grace Period (EV2) |
