@@ -262,7 +262,7 @@ def test_incoming_shot_lifetime_applies_adlife(bot, flag, attr):
     mit *<flag>AdLife nach (SW/GM/L/MG/F/TH). Basis-Lifetime aus dem Paket = 3,5s."""
     from bzflag.protocol import MsgShotBegin
     bot.player_id = 1
-    bot.pos   = [500.0, 0.0, 0.0]   # weit weg → kein Sofort-Treffer/Punktblank
+    bot.pos_x = 500.0; bot.pos_y = 0.0; bot.pos_z = 0.0 # weit weg → kein Sofort-Treffer/Punktblank
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=3,
@@ -280,7 +280,7 @@ def test_incoming_normal_shot_lifetime_unchanged(bot):
     justiert dort ebenfalls nichts nach."""
     from bzflag.protocol import MsgShotBegin
     bot.player_id = 1
-    bot.pos   = [500.0, 0.0, 0.0]
+    bot.pos_x = 500.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     payload = _build_shot_packet(shooter_id=2, shot_id=4,
                                  flag_type=b"\x00\x00", lifetime=3.5)
     bot._on_shot_begin(MsgShotBegin, payload)
@@ -295,7 +295,7 @@ def test_sw_no_phantom_kill_after_wave_passed(bot):
     also verfällt der Shot, bevor der Bot den Ring (6u–60u) erreicht."""
     from bzflag.protocol import MsgShotBegin
     bot.player_id = 1
-    bot.pos   = [200.0, 0.0, 0.0]   # beim Abschuss weit weg → kein Punktblank
+    bot.pos_x = 200.0; bot.pos_y = 0.0; bot.pos_z = 0.0 # beim Abschuss weit weg → kein Punktblank
     bot.alive = True
     payload = _build_shot_packet(
         shooter_id=2, shot_id=7,
@@ -311,7 +311,7 @@ def test_sw_no_phantom_kill_after_wave_passed(bot):
 
     # Welle ist visuell längst vorbei: Shot künstlich altern, Bot fährt in den Ring
     s.fire_time = time.monotonic() - (s.lifetime + 1.5)
-    bot.pos = [30.0, 0.0, 0.0]      # dist=30u liegt zwischen in(6) und out(60)
+    bot.pos_x = 30.0; bot.pos_y = 0.0; bot.pos_z = 0.0 # dist=30u liegt zwischen in(6) und out(60)
     bot.client.send.reset_mock()
     bot._resolve_incoming_shots(time.monotonic(), 0.02)
     assert bot.alive is True
