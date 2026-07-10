@@ -214,11 +214,14 @@ class NavGraph:
         self._precompute_thin_wall_blocked()
         self._build_teleport_edges(world_map)
 
-        # Zähle begehbare Zellen über alle Etagen — erscheint im Log zur Diagnose
-        walkable_count = sum(
-            sum(sum(1 for w in row if w) for row in lyr.walkable)
-            for lyr in self.layers
-        )
+        # Zähle begehbare Zellen über alle Etagen — erscheint im Log zur Diagnose.
+        # Explizite Schleife statt sum()-über-Generator-Comprehension: mypyc kann eine
+        # Comprehension über bytearray-Zeilen nicht kompilieren ("bytearray is not a
+        # valid sequence"); bytearray zählt 0/1-Bytes → sum(row) ist die Zellenzahl.
+        walkable_count = 0
+        for lyr in self.layers:
+            for row in lyr.walkable:
+                walkable_count += sum(row)
         logger.info(
             "[PTH] NavGraph: %d Etagen, %d begehbare Zellen gesamt",
             len(self.layers), walkable_count,
