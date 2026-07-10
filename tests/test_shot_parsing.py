@@ -247,3 +247,74 @@ def test_gm_own_shot_no_kill(bot):
     bot._on_shot_begin(MsgShotBegin, payload)
     bot.client.send.assert_not_called()
     assert bot.alive is True
+
+
+# ── Client-treue *AdLife-Nachjustierung der Fremdschuss-Lifetime ──────────────
+
+@pytest.mark.parametrize("flag,attr", [
+    (b"SW",     "_shock_ad_life"),
+    (b"GM",     "_gm_ad_life"),
+    (b"MG",     "_mgun_ad_life"),
+    (b"F\x00",  "_rfire_ad_life"),
+])
+def test_incoming_shot_lifetime_applies_adlife(bot, flag, attr):
+    """Wie der echte BZFlag-Client justiert der Bot die Server-Lifetime pro Flagge
+    mit *<flag>AdLife nach (SW/GM/L/MG/F/TH). Basis-Lifetime aus dem Paket = 3,5s."""
+    from bzflag.protocol import MsgShotBegin
+    bot.player_id = 1
+    bot.pos   = [500.0, 0.0, 0.0]   # weit weg → kein Sofort-Treffer/Punktblank
+    bot.alive = True
+    payload = _build_shot_packet(
+        shooter_id=2, shot_id=3,
+        pos=(0.0, 0.0, 1.025), vel=(50.0, 0.0, 0.0),
+        flag_type=flag, lifetime=3.5,
+    )
+    bot._on_shot_begin(MsgShotBegin, payload)
+    with bot._shots_lock:
+        s = bot._shots[(2, 3)]
+    assert s.lifetime == pytest.approx(3.5 * getattr(bot, attr))
+
+
+def test_incoming_normal_shot_lifetime_unchanged(bot):
+    """Normale Kugel (kein Flag) behält die rohe Server-Lifetime — der Client
+    justiert dort ebenfalls nichts nach."""
+    from bzflag.protocol import MsgShotBegin
+    bot.player_id = 1
+    bot.pos   = [500.0, 0.0, 0.0]
+    payload = _build_shot_packet(shooter_id=2, shot_id=4,
+                                 flag_type=b"\x00\x00", lifetime=3.5)
+    bot._on_shot_begin(MsgShotBegin, payload)
+    with bot._shots_lock:
+        s = bot._shots[(2, 4)]
+    assert s.lifetime == pytest.approx(3.5)
+
+
+def test_sw_no_phantom_kill_after_wave_passed(bot):
+    """Regression: Eine längst vorbeigezogene Schockwelle darf den Bot nicht mehr
+    töten. Nach dem Fix lebt die SW nur base*_shock_ad_life (~0,7s) statt 3,5s,
+    also verfällt der Shot, bevor der Bot den Ring (6u–60u) erreicht."""
+    from bzflag.protocol import MsgShotBegin
+    bot.player_id = 1
+    bot.pos   = [200.0, 0.0, 0.0]   # beim Abschuss weit weg → kein Punktblank
+    bot.alive = True
+    payload = _build_shot_packet(
+        shooter_id=2, shot_id=7,
+        pos=(0.0, 0.0, 1.025), vel=(0.0, 0.0, 0.0),
+        flag_type=b"SW", lifetime=3.5,
+    )
+    bot._on_shot_begin(MsgShotBegin, payload)
+    with bot._shots_lock:
+        s = bot._shots[(2, 7)]
+    # SW-Lifetime = reload*shockAdLife, NICHT die generische 3,5s
+    assert s.lifetime == pytest.approx(3.5 * bot._shock_ad_life)
+    assert s.lifetime < 3.5
+
+    # Welle ist visuell längst vorbei: Shot künstlich altern, Bot fährt in den Ring
+    s.fire_time = time.monotonic() - (s.lifetime + 1.5)
+    bot.pos = [30.0, 0.0, 0.0]      # dist=30u liegt zwischen in(6) und out(60)
+    bot.client.send.reset_mock()
+    bot._resolve_incoming_shots(time.monotonic(), 0.02)
+    assert bot.alive is True
+    bot.client.send.assert_not_called()
+    with bot._shots_lock:
+        assert (2, 7) not in bot._shots   # abgelaufener Shot wurde entfernt

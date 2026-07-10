@@ -513,6 +513,26 @@ class HandlersMixin(BZBotBase):
         if self.player_id == new_rabbit:
             logger.info("[%s] Bot ist jetzt der Rabbit", self.callsign)
 
+    def _incoming_shot_lifetime(self, flag_abbr: bytes, base: float) -> float:
+        """Client-treue Lebensdauer eines Fremdschusses.
+
+        Der echte BZFlag-Client übernimmt die Server-Lifetime nicht 1:1, sondern
+        justiert sie pro Flagge im Strategy-Konstruktor mit `f.lifetime *= <flag>AdLife`
+        nach (ShockWave/GuidedMissle/SegmentedShot). Wir spiegeln genau diese sechs
+        Flaggen; alle Multiplikatoren folgen Server-Vars (MsgSetVar). Parallel zu
+        `_effective_shot_lifetime` (eigene Flagge), aber gekeyed auf `flag_abbr`-Bytes.
+
+        Wirkung SW: base(=reloadTime)·_shock_ad_life == _reload_time·_shock_ad_life
+        (siehe _recompute_sw_expand_speed) → der Shot verfällt exakt dann, wenn die
+        expandierende Front _shock_out_radius erreicht (BZFlags setExpired()); kein
+        Phantom-Kill-Ring nach dem sichtbaren Wellenende mehr.
+        """
+        if flag_abbr == b"SW":   return base * self._shock_ad_life
+        if flag_abbr == b"GM":   return base * self._gm_ad_life
+        if flag_abbr == b"MG":   return base * self._mgun_ad_life
+        if flag_abbr == b"F\x00": return base * self._rfire_ad_life
+        return base
+
     def _on_shot_begin(self, code: int, payload: bytes) -> None:
         """Registriert neuen Schuss; Sofort-Check für Laser und SW."""
         if len(payload) < 43: return
@@ -526,10 +546,11 @@ class HandlersMixin(BZBotBase):
         team       = unpack_int16(  payload, off); off += 2
         flag_type  = payload[off:off+2];           off += 2
         lifetime   = unpack_float(  payload, off)
+        base_life  = lifetime if lifetime > 0 else self._shot_lifetime
         shot = Shot(shooter_id=shooter, shot_id=shot_id,
                     pos=[px, py, pz], vel=[vx, vy, vz],
                     fire_time=time.monotonic(),
-                    lifetime=lifetime if lifetime > 0 else self._shot_lifetime,
+                    lifetime=self._incoming_shot_lifetime(flag_type, base_life),
                     team=team,
                     is_gm=(flag_type == b"GM"),
                     is_laser=(flag_type == b"L\x00"),
