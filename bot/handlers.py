@@ -145,6 +145,16 @@ class HandlersMixin(BZBotBase):
         callsign = unpack_string(payload, off, CallSignLen)
         logger.debug("MsgAddPlayer: id=%d type=%d team=%d callsign=%r",
                      pid, ptype, team, callsign)
+        # Kann pid schon existieren (erneutes MsgAddPlayer derselben ID, z.B. Resync),
+        # muss der alte Eintrag zuerst raus — sonst zählen human_count/observer_count
+        # doppelt und driften dauerhaft auseinander (observer_count wird nirgends
+        # resynct). Analog zu _on_remove_player.
+        old = self.players.pop(pid, None)
+        if old is not None:
+            if old.team == TEAM_OBSERVER:
+                self.observer_count = max(0, self.observer_count - 1)
+            if old.is_human:
+                self.human_count = max(0, self.human_count - 1)
         is_bot = (ptype == PLAYER_TYPE_COMPUTER) or self._is_bot_callsign(callsign)
         is_obs = (team == TEAM_OBSERVER)
         self.players[pid] = PlayerInfo(
