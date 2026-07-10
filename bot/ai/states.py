@@ -253,10 +253,10 @@ class StateMachineMixin(BZBotBase):
             self._wings_jumps_used = 0
             self._last_jump_at = now
             self.ang_vel = 0.0
-            ret = getattr(self, "_nav_jump_return_state", AIState.SEEKING)
+            ret = self._nav_jump_return_state
             if ret in (AIState.NAV_JUMP, AIState.NAV_JUMP_ALIGN):
                 ret = self._ground_state()   # nie auf sich selbst zurück (Endlosfalle)
-            if abs(floor_z - getattr(self, "_nav_jump_target_z", floor_z)) > 1.5:
+            if abs(floor_z - self._nav_jump_target_z) > 1.5:
                 # Falsche Etage gelandet → Route verwerfen und neu planen
                 self._nav_path = []
                 self._nav_goal = None
@@ -268,14 +268,14 @@ class StateMachineMixin(BZBotBase):
 
     def _tick_nav_jump_align(self, dt: float, now: float) -> None:
         """Richtet Bot auf Sprungziel-Azimuth aus; wechselt dann zu NAV_JUMP."""
-        wp  = getattr(self, '_nav_jump_align_wp', None)
-        ret = getattr(self, '_nav_jump_align_return_state', AIState.SEEKING)
+        wp  = self._nav_jump_align_wp
+        ret = self._nav_jump_align_return_state
         if ret in (AIState.NAV_JUMP, AIState.NAV_JUMP_ALIGN):
             ret = self._ground_state()   # nie auf sich selbst zurück (Endlosfalle)
         if wp is None:
             self._transition_to(ret)
             return
-        if now - getattr(self, '_nav_jump_align_start', now) > 5.0:
+        if now - self._nav_jump_align_start > 5.0:
             wp_key = (round(wp[0]), round(wp[1]), wp[2])
             self._nav_jump_cooldowns[wp_key] = now + 30.0
             self._nav_jump_cooldowns = {k: v for k, v in self._nav_jump_cooldowns.items() if v > now}
@@ -296,19 +296,19 @@ class StateMachineMixin(BZBotBase):
         _check_teleport_crossing (im _update_movement-Wrapper, nach diesem Tick) quert — oder
         bis Timeout/Revert. Ersetzt das Anfahren des mittenseitigen Austritts-WP, an dem der Bot
         sonst (Reichweite erreicht) davor stehen blieb."""
-        ret = getattr(self, "_nav_tele_return_state", None) or self._ground_state()
+        ret = self._nav_tele_return_state or self._ground_state()
         if ret in (AIState.NAV_TELE, AIState.NAV_JUMP, AIState.NAV_JUMP_ALIGN):
             ret = self._ground_state()
-        center = getattr(self, "_nav_tele_center", None)
+        center = self._nav_tele_center
         # Erfolg: der Wrapper-Crossing-Check hat im vorherigen Tick gewarpt (→ _teleporting_until).
-        if now < getattr(self, "_teleporting_until", 0.0):
+        if now < self._teleporting_until:
             logger.info("[%s] NAV_TELE: Querung erfolgreich → %s", self.callsign, ret.name)
             self._nav_tele_center = None
             self._transition_to(ret)
             return
         # Abbruch: Timeout deckt auch den Revert ab (bei _is_inside_obstacle setzt der Crossing-
         # Check _teleporting_until NICHT → kein Erfolg → nach ≤NAV_TELE_TIMEOUT Abbruch).
-        if center is None or now - getattr(self, "_nav_tele_start", now) > NAV_TELE_TIMEOUT:
+        if center is None or now - self._nav_tele_start > NAV_TELE_TIMEOUT:
             if center is not None:
                 self._nav_tele_cooldowns[(round(center[0]), round(center[1]))] = now + NAV_TELE_COOLDOWN
             logger.info("[%s] NAV_TELE: Abbruch (Timeout/blockiert) → Cooldown + Replan", self.callsign)
@@ -330,9 +330,9 @@ class StateMachineMixin(BZBotBase):
         self.vel[0] = math.cos(self.azimuth) * speed
         self.vel[1] = math.sin(self.azimuth) * speed
         self._apply_bounds(dt, self.world_half)
-        if getattr(self, "_debug_log_tele", False):
+        if self._debug_log_tele:
             _t = time.monotonic()
-            if _t - getattr(self, "_debug_nav_tele_t", 0.0) > 0.25:
+            if _t - self._debug_nav_tele_t > 0.25:
                 self._debug_nav_tele_t = _t
                 logger.debug(
                     "[%s] NAV_TELE: pos=(%.1f,%.1f,%.1f) →Mitte(%.1f,%.1f) dist=%.1fu "
@@ -416,7 +416,7 @@ class StateMachineMixin(BZBotBase):
                 t_impact = incoming.time_to_closest(self.pos[0], self.pos[1])
                 if t_impact < 0.1 and self.client.udp_active and self.player_id is not None:
                     self._send_shot(now, self.azimuth)
-                    if getattr(self, '_debug_log_shot', False):
+                    if self._debug_log_shot:
                         logger.debug("[%s] Schuss: Notschuss während Wind-Up (t=%.2fs)",
                                      self.callsign, t_impact)
 
@@ -443,7 +443,7 @@ class StateMachineMixin(BZBotBase):
                     self._evade_cleared_shots[self._last_threat_id] = now + EVADE_CLEAR_GRACE
                 self._last_threat_id = None
 
-                if getattr(self, '_debug_log_dodge', False):
+                if self._debug_log_dodge:
                     logger.debug("[%s] Ausweichen: Bedrohung vorbei – frühzeitiger EVADING-Exit", self.callsign)
                 if self.target_player is not None and self._has_presence():
                     self._transition_to(AIState.COMBAT)
@@ -513,7 +513,7 @@ class StateMachineMixin(BZBotBase):
                     if abs(_angle_diff(_target_az, self.azimuth)) <= math.radians(25):
                         self._send_shot(now, self.azimuth)
                         self._set_next_shoot_after_fire(now)
-                        if getattr(self, '_debug_log_shot', False):
+                        if self._debug_log_shot:
                             logger.debug("[%s] Schuss: LANDING_SHOT Nachschuss (Doppelklick)",
                                          self.callsign)
                 self._landing_second_shot_at = None
@@ -551,7 +551,7 @@ class StateMachineMixin(BZBotBase):
                                 and now >= self._next_shoot and self._next_slot_ready(now)):
                             self._send_shot(now, self.azimuth)
                             self._set_next_shoot_after_fire(now)
-                            if getattr(self, '_debug_log_shot', False):
+                            if self._debug_log_shot:
                                 logger.debug("[%s] Schuss: LANDING_SHOT (t_rem=%.2fs tof=%.2fs)",
                                              self.callsign, _t_rem, _tof)
                             # Doppelklick-Nachschuss nur einplanen, wenn bis dahin auch ein Slot

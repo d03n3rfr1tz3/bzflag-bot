@@ -121,7 +121,7 @@ class CombatMixin(BZBotBase):
         elif (not self._jumping and self._is_landed()
               and self.own_flag not in ("NJ", "BU")
               and (self._server_jumping or self.own_flag in ("WG", "BY", "JP"))
-              and not getattr(self, '_debug_no_jump', False)):
+              and not self._debug_no_jump):
             # Fix EV2: Per-Schuss-Grace — Schuss der beim Early-Exit als ungefährlich
             # eingestuft wurde für 1 s ignorieren (verhindert sofortigen DODGE_JUMP).
             if self._evade_cleared_shots.get(threat_key, 0.0) > now:
@@ -142,15 +142,15 @@ class CombatMixin(BZBotBase):
                         self._jump_ang_vel = math.copysign(
                             min(abs(needed / max(jump_time, 0.001)) * 0.5,
                                 self._tank_turn_rate * 0.5), needed)
-                        if getattr(self, '_debug_log_dodge', False):
+                        if self._debug_log_dodge:
                             logger.debug("[%s] Ausweichen: Dodge-Sprung mit Korrektur (%.0f°)",
                                          self.callsign, math.degrees(needed))
-            if getattr(self, '_debug_log_dodge', False):
+            if self._debug_log_dodge:
                 logger.debug("[%s] Ausweichen: Dodge-Sprung statt Ausweichen (Zeit zu knapp)", self.callsign)
             self.ang_vel = self._jump_ang_vel  # analog zu _initiate_nav_jump
             self._transition_to(AIState.DODGE_JUMP)
         else:
-            if getattr(self, '_debug_log_shot', False):
+            if self._debug_log_shot:
                 logger.debug("[%s] Schuss: Notschuss – jumping=%s z=%.1f landed=%s flag=%s t_imp=%.3f",
                              self.callsign, self._jumping, self.pos[2], self._is_landed(),
                              self.own_flag, time_to_impact)
@@ -161,7 +161,7 @@ class CombatMixin(BZBotBase):
                 self._last_notschuss_threat = threat_key
                 self._send_shot(now, self.azimuth)
                 self._set_next_shoot_after_fire(now)
-                if getattr(self, '_debug_log_shot', False):
+                if self._debug_log_shot:
                     logger.debug("[%s] Schuss: Notschuss abgefeuert", self.callsign)
         return True
 
@@ -206,8 +206,8 @@ class CombatMixin(BZBotBase):
         else:
             aim_x, aim_y = ep
         # Pfad zum Gegner planen/aktualisieren wenn nötig
-        nav_goal   = getattr(self, "_nav_goal",   None)
-        nav_goal_z = getattr(self, "_nav_goal_z", 0.0)
+        nav_goal   = self._nav_goal
+        nav_goal_z = self._nav_goal_z
         enemy_z    = info.pos[2] if info is not None else 0.0
         # Gegner per Sprung unerreichbar (zu hoch)? → ggf. Eskalations-Zyklus (s.u.)
         _max_jump_h = self._effective_jump_height()
@@ -258,7 +258,7 @@ class CombatMixin(BZBotBase):
         if _skip_nav:
             self._nav_path = []     # Direktmodus: keine Wegpunkte fahren
             self._nav_goal = None   # erzwingt frischen Replan beim Verlassen des Direktmodus
-        nav_path = getattr(self, "_nav_path", [])
+        nav_path = self._nav_path
         if nav_path and not _skip_nav:
             self._navigate_wp(dt, half, reverse=self._should_reverse_to_wp())
             return
@@ -267,7 +267,7 @@ class CombatMixin(BZBotBase):
         if _too_high and not nav_path and not _hold_indirect:   # während Halt nicht eskalieren
             if self._combat_escalate(dt, half, ep, aim_x, aim_y, enemy_z):
                 return                                       # Reposition wird abgefahren
-            nav_path = getattr(self, "_nav_path", [])        # Replan evtl. erfolgreich
+            nav_path = self._nav_path        # Replan evtl. erfolgreich
             if nav_path:
                 self._navigate_wp(dt, half, reverse=self._should_reverse_to_wp())
                 return
@@ -295,7 +295,7 @@ class CombatMixin(BZBotBase):
         self._turn_toward(target_az, dt)
         if dist < _opt - COMBAT_DIST_DEADZONE:
             speed = -self._tank_speed * 0.5
-            _nav = getattr(self, "_nav_graph", None)
+            _nav = self._nav_graph
             if _nav is not None and self._get_floor_z() > 0.5:
                 _nx = self.pos[0] + math.cos(self.azimuth) * speed * dt
                 _ny = self.pos[1] + math.sin(self.azimuth) * speed * dt
@@ -308,7 +308,7 @@ class CombatMixin(BZBotBase):
         else:
             speed = 0.0   # Deadzone um die Optimaldistanz: kein Zittern bei minimalen Distanzänderungen
         if speed > 0 and abs(self.ang_vel) > self._tank_turn_rate * 0.5:
-            _nav = getattr(self, "_nav_graph", None)
+            _nav = self._nav_graph
             if _nav is not None and self._get_floor_z() > 0.5:
                 _nx = self.pos[0] + math.cos(self.azimuth) * speed * dt
                 _ny = self.pos[1] + math.sin(self.azimuth) * speed * dt
@@ -318,9 +318,9 @@ class CombatMixin(BZBotBase):
         self.vel[0] = math.cos(self.azimuth) * speed
         self.vel[1] = math.sin(self.azimuth) * speed
         self._apply_bounds(dt, half)
-        if getattr(self, '_debug_log_path', False) and self._is_inside_obstacle():
+        if self._debug_log_path and self._is_inside_obstacle():
             _t = time.monotonic()
-            if _t - getattr(self, '_debug_obstacle_logged', 0.0) > 1.0:
+            if _t - self._debug_obstacle_logged > 1.0:
                 self._debug_obstacle_logged = _t
                 logger.debug("[%s] Pfad: Kollision bei (%.0f,%.0f) Ziel:%s",
                              self.callsign, self.pos[0], self.pos[1], self.target_pos)
@@ -368,7 +368,7 @@ class CombatMixin(BZBotBase):
                 self._unreach_replan_at = now + COMBAT_REPLAN_RETRY
                 self._plan_path(ep[0], ep[1], goal_z=enemy_z, cap_wps=8)
                 self._nav_goal_z = enemy_z
-                if getattr(self, "_nav_path", []):
+                if self._nav_path:
                     self._unreach_target = None      # Pfad gefunden → raus
                     return False
             if now < self._unreach_until:
@@ -390,7 +390,7 @@ class CombatMixin(BZBotBase):
             # Reposition erreicht / Timeout → erneut zum Gegner
             self._plan_path(ep[0], ep[1], goal_z=enemy_z, cap_wps=8)
             self._nav_goal_z = enemy_z
-            if getattr(self, "_nav_path", []):
+            if self._nav_path:
                 self._unreach_target = None
                 return False
             self._unreach_phase = 0                   # immer noch nichts → Zyklus neu
@@ -457,7 +457,7 @@ class CombatMixin(BZBotBase):
         rx = max(-_m, min(_m, self.pos[0] + math.cos(ang) * r))
         ry = max(-_m, min(_m, self.pos[1] + math.sin(ang) * r))
         self._plan_path(rx, ry, cap_wps=COMBAT_STALL_WP_MAX)
-        if not getattr(self, "_nav_path", []):
+        if not self._nav_path:
             return False                          # kein Pfad → Fallback auf REV (s. _stall_fire)
         self._stall_mode = "PATH"
         self._stall_until = now + COMBAT_STALL_TIMEOUT
@@ -486,7 +486,7 @@ class CombatMixin(BZBotBase):
             self._apply_bounds(dt, half)
             return True
         # PATH-Modus
-        if not getattr(self, "_nav_path", []) or now >= self._stall_until:
+        if not self._nav_path or now >= self._stall_until:
             self._stall_end()
             return False
         self._navigate_wp(dt, half)
@@ -515,6 +515,6 @@ class CombatMixin(BZBotBase):
         dodge_duration = max(0.15, min(time_to_impact * 1.5, 0.8))
         self._dodge_until = now + dodge_duration
         self._dodging = True
-        if getattr(self, '_debug_log_dodge', False):
+        if self._debug_log_dodge:
             logger.debug("[%s] Ausweichen: Vor Shot [%d/%d] für %.2fs",
                          self.callsign, threat.shooter_id, threat.shot_id, dodge_duration)

@@ -67,14 +67,14 @@ class CapabilityMixin(BZBotBase):
 
     def _can_shoot(self) -> bool:
         """Basis-Voraussetzungen für Schuss: Netzwerk aktiv, eingeloggt, Debug-Flag."""
-        if getattr(self, '_debug_no_shoot', False): return False
+        if self._debug_no_shoot: return False
         if not self.client.udp_active:              return False
         if self.player_id is None:                  return False
         return True
 
     def _can_jump(self, now: float) -> bool:
         """Prüft alle Sprung-Voraussetzungen: physikalisch, Flagge, Cooldown, Debug-Flag."""
-        if getattr(self, '_debug_no_jump', False):   return False
+        if self._debug_no_jump:   return False
         if self._dodging:                             return False
         if self._jumping:
             if self.own_flag != "WG":                return False
@@ -217,5 +217,5 @@ class CapabilityMixin(BZBotBase):
 
     def _has_teleporters(self) -> bool:
         """True wenn die Karte Teleporter hat (→ indirekte Schüsse auch ohne Ricochet möglich)."""
-        wm = getattr(self, "_world_map", None)
+        wm = self._world_map
         return bool(wm and wm.teleporters)

@@ -253,6 +253,10 @@ class _StubNav:
     def __init__(self, los=None):
         self._los_obs = los or []
         self._tele_exit_wps = set()
+        self._tele_cross_centers = {}
+        self._los_grid = None
+        self._solid_grid = None
+        self._teleport_edges = {}
     def get_floor_z(self, x, y, z, overhang=0.0):
         return 0.0
 

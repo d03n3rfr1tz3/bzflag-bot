@@ -630,7 +630,7 @@ class HandlersMixin(BZBotBase):
                                 "Abpraller" if _rico else "Schuss", shooter)
                     self.client.send(MsgTransferFlag,
                                      struct.pack(">BB", self.player_id, shooter))
-                elif getattr(self, '_debug_log_shot', False):
+                elif self._debug_log_shot:
                     logger.debug("[%s] Schuss: TH-Treffer von %d – keine eigene Flagge vorhanden",
                                  self.callsign, shooter)
         if shot.is_sw and self.alive and self.player_id is not None:
@@ -756,7 +756,7 @@ class HandlersMixin(BZBotBase):
         flag_name = payload[16:16 + name_len].decode('ascii', errors='replace')
         abbr = FLAG_NAME_TO_ABBR.get(flag_name, "")
         if not abbr:
-            if getattr(self, '_debug_log_flag', False):
+            if self._debug_log_flag:
                 logger.debug("[%s] Flagge: MsgNearFlag – unbekannter Flagname %r", self.callsign, flag_name)
             return
         best_fi = None
@@ -768,7 +768,7 @@ class HandlersMixin(BZBotBase):
                 best_fi = fi
         if best_fi is None:
             return
-        if getattr(self, '_debug_log_flag', False):
+        if self._debug_log_flag:
             logger.debug("[%s] Flagge: MsgNearFlag – Flag %d bei (%.0f,%.0f) = %r (%s)",
                          self.callsign, best_fi.flag_id, x, y, abbr, flag_name)
         best_fi.abbr = abbr

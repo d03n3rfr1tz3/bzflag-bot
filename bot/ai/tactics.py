@@ -44,7 +44,7 @@ class TacticsMixin(BZBotBase):
         if self._escape_jump_ang_vel is not None:
             self._jump_ang_vel = self._escape_jump_ang_vel
             self._escape_jump_ang_vel = None
-            if getattr(self, '_debug_log_dodge', False):
+            if self._debug_log_dodge:
                 logger.debug("[%s] Ausweichen: Escape-Sprung ang_vel=%.2f az=%.1f°",
                              self.callsign, self._jump_ang_vel, math.degrees(self.azimuth))
         else:
@@ -54,7 +54,7 @@ class TacticsMixin(BZBotBase):
                     self.azimuth = math.atan2(
                         _ep2[1] - self.pos[1], _ep2[0] - self.pos[0])
             self._jump_ang_vel = self.ang_vel
-            if getattr(self, '_debug_log_dodge', False):
+            if self._debug_log_dodge:
                 logger.debug("[%s] Ausweichen: Frontal-Sprung ang_vel=%.2f az=%.1f°",
                              self.callsign, self._jump_ang_vel, math.degrees(self.azimuth))
         self.vel[0] = math.cos(self.azimuth) * self._tank_speed
@@ -69,7 +69,7 @@ class TacticsMixin(BZBotBase):
         if self.target_pos is not None:
             tx, ty = self.target_pos
             if math.hypot(tx - self.pos[0], ty - self.pos[1]) < self._wp_reach_radius():
-                nav_path = getattr(self, "_nav_path", [])
+                nav_path = self._nav_path
                 # NAV_JUMP-Landekontrolle: zu großer Z-Unterschied = Fehlschlag
                 if (nav_path
                         and nav_path[0][2] - self._get_floor_z() > 1.5
@@ -91,7 +91,7 @@ class TacticsMixin(BZBotBase):
         Vorwärtsfahren effizienter)."""
         if not self._can_move_backward():
             return False
-        nav_path = getattr(self, "_nav_path", [])
+        nav_path = self._nav_path
         if len(nav_path) < 2 or self.target_pos is None:
             return False
         # WP nach dem aktuellen Ziel ist ein Sprung-rauf (aktuelles Ziel = Anlauf-WP)?

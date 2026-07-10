@@ -622,7 +622,9 @@ def test_advance_path_drives_through_teleport_exit_not_jump(bot):
     from bot.models import AIState
 
     class _StubNav:
-        def __init__(self, exits): self._tele_exit_wps = exits
+        def __init__(self, exits):
+            self._tele_exit_wps = exits
+            self._tele_cross_centers = {}
         def get_floor_z(self, x, y, z, overhang=0.0): return 0.0
 
     exit_wp = (50.0, 0.0, 30.0)

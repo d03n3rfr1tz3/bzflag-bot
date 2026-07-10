@@ -109,7 +109,7 @@ class ShootingMixin(BZBotBase):
                         # Landet der Gegner deutlich höher, ist er unerreichbar (kein LANDING_SHOT);
                         # landet er tiefer, wird der Schuss auf den Moment getimt, in dem der Gegner
                         # durch die Mündungshöhe fällt (Interzeption beim Fallen, t_aim < t_land).
-                        nav = getattr(self, "_nav_graph", None)
+                        nav = self._nav_graph
                         landing_z = (0.0 if nav is None
                                      else nav.get_floor_z(aim_x, aim_y, info.pos[2]))
                         z_ref = self.pos[2] + self._muzzle_height
@@ -244,7 +244,7 @@ class ShootingMixin(BZBotBase):
         enemy = self.players.get(target_pid)
         if not enemy or not enemy.alive:
             return None
-        wmap = getattr(self, "_world_map", None)
+        wmap = self._world_map
         if wmap is None:
             return None
 
@@ -277,7 +277,7 @@ class ShootingMixin(BZBotBase):
         bot_z    = bz + self._muzzle_height                        # Flachschuss-Höhe am Eintritt
         ez0, ez1 = enemy.pos[2], enemy.pos[2] + self._tank_height  # Gegner-Vertikalspanne
         teles    = wmap.teleporters or []
-        lmap     = getattr(self, "_link_map", None) or {}
+        lmap     = self._link_map or {}
         for ti, t in enumerate(teles):
             if not (t.bottom_z <= bot_z <= t.bottom_z + t.height - t.border):
                 continue                                           # (1) Eingang nicht auf Bot-Höhe
@@ -327,10 +327,10 @@ class ShootingMixin(BZBotBase):
                 max_bounces=3,
                 wall_height=self._wall_height,
                 teleporters=wmap.teleporters,
-                link_map=getattr(self, "_link_map", None),
+                link_map=self._link_map,
                 tele_log=_tl,
                 solid_obs=wmap.solid_obstacles(),
-                obs_grid=getattr(self, "_shot_grid", None),
+                obs_grid=self._shot_grid,
             )
             if len(segs) <= 1:
                 return None
@@ -442,7 +442,7 @@ class ShootingMixin(BZBotBase):
                 if _rico_az is not None:
                     aim_angle = _rico_az
                     _indirect = True
-                    if getattr(self, '_debug_log_shot', False):
+                    if self._debug_log_shot:
                         logger.debug("[%s] Schuss: Indirekt-Laser (Ricochet/Teleporter) az=%.1f°",
                                      self.callsign, math.degrees(aim_angle))
                 else:
@@ -471,7 +471,7 @@ class ShootingMixin(BZBotBase):
                 if _rico_az is not None:
                     aim_angle = _rico_az
                     _indirect = True
-                    if getattr(self, '_debug_log_shot', False):
+                    if self._debug_log_shot:
                         logger.debug("[%s] Schuss: Indirekt-TH (Ricochet/Teleporter) az=%.1f°",
                                      self.callsign, math.degrees(aim_angle))
                 else:
@@ -551,7 +551,7 @@ class ShootingMixin(BZBotBase):
             if _rico_az is not None:
                 aim_angle = _rico_az
                 _indirect = True
-                if getattr(self, '_debug_log_shot', False):
+                if self._debug_log_shot:
                     logger.debug("[%s] Schuss: Indirekt-Standard (Ricochet/Teleporter) az=%.1f°",
                                  self.callsign, math.degrees(aim_angle))
             elif _no_los:
@@ -661,7 +661,7 @@ class ShootingMixin(BZBotBase):
         muzzle_x = self.pos[0] + math.cos(az) * self._muzzle_front
         muzzle_y = self.pos[1] + math.sin(az) * self._muzzle_front
         muzzle_z = self.pos[2] + self._muzzle_height
-        if getattr(self, '_debug_log_shot', False):
+        if self._debug_log_shot:
             logger.debug("[%s] Schuss: Abgefeuert – muzzle=(%.3f,%.3f,%.3f) vel=(%.2f,%.2f) flag=%s",
                          self.callsign, muzzle_x, muzzle_y, muzzle_z, vx, vy, self.own_flag or "–")
 

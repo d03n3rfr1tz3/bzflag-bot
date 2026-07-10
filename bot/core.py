@@ -297,6 +297,10 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._nav_goal = None          # Optional[Tuple[float, float]] — aktuelles Ziel
         self._nav_jump_return_state = None   # AIState nach NAV_JUMP-Landung
         self._nav_jump_target_z = 0.0  # Erwartet-Landeebene für NAV_JUMP-Fehlschlagerkennung
+        self._nav_goal_z = 0.0                # Ziel-Höhe für COMBAT-Direktanflug (Z-Attack)
+        self._nav_jump_align_wp = None        # WP, auf das NAV_JUMP_ALIGN ausrichtet
+        self._nav_jump_align_start = 0.0      # Engage-Zeit (monotonic) für Ausricht-Timeout
+        self._nav_jump_align_return_state = None  # AIState nach Ausrichtung
         self._nav_jump_cooldowns = {}  # (round_x, round_y, z) → expiry_time (NAV-14)
         # NAV_TELE: direkter Endanflug in die Teleporter-Mitte (P3-NAV-02)
         self._nav_tele_cooldowns = {}  # (round_cx, round_cy) → expiry_time
@@ -369,6 +373,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._debug_log_dodge = debug_log_dodge
         self._debug_log_flag  = debug_log_flag
         self._debug_log_tele  = debug_log_tele
+        self._debug_wp_near_t = 0.0        # Drossel für WP-Näherungs-Log
+        self._debug_obstacle_logged = 0.0  # Drossel für Obstacle-Inside-Log
+        self._debug_nav_tele_t = 0.0       # Drossel für NAV_TELE-Log
 
     def _init_flags(self, good_flags, bad_flags, limited_flags, debug_target_flag):
         """Flag-Strategie + Flag-Tracking."""
@@ -704,7 +711,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         """Reicht die globalen Server-Variablen _jumpVelocity/_gravity in den (ggf. schon gebauten)
         NavGraph durch — für MsgSetVar, die erst nach dem Weltladen eintreffen. No-Op wenn noch kein
         Graph existiert (dann greift der Build-Aufruf) oder Werte unverändert."""
-        nav = getattr(self, "_nav_graph", None)
+        nav = self._nav_graph
         if nav is not None:
             nav.set_physics(self._jump_velocity, abs(self._gravity))
 
@@ -760,7 +767,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._last_drop_attempt = time.monotonic()
         self._last_grab_attempt = time.monotonic()  # 0.5s Grab-Cooldown nach Drop
         self.client.send(MsgDropFlag, struct.pack(">fff", *self.pos))
-        if getattr(self, '_debug_log_flag', False):
+        if self._debug_log_flag:
             logger.debug("[%s] Flagge: MsgDropFlag gesendet (Flag=%r)", self.callsign, self.own_flag)
 
     def _send_gm_update(self, now: float) -> None:

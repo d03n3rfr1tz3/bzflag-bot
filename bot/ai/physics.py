@@ -70,13 +70,13 @@ class PhysicsMixin(BZBotBase):
         # P4a: Per-Tick-Memo (3–5 identische Aufrufe pro 60-Hz-Tick). Der Key
         # enthält Position+Flagge → Aufrufe NACH einer pos-Mutation im selben
         # Tick treffen einen neuen Key; Ergebnis bleibt verhaltensidentisch.
-        memo = getattr(self, "_tick_memo", None)
+        memo = self._tick_memo
         key = ("floor", self.pos[0], self.pos[1], self.pos[2], self.own_flag)
         if memo is not None:
             cached = memo.get(key)
             if cached is not None:
                 return cached
-        nav = getattr(self, "_nav_graph", None)
+        nav = self._nav_graph
         floor = 0.0 if nav is None else nav.get_floor_z(
             self.pos[0], self.pos[1], self.pos[2], overhang=self._effective_half_width())
         if self.own_flag == "BU" and floor <= 0.0:
@@ -89,7 +89,7 @@ class PhysicsMixin(BZBotBase):
         """True wenn Bot physisch innerhalb eines Gebäudes steht (echte Geometrie, kein A*-Margin)."""
         if self._can_drive_through_obstacles() and not include_oo:
             return False
-        world_map = getattr(self, '_world_map', None)
+        world_map = self._world_map
         if world_map is None:
             return False
         px, py, pz = self.pos[0], self.pos[1], self.pos[2]
@@ -130,12 +130,13 @@ class PhysicsMixin(BZBotBase):
         _is_inside_obstacle) — läuft nur bei OO und mit 30-Hz-Sende-Kadenz.
         Approximation: True bei jedem Overlap (Straddle wie vollständig-innen); der
         Client-`isCrossing` nur beim Straddeln. Für den Effekt praktisch identisch."""
-        world_map = getattr(self, '_world_map', None)
+        world_map = self._world_map
         if world_map is None:
             return False
         px, py, pz = self.pos[0], self.pos[1], self.pos[2]
-        _solid = world_map.boxes + getattr(self, '_tele_solid_boxes', [])
-        _grid = getattr(getattr(self, '_nav_graph', None), '_solid_grid', None)
+        _solid = world_map.boxes + self._tele_solid_boxes
+        _nav = self._nav_graph
+        _grid = _nav._solid_grid if _nav is not None else None
         cands = _grid.query_point(px, py) if _grid is not None else _solid
         tank_top = pz + self._tank_height
         half_len = self._tank_length / 2.0
@@ -157,7 +158,7 @@ class PhysicsMixin(BZBotBase):
         Für JEDE Flagge (wie der Client). Port von Teleporter::isCrossing: OBB gegen das
         Querungsfeld (getWidth × getBreadth-border) plus z-Gate. Linear über die wenigen
         Teleporter der Karte, Early-Out ohne Teleporter."""
-        world_map = getattr(self, '_world_map', None)
+        world_map = self._world_map
         if world_map is None or not world_map.teleporters:
             return False
         px, py, pz = self.pos[0], self.pos[1], self.pos[2]
@@ -176,7 +177,7 @@ class PhysicsMixin(BZBotBase):
         """Wall-Sliding + Decken-Kollision: korrigiert self.vel/pos bei Gebäude-Kollision (60 Hz)."""
         if self._can_drive_through_obstacles():
             return
-        world_map = getattr(self, '_world_map', None)
+        world_map = self._world_map
         if world_map is None:
             return
         pz = self.pos[2]
@@ -184,11 +185,12 @@ class PhysicsMixin(BZBotBase):
         vx, vy = self.vel[0], self.vel[1]
         # P3-NAV-02: Teleporter-Posts + Crossbar als solide Boxen mitprüfen (Decken-Kollision von
         # unten gegen den Crossbar, Wall-Slide an den Posts). Das Querungsfeld bleibt frei.
-        _solid = world_map.boxes + getattr(self, '_tele_solid_boxes', [])
+        _solid = world_map.boxes + self._tele_solid_boxes
         # Broad-Phase: bei vorhandenem NavGraph nur die Boxen der Bot-Zelle statt linear über alle.
         # nav._obs = non-drive_through world_map.boxes + dieselben Teleporter-Solidboxen → deckungs-
         # gleicher Kandidatensatz wie _solid nach dem drive_through-Skip. Ohne nav: linearer Fallback.
-        _grid = getattr(getattr(self, '_nav_graph', None), '_solid_grid', None)
+        _nav = self._nav_graph
+        _grid = _nav._solid_grid if _nav is not None else None
         # ── Decken-Kollision: Bot-Kopf stößt von unten an Plattform-Boden ──────
         bot_top = pz + self._tank_height
         ceil_cands = _grid.query_point(px, py) if _grid is not None else _solid

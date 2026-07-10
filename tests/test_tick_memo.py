@@ -4,8 +4,11 @@ P4a: Per-Tick-Memo für _get_floor_z / _muzzle_clear / _has_los_to_enemy.
 Der Memo ist ein reiner Funktions-Memo: alle Eingaben (Position, Flagge,
 Azimut, Gegnerposition) stecken im Key. Geprüft wird, dass
 (a) der Memo tatsächlich benutzt wird (präparierter Cache-Eintrag gewinnt),
-(b) geänderte Eingaben einen neuen Key treffen (kein staler Treffer),
-(c) die Methoden ohne _tick_memo-Attribut funktionieren (Mixin-Robustheit).
+(b) geänderte Eingaben einen neuen Key treffen (kein staler Treffer).
+
+Track 5 (mypyc): _tick_memo ist über BZBotBase deklariert und wird in
+BZBot.__init__ (_init_shots) immer gesetzt — kein getattr-Fallback mehr,
+der native Attributzugriff setzt das Attribut voraus (s. DEVELOPER.md).
 """
 from conftest import make_player
 
@@ -47,13 +50,3 @@ def test_los_memo_key_includes_enemy_pos(bot):
     # … bewegt sich der Gegner, greift der Eintrag nicht mehr (neuer Key)
     info.pos[0] = 60.0
     assert bot._has_los_to_enemy(2) is True
-
-
-def test_methods_work_without_memo_attr(bot):
-    """BZBotAI ist ein Mixin — die Methoden dürfen nicht am fehlenden
-    Attribut sterben (getattr-Fallback, Memo dann einfach aus)."""
-    del bot._tick_memo
-    make_player(bot, 2, pos=(50.0, 0.0, 0.0))
-    assert bot._get_floor_z() == 0.0
-    assert bot._has_los_to_enemy(2) is True
-    assert bot._muzzle_clear(0.0) in (True, False)

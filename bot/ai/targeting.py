@@ -185,8 +185,8 @@ class TargetingMixin(BZBotBase):
         if self.own_flag == "":
             best_d: float = float("inf")
             best_pos: tuple[float, ...] | None = None
-            _dropped = getattr(self, '_dropped_neutrals', ())
-            _recent  = getattr(self, '_recent_flag_targets', ())
+            _dropped = self._dropped_neutrals
+            _recent  = self._recent_flag_targets
             for fi in list(self.flags.values()):
                 if fi.status != 1:
                     continue
@@ -203,7 +203,7 @@ class TargetingMixin(BZBotBase):
                 self._recent_flag_targets.append((round(best_pos[0]), round(best_pos[1])))
                 via = self._flags_on_route_all(best_pos[0], best_pos[1], detour=40.0)
                 if via:
-                    nav = getattr(self, "_nav_graph", None)
+                    nav = self._nav_graph
                     blocked = {k for k, v in self._nav_jump_cooldowns.items()
                                if v > time.monotonic()}
                     all_wps: list = []
@@ -240,7 +240,7 @@ class TargetingMixin(BZBotBase):
 
         # ── Fall B: Bot hat ID-Flagge ─────────────────────────────────────
         elif self.own_flag == "ID":
-            _recent = getattr(self, '_recent_flag_targets', ())
+            _recent = self._recent_flag_targets
             best_d_good: float = float("inf")
             best_pos_good = None
             for fi in list(self.flags.values()):
@@ -248,19 +248,19 @@ class TargetingMixin(BZBotBase):
                     continue
                 d = math.hypot(fi.pos[0] - self.pos[0], fi.pos[1] - self.pos[1])
                 if d < IDENTIFY_RANGE and fi.abbr in self.good_flags and d < best_d_good:
-                    if getattr(self, '_debug_log_flag', False):
+                    if self._debug_log_flag:
                         logger.debug("[%s] Flagge: ID-B1 – gute Flagge %r d=%.1fu (< %.0fu)",
                                      self.callsign, fi.abbr, d, IDENTIFY_RANGE)
                     best_d_good = d
                     best_pos_good = (fi.pos[0], fi.pos[1])
                 elif fi.abbr:
-                    if getattr(self, '_debug_log_flag', False):
+                    if self._debug_log_flag:
                         logger.debug("[%s] Flagge: ID-B1 – keine gute Flagge %r d=%.1fu",
                                      self.callsign, fi.abbr, d)
             if best_pos_good is not None:
                 d_to_good = math.hypot(best_pos_good[0] - self.pos[0],
                                        best_pos_good[1] - self.pos[1])
-                if getattr(self, '_debug_log_flag', False):
+                if self._debug_log_flag:
                     logger.debug("[%s] Flagge: ID-B1 – Drop-Kandidat (%.0f,%.0f) d=%.1fu cooldown=%.1fs",
                                  self.callsign, best_pos_good[0], best_pos_good[1], d_to_good,
                                  time.monotonic() - self._last_drop_attempt)
@@ -271,7 +271,7 @@ class TargetingMixin(BZBotBase):
                 # else: bereits am Ziel, warten bis Drop vom Server bestätigt wird
                 return
             # Keine gute Flag in Erkennungsradius → nächste unbekannte Flag ansteuern
-            if getattr(self, '_debug_log_flag', False):
+            if self._debug_log_flag:
                 logger.debug("[%s] Flagge: ID-B2 – kein Ziel in %.0fu, scanne %d Flaggen (%d recent)",
                              self.callsign, IDENTIFY_RANGE, len(self.flags), len(_recent))
             best_d = float("inf")
@@ -289,7 +289,7 @@ class TargetingMixin(BZBotBase):
                     best_d = d
                     best_pos = (fi.pos[0], fi.pos[1])
             if best_pos is not None:
-                if getattr(self, '_debug_log_flag', False):
+                if self._debug_log_flag:
                     logger.debug("[%s] Flagge: ID-B2 – Ziel (%.0f,%.0f) d=%.1fu",
                                  self.callsign, best_pos[0], best_pos[1], best_d)
                 self._recent_flag_targets.append((round(best_pos[0]), round(best_pos[1])))
@@ -328,5 +328,5 @@ class TargetingMixin(BZBotBase):
         """Sendet MsgGrabFlag."""
         if self.player_id is None: return
         self.client.send(MsgGrabFlag, struct.pack(">H", flag_id))
-        if getattr(self, '_debug_log_flag', False):
+        if self._debug_log_flag:
             logger.debug("[%s] Flagge: MsgGrabFlag gesendet (flag_id=%d)", self.callsign, flag_id)

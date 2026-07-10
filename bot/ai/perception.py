@@ -17,7 +17,6 @@ from bot.constants import (
     RADAR_COOLDOWN_DEFAULT,
     RADAR_COOLDOWN_CL,
     PLAYER_LOS_TTL_S,
-    RADAR_RANGE,
     TARGET_FOV,
 )
 from bot.util import _angle_diff
@@ -333,7 +332,7 @@ class PerceptionMixin(BZBotBase):
         ein Mensch sieht nie permanent die ganze Karte. Da der Bot über
         FoV+LoS bereits kartenweit schauen darf, wäre ein Voll-Radar
         Allwissenheit; das Halbe-Welt-Limit hält ihn fair. Nicht „fixen"!"""
-        base = getattr(self, "world_half", RADAR_RANGE)
+        base = self.world_half
         if self.own_flag == "BU" and self.pos[2] < 0.0:
             return base * 0.25
         return base
@@ -344,13 +343,12 @@ class PerceptionMixin(BZBotBase):
         (ox,oy,oz)→(ex,ey,ez) schneidet. Generischer Slab-Test mit frei wählbarem Ursprung —
         Basis für _has_los_to_point (Bot-Auge) und das GM-Aktivierungspunkt-Gate (beliebige Punkte).
         Teleporter zählen bewusst NICHT als Blocker (Schuss-/Kurven-Routing s. _has_los_to_enemy)."""
-        nav = getattr(self, "_nav_graph", None)
+        nav = self._nav_graph
         if nav is None:
             return True
         dx = ex - ox; dy = ey - oy; dz = ez - oz
         # Broad-Phase: nur Boxen entlang des Strahls (DDA) statt linear über alle _los_obs.
-        # Fallback (nav ohne _los_grid, z.B. Test-Stub) auf den linearen Scan.
-        _grid = getattr(nav, "_los_grid", None)
+        _grid = nav._los_grid
         _boxes = _grid.query_ray(ox, oy, ex, ey) if _grid is not None else nav._los_obs
         for box in _boxes:
             cos_a = box.cos_a; sin_a = box.sin_a
@@ -401,14 +399,14 @@ class PerceptionMixin(BZBotBase):
 
     def _steep_wall_ahead_raycast(self, az: float, max_dist: float) -> Optional[float]:
         """Unveränderte Raycast-Logik von _steep_wall_ahead, jetzt hinter dessen 0.1s-Cache."""
-        nav = getattr(self, "_nav_graph", None)
+        nav = self._nav_graph
         if nav is None or max_dist <= 0.0:
             return None
         ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + self._tank_height * 0.5
         dx = math.cos(az) * max_dist; dy = math.sin(az) * max_dist
         best_t = 2.0; best_axis = -1; best_box = None
-        # Broad-Phase: nur Boxen entlang des Strahls (DDA); Fallback auf linearen Scan ohne _los_grid.
-        _grid = getattr(nav, "_los_grid", None)
+        # Broad-Phase: nur Boxen entlang des Strahls (DDA).
+        _grid = nav._los_grid
         _boxes = _grid.query_ray(ox, oy, ox + dx, oy + dy) if _grid is not None else nav._los_obs
         for box in _boxes:
             cos_a = box.cos_a; sin_a = box.sin_a
@@ -466,7 +464,7 @@ class PerceptionMixin(BZBotBase):
         liegt eine dünne Wand zwischen Tank-Mitte und Mündung, würde bzfs den Schuss serverseitig
         'fressen' bzw. er ginge unfair durch die Wand → solche Schüsse unterdrücken (s. _maybe_shoot)."""
         # P4a: Per-Tick-Memo — wird pro Tick mit identischem az mehrfach geprüft.
-        memo = getattr(self, "_tick_memo", None)
+        memo = self._tick_memo
         key = ("muzzle", az, self.pos[0], self.pos[1], self.pos[2])
         if memo is not None:
             cached = memo.get(key)
@@ -491,7 +489,7 @@ class PerceptionMixin(BZBotBase):
         # (_execute_combat_move 2×, _maybe_shoot_standard 1×). Key enthält
         # beide Positionen → bewegt sich der Gegner mittendrin (Recv-Thread),
         # gibt es schlicht einen Miss statt eines stalen Treffers.
-        memo = getattr(self, "_tick_memo", None)
+        memo = self._tick_memo
         key = ("los", target_pid, self.pos[0], self.pos[1], self.pos[2], ex, ey, ez)
         if memo is not None:
             cached = memo.get(key)
@@ -503,11 +501,11 @@ class PerceptionMixin(BZBotBase):
         else:
             # Teleporter-Feld zwischen Bot und Ziel → ein Direktschuss würde wegteleportiert,
             # also kein sauberer Direktschuss (der indirekte Aim-Sweep übernimmt dann, s. A4).
-            wm = getattr(self, "_world_map", None)
+            wm = self._world_map
             if wm and wm.teleporters:
                 ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + self._tank_height * 0.5
                 dx = ex - ox; dy = ey - oy; dz = ez - oz
-                lmap = getattr(self, "_link_map", {})
+                lmap = self._link_map
                 for ti, tele in enumerate(wm.teleporters):
                     res = ray_teleporter_crossing(ox, oy, oz, dx, dy, dz, tele)
                     if res is None:
