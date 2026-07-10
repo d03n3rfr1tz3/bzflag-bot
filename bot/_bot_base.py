@@ -29,6 +29,7 @@ class BZBotBase:
     _async_plan_result: Any
     _async_plan_thread: Any
     _bounce_next: Any
+    _bounce_replan: Any
     _burrow_ang_ad: Any
     _burrow_depth: Any
     _burrow_speed_ad: Any

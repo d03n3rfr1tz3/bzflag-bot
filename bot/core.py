@@ -313,6 +313,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._wp_start_time = None  # Zeit seit aktuellem WP-Ziel
         self._wp_fail_count = 0                 # aufeinanderfolgende WP-Timeouts
         self._wp_timeout = 3.0                # per-WP Timeout (berechnet in bot/ai/navigation.py)
+        # B4: Rand-Bounce im 60-Hz-Physik-Pfad (_apply_bounds) setzt nur dieses Flag; der
+        # eigentliche Replan (A*) läuft gedrosselt im 10-Hz-KI-Tick (_dispatch_movement).
+        self._bounce_replan = False
 
     def _init_shots(self):
         """Shot-Tracking (Recv-Thread schreibt, Game-Loop liest)."""

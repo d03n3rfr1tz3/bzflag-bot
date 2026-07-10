@@ -1,6 +1,7 @@
 """State-Machine: Zustandsuebergaenge, 60-Hz-Dispatch und alle _tick_*-Zustaende ausser COMBAT (W4, FABLE-PLAN Teil 3)."""
 
 import math
+import random
 import time
 import logging
 
@@ -148,6 +149,16 @@ class StateMachineMixin(BZBotBase):
             # Fertige Async-Vollsuche (P4-INF-01) vor dem State-Tick übernehmen — nur in
             # navigierbaren Bodenstates (NAV_JUMP/NAV_TELE/FALLING returnen vorher).
             self._poll_async_plan()
+            # B4: Rand-Bounce-Replan aus dem 60-Hz-Physik-Pfad (_apply_bounds) hierher
+            # verlagert — kein synchroner A*-Lauf im Physik-Pfad, kein Ziel-Überschreiben
+            # in committed States (EVADING etc. laufen hier gar nicht erst ein).
+            if self._bounce_replan:
+                self._bounce_replan = False
+                # In COMBAT kein Zufalls-Ziel — der Combat-Tick replant ohnehin zum Gegner.
+                if self._ai_state in (AIState.SEEKING, AIState.IDLE):
+                    h = self.world_half
+                    self._plan_path(random.uniform(-h * 0.85, h * 0.85),
+                                    random.uniform(-h * 0.85, h * 0.85))
             if self._ai_state == AIState.IDLE:
                 self._tick_idle(now)
             elif self._ai_state == AIState.SEEKING:

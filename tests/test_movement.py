@@ -117,6 +117,54 @@ def test_bounce_flag_not_triggered_in_air(bot):
     assert bot.vel[2] != pytest.approx(19.0, abs=0.5)  # wurde nicht auf JUMP_VELOCITY gesetzt
 
 
+# ── Rand-Bounce-Replan (B4): deferred in den KI-Tick, kein A* im Physik-Pfad ──────
+
+def test_apply_bounds_sets_flag_instead_of_sync_replan(bot):
+    """_apply_bounds plant beim Rand-Abprall NICHT mehr synchron — nur das Flag wird gesetzt."""
+    bot._bounce_replan = False
+    bot.pos = [0.0, 0.0, 0.0]
+    half = 100.0
+    bot.vel = [half * 100.0, 0.0, 0.0]   # garantiert außerhalb der Grenze nach einem Tick
+    bot._apply_bounds(0.02, half)
+    assert bot._bounce_replan is True
+
+
+def test_bounce_replan_deferred_in_combat_keeps_nav_goal(bot, monkeypatch):
+    """B4: Rand-Bounce in COMBAT darf _nav_goal nicht überschreiben — der Combat-Tick
+    replant ohnehin zum Gegner, ein Zufallsziel würde ihn stören."""
+    from bot.models import AIState
+    monkeypatch.setattr(bot, "_tick_combat", lambda now: None)
+    monkeypatch.setattr(bot, "_execute_combat_move", lambda dt, half, now=0.0: None)
+    monkeypatch.setattr(bot, "_poll_async_plan", lambda: None)
+    plan_calls = []
+    monkeypatch.setattr(bot, "_plan_path", lambda *a, **kw: plan_calls.append((a, kw)))
+    bot._ai_state = AIState.COMBAT
+    bot._bounce_replan = True
+    bot._nav_goal = (123.0, 456.0)
+    now = time.monotonic()
+    bot._dispatch_movement(0.02, now, ai_tick=True)
+    assert bot._nav_goal == (123.0, 456.0)   # unangetastet
+    assert plan_calls == []                   # kein Zufalls-Replan in COMBAT
+    assert bot._bounce_replan is False         # Flag wurde trotzdem konsumiert
+
+
+def test_bounce_replan_in_seeking_plans_on_next_ai_tick(bot, monkeypatch):
+    """B4: Rand-Bounce in SEEKING löst beim nächsten KI-Tick einen Replan aus (deferred,
+    nicht mehr synchron im 60-Hz-Physik-Pfad)."""
+    from bot.models import AIState
+    monkeypatch.setattr(bot, "_tick_seeking", lambda now: None)
+    monkeypatch.setattr(bot, "_move_to_target", lambda dt, half: None)
+    monkeypatch.setattr(bot, "_poll_async_plan", lambda: None)
+    plan_calls = []
+    monkeypatch.setattr(bot, "_plan_path", lambda *a, **kw: plan_calls.append((a, kw)))
+    bot._ai_state = AIState.SEEKING
+    bot._bounce_replan = True
+    now = time.monotonic()
+    bot._dispatch_movement(0.02, now, ai_tick=True)
+    assert len(plan_calls) == 1   # neues Ziel geplant
+    assert bot._bounce_replan is False
+
+
 # ── Schwerkraft ───────────────────────────────────────────────────────────────
 
 def test_gravity_applied_when_airborne(bot):

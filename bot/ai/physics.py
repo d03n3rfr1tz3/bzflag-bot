@@ -276,9 +276,10 @@ class PhysicsMixin(BZBotBase):
             ny = max(-half + 1, min(half - 1, ny))
             bounced = True
         if bounced:
-            self._plan_path(
-                random.uniform(-half * 0.85, half * 0.85),
-                random.uniform(-half * 0.85, half * 0.85),
-            )
+            # B4: Replan in den 10-Hz-KI-Tick verlagert (states._dispatch_movement) statt hier
+            # synchron zu planen — _apply_bounds läuft im 60-Hz-Physik-Pfad aus JEDEM State
+            # (auch EVADING/committed; in COMBAT würde ein sofortiger A*-Lauf hier _nav_goal
+            # überschreiben). Nur noch ein Flag setzen, kein A*-Lauf im Physik-Pfad.
+            self._bounce_replan = True
         self.pos[0] = nx
         self.pos[1] = ny
