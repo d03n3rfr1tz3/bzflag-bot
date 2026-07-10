@@ -190,8 +190,11 @@ class PerceptionMixin(BZBotBase):
             for (pid, sid), segs in self._ricochet_paths.items():
                 if pid == self.player_id:
                     continue
-                shot = self._shots.get((pid, sid))
-                if shot is None or shot.is_expired(now):
+                # Track 5 (mypyc): eigener Name statt `shot` — _shots.get() liefert
+                # Optional[Shot], das `for shot in self._shots.values()` oben (nicht-optional)
+                # widerspräche einer Wiederverwendung derselben Variable.
+                rico_shot = self._shots.get((pid, sid))
+                if rico_shot is None or rico_shot.is_expired(now):
                     continue
                 if self.own_flag == "BU" and self.pos[2] < 0.0:
                     continue
@@ -228,7 +231,7 @@ class PerceptionMixin(BZBotBase):
                         t_threat = t_from - now
                     if d < DODGE_DIST and t_threat < best_t and t_threat < RICO_DODGE_LOOKAHEAD:
                         best_t = t_threat
-                        best = shot
+                        best = rico_shot
         return best, best_t
 
     def _any_incoming_threat(self, now: float, vels) -> bool:
@@ -282,8 +285,9 @@ class PerceptionMixin(BZBotBase):
             for (pid, sid), segs in self._ricochet_paths.items():
                 if pid == self.player_id:
                     continue
-                shot = self._shots.get((pid, sid))
-                if shot is None or shot.is_expired(now):
+                # Track 5 (mypyc): eigener Name statt `shot` (s. _find_incoming_shot).
+                rico_shot = self._shots.get((pid, sid))
+                if rico_shot is None or rico_shot.is_expired(now):
                     continue
                 if self.own_flag == "BU" and self.pos[2] < 0.0:
                     continue

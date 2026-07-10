@@ -160,7 +160,10 @@ class HitDetectionMixin(BZBotBase):
                                 if _p is not None:
                                     gm_tx = _p.pos[0]; gm_ty = _p.pos[1]
                                     gm_tz = _p.pos[2] + self._tank_height / 2
-                        if gm_tx is not None:
+                        # gm_tx/gm_ty/gm_tz werden immer gemeinsam gesetzt (Tupel oben) — alle
+                        # drei prüfen, damit mypy die Narrowing-Lücke schließt (Track 5 M2a:
+                        # players jetzt typisiert, _p.pos[i] kein Any mehr).
+                        if gm_tx is not None and gm_ty is not None and gm_tz is not None:
                             _dx = gm_tx - prev_x; _dy = gm_ty - prev_y; _dz = gm_tz - prev_z
                             _dist = math.sqrt(_dx*_dx + _dy*_dy + _dz*_dz)
                             if _dist > 1e-6:
