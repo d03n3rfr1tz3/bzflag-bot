@@ -215,27 +215,59 @@ def _segment_hits_obb_3d(ax: float, ay: float, az: float,
                          bx: float, by: float, bz: float,
                          cx: float, cy: float, cz: float, angle: float,
                          half_len: float, half_w: float, half_h: float) -> bool:
-    """Parametrische Slab-Methode: Segment [A,B] gegen OBB (Mittelpunkt cx,cy,cz, Winkel angle)."""
+    """Parametrische Slab-Methode: Segment [A,B] gegen OBB (Mittelpunkt cx,cy,cz, Winkel angle).
+
+    Track 5 (mypyc): Closure (to_local) und heterogene Tupel-Iteration aufgelöst — beides
+    verhindert unter mypyc native Compilierung/Unboxing und ist auch unter CPython teurer
+    als die drei ausgerollten Achsen-Blöcke. Verhalten bit-identisch zur Vorversion."""
     cos_a = math.cos(-angle); sin_a = math.sin(-angle)
-    def to_local(x: float, y: float, z: float):
-        dx, dy = x - cx, y - cy
-        return (dx*cos_a - dy*sin_a, dx*sin_a + dy*cos_a, z - cz)
-    alx, aly, alz = to_local(ax, ay, az)
-    blx, bly, blz = to_local(bx, by, bz)
+    adx, ady = ax - cx, ay - cy
+    alx = adx * cos_a - ady * sin_a
+    aly = adx * sin_a + ady * cos_a
+    alz = az - cz
+    bdx, bdy = bx - cx, by - cy
+    blx = bdx * cos_a - bdy * sin_a
+    bly = bdx * sin_a + bdy * cos_a
+    blz = bz - cz
+
     t_min, t_max = 0.0, 1.0
-    for a_c, b_c, half in ((alx, blx, half_len),
-                           (aly, bly, half_w),
-                           (alz, blz, half_h)):
-        d = b_c - a_c
-        if abs(d) < 1e-9:
-            if abs(a_c) > half:
-                return False
-        else:
-            t1 = (-half - a_c) / d;  t2 = (half - a_c) / d
-            if t1 > t2: t1, t2 = t2, t1
-            t_min = max(t_min, t1);  t_max = min(t_max, t2)
-            if t_min > t_max:
-                return False
+
+    # Achse x (Länge)
+    d = blx - alx
+    if abs(d) < 1e-9:
+        if abs(alx) > half_len:
+            return False
+    else:
+        t1 = (-half_len - alx) / d;  t2 = (half_len - alx) / d
+        if t1 > t2: t1, t2 = t2, t1
+        t_min = max(t_min, t1);  t_max = min(t_max, t2)
+        if t_min > t_max:
+            return False
+
+    # Achse y (Breite)
+    d = bly - aly
+    if abs(d) < 1e-9:
+        if abs(aly) > half_w:
+            return False
+    else:
+        t1 = (-half_w - aly) / d;  t2 = (half_w - aly) / d
+        if t1 > t2: t1, t2 = t2, t1
+        t_min = max(t_min, t1);  t_max = min(t_max, t2)
+        if t_min > t_max:
+            return False
+
+    # Achse z (Höhe)
+    d = blz - alz
+    if abs(d) < 1e-9:
+        if abs(alz) > half_h:
+            return False
+    else:
+        t1 = (-half_h - alz) / d;  t2 = (half_h - alz) / d
+        if t1 > t2: t1, t2 = t2, t1
+        t_min = max(t_min, t1);  t_max = min(t_max, t2)
+        if t_min > t_max:
+            return False
+
     return True
 
 

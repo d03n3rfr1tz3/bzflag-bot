@@ -358,18 +358,39 @@ class PerceptionMixin(BZBotBase):
             ldx =  dx * cos_a + dy * sin_a
             ldy = -dx * sin_a + dy * cos_a
             t_min = 0.0; t_max = 1.0; hit = True
-            for o_v, d_v, lo_v, hi_v in (
-                (lox, ldx, -box.half_w,   box.half_w),
-                (loy, ldy, -box.half_d,   box.half_d),
-                (oz,  dz,   box.bottom_z, box.bottom_z + box.height),
-            ):
-                if abs(d_v) < 1e-9:
-                    if o_v < lo_v or o_v > hi_v:
-                        hit = False; break
+
+            # Track 5 (mypyc): Tupel-Loop ausgerollt — drei explizite Achsen-Blöcke statt
+            # heterogener Tupel-Iteration (Closures/Tupel-Loops sind unter mypyc teuer).
+            # Achse x (lokal, Box-Breite)
+            if abs(ldx) < 1e-9:
+                if lox < -box.half_w or lox > box.half_w:
+                    hit = False
+            else:
+                t1 = (-box.half_w - lox) / ldx; t2 = (box.half_w - lox) / ldx
+                t_min = max(t_min, min(t1, t2))
+                t_max = min(t_max, max(t1, t2))
+
+            # Achse y (lokal, Box-Tiefe)
+            if hit:
+                if abs(ldy) < 1e-9:
+                    if loy < -box.half_d or loy > box.half_d:
+                        hit = False
                 else:
-                    t1 = (lo_v - o_v) / d_v; t2 = (hi_v - o_v) / d_v
+                    t1 = (-box.half_d - loy) / ldy; t2 = (box.half_d - loy) / ldy
                     t_min = max(t_min, min(t1, t2))
                     t_max = min(t_max, max(t1, t2))
+
+            # Achse z (Höhe)
+            if hit:
+                hi_z = box.bottom_z + box.height
+                if abs(dz) < 1e-9:
+                    if oz < box.bottom_z or oz > hi_z:
+                        hit = False
+                else:
+                    t1 = (box.bottom_z - oz) / dz; t2 = (hi_z - oz) / dz
+                    t_min = max(t_min, min(t1, t2))
+                    t_max = min(t_max, max(t1, t2))
+
             if hit and t_min <= t_max:
                 return False
         return True
@@ -416,20 +437,40 @@ class PerceptionMixin(BZBotBase):
             ldx =  dx * cos_a + dy * sin_a
             ldy = -dx * sin_a + dy * cos_a
             t_min = 0.0; t_max = 1.0; hit = True; t_min_axis = -1
-            for ax, (o_v, d_v, lo_v, hi_v) in enumerate((
-                (lox, ldx, -box.half_w,   box.half_w),
-                (loy, ldy, -box.half_d,   box.half_d),
-                (oz,  0.0,  box.bottom_z, box.bottom_z + box.height),
-            )):
-                if abs(d_v) < 1e-9:
-                    if o_v < lo_v or o_v > hi_v:
-                        hit = False; break
+
+            # Track 5 (mypyc): Tupel-Loop ausgerollt (wie _segment_clear). Achsindex-Semantik
+            # exakt erhalten: Achse 2 (z) zählt NIE als Eintritts-Achse (t_min_axis bleibt bei
+            # ihr unverändert) — sie ist hier nur ein statisches Höhen-Gate (d_v ist immer 0.0,
+            # der Ray ist horizontal), kein Sonderfall der Iteration.
+            # Achse 0: x (lokal, Box-Breite)
+            if abs(ldx) < 1e-9:
+                if lox < -box.half_w or lox > box.half_w:
+                    hit = False
+            else:
+                t1 = (-box.half_w - lox) / ldx; t2 = (box.half_w - lox) / ldx
+                t_near = min(t1, t2)
+                if t_near > t_min:
+                    t_min = t_near; t_min_axis = 0
+                t_max = min(t_max, max(t1, t2))
+
+            # Achse 1: y (lokal, Box-Tiefe)
+            if hit:
+                if abs(ldy) < 1e-9:
+                    if loy < -box.half_d or loy > box.half_d:
+                        hit = False
                 else:
-                    t1 = (lo_v - o_v) / d_v; t2 = (hi_v - o_v) / d_v
+                    t1 = (-box.half_d - loy) / ldy; t2 = (box.half_d - loy) / ldy
                     t_near = min(t1, t2)
                     if t_near > t_min:
-                        t_min = t_near; t_min_axis = ax
+                        t_min = t_near; t_min_axis = 1
                     t_max = min(t_max, max(t1, t2))
+
+            # Achse 2: z (Höhe, statisches Gate — d_v == 0.0)
+            if hit:
+                hi_z = box.bottom_z + box.height
+                if oz < box.bottom_z or oz > hi_z:
+                    hit = False
+
             if not hit or t_min > t_max or t_min >= best_t or t_min_axis not in (0, 1):
                 continue   # kein Treffer / weiter weg / Eintritt über Z-Ebene (Dach/Boden)
             best_t = t_min; best_axis = t_min_axis; best_box = box
