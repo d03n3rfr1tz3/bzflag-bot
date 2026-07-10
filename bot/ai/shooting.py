@@ -266,9 +266,11 @@ class ShootingMixin(BZBotBase):
 
         # Kandidaten-Azimute (absolute Grad): um die Gegner-Richtung (Abpraller / direkte Tor-Schüsse)
         # plus um die Richtung zu jedem erreichbaren, gegnerseitig verlinkten Tor-Eintritt.
+        # P6: Grobpass in 3°-Schritten statt 1° (Baseline ~20ms/Aufruf bei ~170 1°-Kandidaten) —
+        # Feinpass unten verfeinert nur um tatsächliche Treffer herum.
         direct_az_deg = math.degrees(direct_az)
         cand_deg: set = set()
-        for az_deg in range(-(RICO_AIM_MAX), RICO_AIM_MAX):
+        for az_deg in range(-(RICO_AIM_MAX), RICO_AIM_MAX, 3):
             if abs(az_deg) > 5:
                 cand_deg.add(direct_az_deg + az_deg)
 
@@ -293,7 +295,7 @@ class ShootingMixin(BZBotBase):
                 half_deg = math.degrees(math.atan2(max(t.half_d - t.border, 0.1),
                                                    max(d_in, 0.1))) + 5.0
                 # distanz-adaptives Fenster — nah breit, fern schmal (Tor schrumpft optisch)
-                for d in range(-int(half_deg), int(half_deg) + 1):
+                for d in range(-int(half_deg), int(half_deg) + 1, 3):
                     cand_deg.add(ent_deg + d)
 
         best_az: Optional[float] = None
@@ -301,7 +303,10 @@ class ShootingMixin(BZBotBase):
         best_t: float = float("inf")
         _tl: list = []   # je Winkel wiederverwendet: Teleporter-Querungen des Pfades
 
-        for deg in sorted(cand_deg):
+        def _try_angle(deg: float) -> Optional[Tuple[float, float, bool]]:
+            """Simuliert einen Kandidatenwinkel; liefert (t_start, az, via_tele) bei Treffer,
+            sonst None. Liest nur äußere Variablen (keine Zustandsänderung) — von Grob- und
+            Feinpass gleichermaßen genutzt."""
             az = math.radians(deg)
             # F2: Sim-Start an der realen Mündung (deckt sich mit _send_shot)
             sx = bx + math.cos(az) * self._muzzle_front
@@ -328,7 +333,7 @@ class ShootingMixin(BZBotBase):
                 obs_grid=getattr(self, "_shot_grid", None),
             )
             if len(segs) <= 1:
-                continue
+                return None
             _hh = hh + (TELE_AIM_Z_TOL if _tl else 0.0)   # A: nur Tor-Schüsse bekommen Z-Spielraum
             for seg in segs[1:]:
                 if _segment_hits_obb_3d(
@@ -337,11 +342,39 @@ class ShootingMixin(BZBotBase):
                     ecx, ecy, ecz, 0.0,
                     hlen, hw, _hh,
                 ):
-                    if seg.t_start < best_t:
-                        best_t = seg.t_start
-                        best_az = az
-                        best_via_tele = bool(_tl)
-                    break
+                    return (seg.t_start, az, bool(_tl))
+            return None
+
+        # Grobpass (3°-Raster)
+        hit_deg: set = set()
+        for deg in sorted(cand_deg):
+            hit = _try_angle(deg)
+            if hit is not None:
+                hit_deg.add(deg)
+                t_start, az, via_tele = hit
+                if t_start < best_t:
+                    best_t = t_start
+                    best_az = az
+                    best_via_tele = via_tele
+
+        # Feinpass: nur um tatsächliche Grob-Treffer herum ±1°/±2° nachschärfen (Duplikate
+        # gegen den Grobpass via Set vermieden). Leicht approximativ — sehr schmale 1°-
+        # Korridore, die komplett zwischen zwei 3°-Kandidaten fallen UND selbst keinen
+        # Grob-Treffer erzeugen, werden nicht gefunden; bewusst akzeptiert für den Perf-Gewinn.
+        fine_deg: set = set()
+        for deg in hit_deg:
+            for off in (-2, -1, 1, 2):
+                d2 = deg + off
+                if d2 not in cand_deg:
+                    fine_deg.add(d2)
+        for deg in sorted(fine_deg):
+            hit = _try_angle(deg)
+            if hit is not None:
+                t_start, az, via_tele = hit
+                if t_start < best_t:
+                    best_t = t_start
+                    best_az = az
+                    best_via_tele = via_tele
 
         return None if best_az is None else (best_az, best_via_tele)
 
@@ -632,17 +665,14 @@ class ShootingMixin(BZBotBase):
             logger.debug("[%s] Schuss: Abgefeuert – muzzle=(%.3f,%.3f,%.3f) vel=(%.2f,%.2f) flag=%s",
                          self.callsign, muzzle_x, muzzle_y, muzzle_z, vx, vy, self.own_flag or "–")
 
-        payload = (
-            struct.pack(">f",  now)
-            + struct.pack(">B", self.player_id)
-            + struct.pack(">H", shot_id)
-            + struct.pack(">fff", muzzle_x, muzzle_y, muzzle_z)
-            + struct.pack(">fff", vx, vy, 0.0)
-            + struct.pack(">f",  0.0)
-            + struct.pack(">h",  team_id)
-            + self._own_flag_bytes()
-            + struct.pack(">f",  self._shot_lifetime)
-        )
+        # Ein struct.pack statt neun Einzel-packs + Konkatenation (P5): big-endian (">")
+        # kennt kein Padding, das Byte-Layout bleibt identisch.
+        payload = struct.pack(">fBH3f3ffh2sf",
+                               now, self.player_id, shot_id,
+                               muzzle_x, muzzle_y, muzzle_z,
+                               vx, vy, 0.0,
+                               0.0, team_id, self._own_flag_bytes(),
+                               self._shot_lifetime)
         assert len(payload) == 43
         self.client.send(MsgShotBegin, payload)
         # Slot-Reload-Tracking: diesen Slot als belegt markieren

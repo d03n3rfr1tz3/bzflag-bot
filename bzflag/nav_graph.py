@@ -16,6 +16,7 @@ import heapq
 import logging
 import math
 import time
+from collections import deque
 from typing import Dict, List, Optional, Tuple
 
 from .world_map import (BoxObstacle, WorldMap,
@@ -101,7 +102,7 @@ class FloorLayer:
     def __init__(self, z: float, cx: float, cy: float,
                  half_w: float, half_d: float,
                  n_x: int, n_y: int,
-                 walkable: List[List[bool]],
+                 walkable: List[bytearray],
                  source_obstacle: Optional[BoxObstacle]) -> None:
         self.z             = z
         self.cx            = cx
@@ -133,7 +134,7 @@ class FloorLayer:
         ix, iy = self.world_to_cell(x, y)
         if not (0 <= ix < self.n_x and 0 <= iy < self.n_y):
             return False
-        return self.walkable[iy][ix]
+        return bool(self.walkable[iy][ix])
 
     def has_any_walkable(self) -> bool:
         for row in self.walkable:
@@ -229,7 +230,9 @@ class NavGraph:
         half = self._world_half
         # Rasteranzahl: gesamte Kartenbreite durch Zellgröße
         n = max(1, int(2.0 * half / CELL_SIZE))
-        walkable = [[True] * n for _ in range(n)]  # alle Zellen zunächst frei
+        # P9: bytearray (0/1) statt List[List[bool]] — bessere Cache-Lokalität (ein zusammen-
+        # hängender Byte-Block pro Zeile statt N einzelner PyObject-bool-Referenzen).
+        walkable = [bytearray(b"\x01" * n) for _ in range(n)]  # alle Zellen zunächst frei
         ground = FloorLayer(z=0.0, cx=0.0, cy=0.0, half_w=half, half_d=half,
                             n_x=n, n_y=n, walkable=walkable,
                             source_obstacle=None)
@@ -265,7 +268,7 @@ class NavGraph:
                 continue  # zu schmal für eine begehbare Dachfläche
             n_x = max(1, int(2.0 * w / CELL_SIZE))
             n_y = max(1, int(2.0 * d / CELL_SIZE))
-            walkable = [[True] * n_x for _ in range(n_y)]  # alle Dachzellen zunächst frei
+            walkable = [bytearray(b"\x01" * n_x) for _ in range(n_y)]  # alle Dachzellen zunächst frei
             roof = FloorLayer(z=roof_z, cx=obs.cx, cy=obs.cy,
                               half_w=w, half_d=d,
                               n_x=n_x, n_y=n_y, walkable=walkable,
@@ -520,7 +523,6 @@ class NavGraph:
         me = ASTAR_MAX_EXPANSIONS if max_expansions is None else max_expansions
         mm = ASTAR_MAX_MS if max_ms is None else max_ms
 
-        open_heap = [(0.0, 0, start)]
         g_score   = {start: 0.0}
         came_from: Dict[Tuple, Optional[Tuple]] = {start: None}
         closed:   set = set()
@@ -530,6 +532,11 @@ class NavGraph:
         # zurück (rammt das Gebäude statt das Tor zu nehmen).
         best_node = start
         best_h    = _h(self.layers[start[0]], start[1], start[2], gx, gy, goal_z)
+        # P7: h wird zusammen mit dem Knoten im Heap-Tupel mitgeführt (f, counter, h, node) —
+        # spart die h-Neuberechnung (cell_to_world + hypot) bei jedem Pop; der Start-Push nutzt
+        # das bereits berechnete best_h. Die Vergleichssemantik bleibt korrekt: counter ist pro
+        # Push eindeutig, der Heap-Vergleich erreicht h/node also nie.
+        open_heap = [(0.0, 0, best_h, start)]
         t_deadline = time.perf_counter() + mm / 1000.0
 
         def _best_effort(grund: str) -> List[Tuple]:
@@ -553,13 +560,12 @@ class NavGraph:
             return []
 
         while open_heap:
-            f, _, current = heapq.heappop(open_heap)
+            f, _, h_cur, current = heapq.heappop(open_heap)
 
             if current in closed:
                 continue
             closed.add(current)
 
-            h_cur = _h(self.layers[current[0]], current[1], current[2], gx, gy, goal_z)
             if h_cur < best_h:
                 best_h, best_node = h_cur, current
 
@@ -619,7 +625,7 @@ class NavGraph:
                     came_from[neighbor] = current
                     h = _h(self.layers[lid], nix, niy, gx, gy, goal_z)
                     counter += 1
-                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, neighbor))
+                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, h, neighbor))
 
             # ── Vertikale Nachbarn (on-the-fly) ───────────────────────────
             for neighbor, cost in self._vertical_neighbors(lid, ix, iy, wx, wy, layer,
@@ -631,7 +637,7 @@ class NavGraph:
                     n_lid, n_ix, n_iy = neighbor
                     h = _h(self.layers[n_lid], n_ix, n_iy, gx, gy, goal_z)
                     counter += 1
-                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, neighbor))
+                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, h, neighbor))
 
             # ── Gleich-hohe Nachbar-Layer (berührende Dach-Flächen, on-the-fly) ──
             for neighbor, cost in self._same_z_neighbors(lid, ix, iy, wx, wy, layer):
@@ -642,7 +648,7 @@ class NavGraph:
                     n_lid, n_ix, n_iy = neighbor
                     h = _h(self.layers[n_lid], n_ix, n_iy, gx, gy, goal_z)
                     counter += 1
-                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, neighbor))
+                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, h, neighbor))
 
             # ── Teleporter-Portal-Kante (P3-NAV-02, vorberechnet, O(1)-Lookup) ──
             edge = self._teleport_edges.get(current)
@@ -655,7 +661,7 @@ class NavGraph:
                     n_lid, n_ix, n_iy = neighbor
                     h = _h(self.layers[n_lid], n_ix, n_iy, gx, gy, goal_z)
                     counter += 1
-                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, neighbor))
+                    heapq.heappush(open_heap, (new_g + _ASTAR_WEIGHT * h, counter, h, neighbor))
 
         return []
 
@@ -1168,7 +1174,7 @@ def _clip_to_footprint(layer: FloorLayer, obs: BoxObstacle,
             lx = dx * cos_a + dy * sin_a
             ly = -dx * sin_a + dy * cos_a
             if abs(lx) > hw_inner or abs(ly) > hd_inner:
-                layer.walkable[iy][ix] = False
+                layer.walkable[iy][ix] = 0
 
 
 def _mark_blocked(layer: FloorLayer, obs: BoxObstacle,
@@ -1193,7 +1199,7 @@ def _mark_blocked(layer: FloorLayer, obs: BoxObstacle,
             ly = -dx * sin_a + dy * cos_a
             # Nur blockieren wenn die Zell-Mitte wirklich im Obstacle + margin liegt
             if abs(lx) <= obs.half_w + margin and abs(ly) <= obs.half_d + margin:
-                layer.walkable[row][col] = False
+                layer.walkable[row][col] = 0
 
 
 def _point_in_rotated_box(obs: BoxObstacle, x: float, y: float, margin: float = 0.0) -> bool:
@@ -1211,7 +1217,6 @@ def _point_in_rotated_box(obs: BoxObstacle, x: float, y: float, margin: float = 
 def _nearest_walkable(layer: FloorLayer, ix: int, iy: int,
                        max_r: int = 6) -> Tuple[int, int]:
     """BFS: nächste begehbare Zelle in layer ausgehend von (ix, iy)."""
-    from collections import deque
     if (0 <= ix < layer.n_x and 0 <= iy < layer.n_y and
             layer.walkable[iy][ix]):
         return ix, iy

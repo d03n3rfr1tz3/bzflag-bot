@@ -272,13 +272,10 @@ def build_player_update(player_id: int, order: int, status: int,
       float32  angVel
     Gesamt: 4+1+4+2+12+12+4+4 = 43 Bytes
     """
-    return (
-        struct.pack(">f",  timestamp)
-        + struct.pack(">B",  player_id)
-        + struct.pack(">i",  order)
-        + struct.pack(">h",  status)
-        + struct.pack(">fff", *pos)
-        + struct.pack(">fff", *vel)
-        + struct.pack(">f",  azimuth)
-        + struct.pack(">f",  ang_vel)
-    )
+    # Ein struct.pack statt acht Einzel-packs + Konkatenation (P5): big-endian (">")
+    # kennt kein Padding, das Byte-Layout bleibt identisch.
+    return struct.pack(">fBih3f3fff",
+                        timestamp, player_id, order, status,
+                        pos[0], pos[1], pos[2],
+                        vel[0], vel[1], vel[2],
+                        azimuth, ang_vel)

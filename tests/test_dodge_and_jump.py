@@ -914,6 +914,61 @@ class TestEvadingEarlyExitEV1:
         assert bot._ai_state == AIState.EVADING
 
 
+class TestAnyIncomingThreatEquivalenceP3:
+    """P3: _any_incoming_threat(now, vier_hypothesen) muss exakt dasselbe Ergebnis liefern
+    wie die vier einzelnen _find_incoming_shot-Aufrufe aus dem EVADING-Early-Exit —
+    randomisiert über feste Seed für breite Abdeckung der Bedrohungslogik (SW, GM,
+    Ricochet-Segmente, BU-eingegraben, verschiedene Etagen, sich entfernende Schüsse)."""
+
+    def test_any_incoming_threat_matches_four_calls(self, bot):
+        import random
+        from bzflag.shot_physics import Segment
+
+        rng = random.Random(1234)
+        now = time.monotonic()
+
+        for i in range(100):
+            bot._shots.clear()
+            bot._ricochet_paths.clear()
+            bot.pos = [0.0, 0.0, rng.choice([0.0, -3.0, 5.0])]
+            bot.vel = [rng.uniform(-25.0, 25.0), rng.uniform(-25.0, 25.0), 0.0]
+            bot.azimuth = rng.uniform(-math.pi, math.pi)
+            bot.own_flag = rng.choice(["", "", "", "BU"])
+
+            n_shots = rng.randint(0, 3)
+            for j in range(n_shots):
+                shooter_id = rng.choice([2, 3, 4])
+                shot_id = 100 * i + j
+                px = rng.uniform(-40.0, 40.0)
+                py = rng.uniform(-40.0, 40.0)
+                pz = rng.choice([bot.pos[2], bot.pos[2] + 0.5, 10.0])
+                vx = rng.uniform(-100.0, 100.0)
+                vy = rng.uniform(-100.0, 100.0)
+                is_sw = rng.random() < 0.15
+                is_gm = (not is_sw) and rng.random() < 0.15
+                lifetime = rng.choice([3.5, 0.0001])   # gelegentlich bereits abgelaufen
+                shot = make_shot(bot, shooter_id=shooter_id, shot_id=shot_id,
+                                  pos=(px, py, pz), vel=(0.0, 0.0, 0.0) if is_sw else (vx, vy, 0.0),
+                                  lifetime=lifetime, is_sw=is_sw, is_gm=is_gm,
+                                  fire_time=now - rng.uniform(0.0, 0.5))
+                # gelegentlich zusätzlich als Ricochet-Pfad hinterlegen (Direktzweig übersprungen)
+                if not is_sw and rng.random() < 0.25:
+                    seg_dt = rng.uniform(0.2, 1.5)
+                    bot._ricochet_paths[(shooter_id, shot_id)] = [
+                        Segment(px, py, pz, px + vx * seg_dt, py + vy * seg_dt, pz,
+                                now - 0.05, now - 0.05 + seg_dt)
+                    ]
+
+            fwd_vx = math.cos(bot.azimuth) * bot._tank_speed
+            fwd_vy = math.sin(bot.azimuth) * bot._tank_speed
+            vels = ((bot.vel[0], bot.vel[1]), (0.0, 0.0),
+                    (fwd_vx, fwd_vy), (-fwd_vx, -fwd_vy))
+
+            expected = any(bot._find_incoming_shot(now, bot_vel=v)[0] is not None for v in vels)
+            actual = bot._any_incoming_threat(now, vels)
+            assert actual == expected, f"Divergenz bei Iteration {i} (seed 1234)"
+
+
 class TestZAttackJump:
     """Feature ZJ1: Z-Höhen-Sprung auf erhöhten Gegner."""
 

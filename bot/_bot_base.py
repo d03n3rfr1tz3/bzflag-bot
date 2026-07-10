@@ -30,6 +30,7 @@ class BZBotBase:
     _async_plan_result: Any
     _async_plan_thread: Any
     _bounce_next: Any
+    _bounce_replan: Any
     _burrow_ang_ad: Any
     _burrow_depth: Any
     _burrow_speed_ad: Any
@@ -124,6 +125,7 @@ class BZBotBase:
     _own_flag_since: Any
     _plan_gen: Any
     _pre_fall_state: Any
+    _presence: Any
     _recent_flag_targets: Any
     _reconnect_needed: Any
     _reload_time: Any
@@ -162,6 +164,7 @@ class BZBotBase:
     _stall_rev_dist: Any
     _stall_rev_start: Any
     _stall_until: Any
+    _steep_wall_cache: Any
     _stop_event: Any
     _sw_expand_speed: Any
     _tact_jump_retry_after: Any
@@ -233,6 +236,8 @@ class BZBotBase:
 
     # ── Geteilte Methoden (Stubs; reale Impl. in den Mixins) ─────────────
     def _advance_path(self, *, timed_out: bool=False) -> None:
+        raise NotImplementedError
+    def _any_incoming_threat(self, now: float, vels) -> bool:
         raise NotImplementedError
     def _apply_bounds(self, dt: float, half: float) -> None:
         raise NotImplementedError
@@ -359,6 +364,8 @@ class BZBotBase:
     def _poll_async_plan(self) -> None:
         raise NotImplementedError
     def _recompute_gm_min_range(self) -> None:
+        raise NotImplementedError
+    def _recompute_presence(self) -> None:
         raise NotImplementedError
     def _report_killed(self, shot: Shot) -> None:
         raise NotImplementedError

@@ -65,6 +65,8 @@ class PhysicsMixin(BZBotBase):
         Flaggen-Boden zentral hier: OO phast durch Gebäude → landet/fällt immer auf den Weltboden
         (z=0). BU gräbt sich NUR am Boden ein (auf einem Dach trägt das Dach, also nur dort sinkt
         der Bot auf BURROW_DEPTH)."""
+        if not self.alive:
+            return 0.0
         if self.own_flag == "OO":
             return 0.0
         # P4a: Per-Tick-Memo (3–5 identische Aufrufe pro 60-Hz-Tick). Der Key
@@ -276,9 +278,10 @@ class PhysicsMixin(BZBotBase):
             ny = max(-half + 1, min(half - 1, ny))
             bounced = True
         if bounced:
-            self._plan_path(
-                random.uniform(-half * 0.85, half * 0.85),
-                random.uniform(-half * 0.85, half * 0.85),
-            )
+            # B4: Replan in den 10-Hz-KI-Tick verlagert (states._dispatch_movement) statt hier
+            # synchron zu planen — _apply_bounds läuft im 60-Hz-Physik-Pfad aus JEDEM State
+            # (auch EVADING/committed; in COMBAT würde ein sofortiger A*-Lauf hier _nav_goal
+            # überschreiben). Nur noch ein Flag setzen, kein A*-Lauf im Physik-Pfad.
+            self._bounce_replan = True
         self.pos[0] = nx
         self.pos[1] = ny

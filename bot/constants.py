@@ -183,7 +183,10 @@ TACT_JUMP_REACTION_S = 0.5   # Reaktionszeit des GEGNERS auf den Sprung (nicht D
 DODGE_DIST          = TANK_RADIUS * 4.0   # 17.28
 EVADE_CLEAR_GRACE   = 1.0                 # Sekunden, die ein als "sicher" eingestufter Schuss ignoriert wird
 RICO_DODGE_LOOKAHEAD = 2.0               # Maximaler Lookahead (s) für Ricochet-Bedrohungen
-RICO_AIM_CACHE_TTL   = 2.0               # Cache-Gültigkeit (s) für offensiven Ricochet-Azimut
+RICO_AIM_CACHE_TTL   = 1.0               # Cache-Gültigkeit (s) für offensiven Ricochet-Azimut
+                                         # (P6: coarse-to-fine-Sweep ist deutlich schneller als der
+                                         # alte 1°-Vollsweep → häufigeres Neuberechnen bezahlbar,
+                                         # liefert aktuellere Zielwinkel bei bewegten Gegnern)
 RICO_AIM_MAX       = 45                  # Maximaler Winkel für Suche nach Ricochet-Schüssen
 TELE_AIM_Z_TOL     = 1.0                 # Z-Spielraum (u) NUR für Tor-Schüsse — gleicht die
                                          # Höhen-Skalierung der Tor-Transform aus; reiner Tuning-Knopf.

@@ -2,6 +2,7 @@
 
 import math
 import random
+import time
 from typing import Optional
 
 from bzflag.shot_physics import (ray_teleporter_crossing)
@@ -236,6 +237,98 @@ class PerceptionMixin(BZBotBase):
                         best = shot
         return best, best_t
 
+    def _any_incoming_threat(self, now: float, vels) -> bool:
+        """Wie _find_incoming_shot, aber prüft mehrere Velocity-Hypothesen (vels: Sequenz von
+        (bvx, bvy)-Tupeln) in EINEM Durchlauf über die Schüsse statt eines separaten Aufrufs
+        pro Hypothese — spart pro EVADING-Tick drei zusätzliche Shots-Lock-Scans (P3). Liefert
+        True bei der ERSTEN gefundenen Bedrohung (kein best/best_t-Tracking nötig, anders als
+        _find_incoming_shot dessen Aufrufer den konkreten Schuss/Zeitpunkt brauchen). Gleiche
+        Skip-Bedingungen wie dort: expired, eigener Schuss, Rico-Cache-Skip im Direktzweig,
+        GM-Live-Position statt position_at, SW-Sonderfall, BU-eingegraben-Skip, z-Etagen-Check,
+        d < DODGE_DIST, sowie im Segment-Zweig zusätzlich t_threat < RICO_DODGE_LOOKAHEAD."""
+        if not self._shots:
+            return False
+        with self._shots_lock:
+            for shot in self._shots.values():
+                if shot.is_expired(now): continue
+                if shot.shooter_id == self.player_id: continue
+                # Ricochet-Schüsse: Richtung nach Bounce unklar → nur Segment-Cache prüfen (unten)
+                if (shot.shooter_id, shot.shot_id) in self._ricochet_paths:
+                    continue
+                if shot.is_gm:
+                    sx, sy, sz = shot.pos          # Live-Position (siehe _find_incoming_shot)
+                else:
+                    sx, sy, sz = shot.position_at(now)
+                if shot.is_sw:
+                    _sw_dist = math.hypot(sx - self.pos[0], sy - self.pos[1])
+                    if self._shock_in_radius < _sw_dist < self._shock_out_radius:
+                        return True                # SW-Bedrohung ist velocity-unabhängig
+                    continue
+                if self.own_flag == "BU" and self.pos[2] < 0.0 and not shot.is_gm:
+                    continue
+                if abs(sz - self.pos[2]) > HIT_RADIUS * 2:
+                    continue
+                rx = sx - self.pos[0]
+                ry = sy - self.pos[1]
+                for bvx, bvy in vels:
+                    rvx = shot.vel[0] - bvx
+                    rvy = shot.vel[1] - bvy
+                    rel_spd_sq = rvx * rvx + rvy * rvy
+                    if rel_spd_sq > 1e-6:
+                        t_rel_raw = -(rx * rvx + ry * rvy) / rel_spd_sq
+                        if t_rel_raw < 0:
+                            continue               # Schuss entfernt sich → keine Bedrohung
+                        d = math.hypot(rx + rvx * t_rel_raw, ry + rvy * t_rel_raw)
+                    else:
+                        d = math.hypot(rx, ry)
+                    if d < DODGE_DIST:
+                        return True
+
+            # --- Ricochet-Pfade: segmentweise prüfen ---
+            for (pid, sid), segs in self._ricochet_paths.items():
+                if pid == self.player_id:
+                    continue
+                shot = self._shots.get((pid, sid))
+                if shot is None or shot.is_expired(now):
+                    continue
+                if self.own_flag == "BU" and self.pos[2] < 0.0:
+                    continue
+                for seg in segs:
+                    if seg.t_end <= now:
+                        continue
+                    seg_dt = seg.t_end - seg.t_start
+                    if seg_dt < 1.0e-9:
+                        continue
+                    t_from = max(seg.t_start, now)
+                    frac = (t_from - seg.t_start) / seg_dt
+                    sx = seg.px + (seg.ex - seg.px) * frac
+                    sy = seg.py + (seg.ey - seg.py) * frac
+                    sz = seg.pz + (seg.ez - seg.pz) * frac
+                    if abs(sz - self.pos[2]) > HIT_RADIUS * 2:
+                        continue
+                    svx = (seg.ex - seg.px) / seg_dt
+                    svy = (seg.ey - seg.py) / seg_dt
+                    rx = sx - self.pos[0]
+                    ry = sy - self.pos[1]
+                    seg_rem = seg.t_end - t_from
+                    for bvx, bvy in vels:
+                        rvx = svx - bvx
+                        rvy = svy - bvy
+                        rel_spd_sq = rvx * rvx + rvy * rvy
+                        if rel_spd_sq > 1e-6:
+                            t_rel = -(rx * rvx + ry * rvy) / rel_spd_sq
+                            if t_rel < 0:
+                                continue
+                            t_rel = min(t_rel, seg_rem)
+                            d = math.hypot(rx + rvx * t_rel, ry + rvy * t_rel)
+                            t_threat = (t_from - now) + t_rel
+                        else:
+                            d = math.hypot(rx, ry)
+                            t_threat = t_from - now
+                        if d < DODGE_DIST and t_threat < RICO_DODGE_LOOKAHEAD:
+                            return True
+        return False
+
     def _effective_radar_range(self) -> float:
         """Liefert effektive Radar-Reichweite (25% wenn BU + pos[2] < 0).
 
@@ -294,7 +387,25 @@ class PerceptionMixin(BZBotBase):
         Wand in steilem Winkel (Einfallswinkel zur Oberfläche > NAV_WALL_STEEP_DEG → der Wall-Slide
         nullt dann fast den ganzen Vortrieb), liefert er die nach vorn gerichtete Wand-Tangente
         (Azimut) zum Entlanggleiten/Abdrehen. Sonst None: flacher Winkel (Gleiten ist ok) oder
-        freie Bahn. Slab-Mathematik wie _segment_clear; Box-angle deckt gedrehte Wände ab."""
+        freie Bahn. Slab-Mathematik wie _segment_clear; Box-angle deckt gedrehte Wände ab.
+
+        P8: Ergebnis 0.1s gecacht — läuft im sichtlosen COMBAT-Direktmodus bei 60 Hz (DDA-
+        Raycast + Slab-Tests), teils 2× pro Tick mit gleichem az (_execute_combat_move). 0.1s
+        ≈ 6 Ticks, der Bot bewegt sich dabei ≤2.5u — für eine 20u-Vorausschau tolerierbar."""
+        now = time.monotonic()
+        cache = self._steep_wall_cache
+        if cache is not None:
+            expires_at, az_cached, max_dist_cached, result = cache
+            if (now < expires_at
+                    and abs(_angle_diff(az, az_cached)) < math.radians(3)
+                    and abs(max_dist - max_dist_cached) < 1.0):
+                return result
+        result = self._steep_wall_ahead_raycast(az, max_dist)
+        self._steep_wall_cache = (now + 0.1, az, max_dist, result)
+        return result
+
+    def _steep_wall_ahead_raycast(self, az: float, max_dist: float) -> Optional[float]:
+        """Unveränderte Raycast-Logik von _steep_wall_ahead, jetzt hinter dessen 0.1s-Cache."""
         nav = getattr(self, "_nav_graph", None)
         if nav is None or max_dist <= 0.0:
             return None

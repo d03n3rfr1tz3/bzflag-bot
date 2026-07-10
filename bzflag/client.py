@@ -365,7 +365,11 @@ class BZFlagClient:
             with self._send_lock:
                 try:
                     assert self._sock is not None  # TCP-Pfad läuft nur nach connect()
-                    self._sock.setblocking(True)
+                    # B8: kein setblocking(True) mehr pro Send — Send und Recv teilen sich
+                    # dasselbe Socket-Objekt, das frühere setblocking(True) hat das Recv-
+                    # Timeout ohnehin nach dem ersten Send deaktiviert (deshalb jetzt auch
+                    # in _recv_loop_tcp entfernt, siehe dort). Socket bleibt blocking wie
+                    # nach connect().
                     self._sock.sendall(data)
                 except OSError as exc:
                     logger.error("TCP-Sendefehler 0x%04x: %s", code, exc)
@@ -395,9 +399,19 @@ class BZFlagClient:
 
     def _recv_loop_tcp(self) -> None:
         """TCP-Empfangs-Thread: liest Pakete aus dem Stream und dispatcht sie."""
-        buf = b""
+        # bytearray + Lese-Cursor statt buf += data / buf = buf[total:]: Letzteres kopiert
+        # bei Broadcast-lastigem Verkehr (viele PlayerUpdates) den kompletten Restpuffer bei
+        # JEDEM verarbeiteten Paket um → O(n²) über die Lebensdauer der Verbindung. Der
+        # Cursor verbraucht nur einen Index; das bereits gelesene Präfix wird einmal pro
+        # recv()-Runde (nicht pro Paket) via del buf[:pos] abgeschnitten.
+        buf = bytearray()
+        pos = 0
         assert self._sock is not None  # Thread startet erst nach erfolgreichem connect()
-        self._sock.settimeout(1.0)
+        # B8: kein settimeout(1.0)/socket.timeout-Polling mehr — Socket bleibt blocking wie
+        # nach connect() (das war es faktisch ohnehin, da send() bislang setblocking(True) pro
+        # TCP-Send setzte und damit dieses Timeout nach dem ersten Send deaktivierte). Der
+        # Loop-Exit läuft wie bisher über den Socket-Close in disconnect() → recv() liefert
+        # dann OSError, der break unten greift. Der UDP-Socket behält sein eigenes Timeout.
         while self.running:
             try:
                 data = self._sock.recv(8192)
@@ -405,8 +419,6 @@ class BZFlagClient:
                     logger.warning("Server hat TCP-Verbindung geschlossen")
                     break
                 buf += data
-            except socket.timeout:
-                continue
             except OSError as exc:
                 # Socket-Fehler (z.B. ECONNRESET) NICHT verschlucken – das ist oft der
                 # einzige konkrete Grund eines Verbindungsverlusts.
@@ -414,14 +426,18 @@ class BZFlagClient:
                 break
 
             # TCP ist ein Byte-Strom: ein recv() kann halbe Pakete liefern → Puffer zusammensetzen
-            while len(buf) >= 4:
-                length, code = struct.unpack_from(">HH", buf)
+            while len(buf) - pos >= 4:
+                length, code = struct.unpack_from(">HH", buf, pos)
                 total = 4 + length  # 4 Byte Header + Nutzlast
-                if len(buf) < total:
+                if len(buf) - pos < total:
                     break  # noch nicht genug Bytes für dieses Paket → nächsten recv() abwarten
-                payload = buf[4:total]
-                buf     = buf[total:]
+                payload = bytes(buf[pos + 4: pos + total])  # Handler slicen/unpacken auf bytes
+                pos += total
                 self._dispatch(code, payload)
+
+            if pos:
+                del buf[:pos]
+                pos = 0
 
         self.connected = False
         self._dispatch(MSG_INTERNAL_DISCONNECT, b"")

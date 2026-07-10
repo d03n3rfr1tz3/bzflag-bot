@@ -286,6 +286,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._link_map = {}      # face-Index → Ziel-face-Index (Teleporter), aus _world_map.links
         self._tele_solid_boxes = []  # Teleporter-Posts+Crossbar als BoxObstacle (Kollision)
         self._teleporting_until = 0.0      # P3-NAV-02: PS_TELEPORTING-Ende + Re-Trigger-Sperre
+        # Event-getriebener Anwesenheits-Cache (statt 60-Hz-Scan in _has_presence):
+        # nur bei Add/Remove/Callsign-Liste neu berechnet, siehe _recompute_presence.
+        self._presence = False
 
     def _init_nav(self):
         """Navigation: Pfad-Queue, NAV_JUMP/NAV_TELE, COMBAT-Eskalations-Episode."""
@@ -310,6 +313,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._wp_start_time = None  # Zeit seit aktuellem WP-Ziel
         self._wp_fail_count = 0                 # aufeinanderfolgende WP-Timeouts
         self._wp_timeout = 3.0                # per-WP Timeout (berechnet in bot/ai/navigation.py)
+        # B4: Rand-Bounce im 60-Hz-Physik-Pfad (_apply_bounds) setzt nur dieses Flag; der
+        # eigentliche Replan (A*) läuft gedrosselt im 10-Hz-KI-Tick (_dispatch_movement).
+        self._bounce_replan = False
 
     def _init_shots(self):
         """Shot-Tracking (Recv-Thread schreibt, Game-Loop liest)."""
@@ -349,6 +355,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._z_attack_fire_z = 0.0
         self._z_attack_retry_after = 0.0
         self._tact_jump_retry_after = 0.0
+        # P8: Cache für _steep_wall_ahead — (expires_at, az, max_dist, result), 0.1s Gültigkeit.
+        self._steep_wall_cache = None
 
     def _init_debug(self, debug_no_shoot, debug_no_jump, debug_log_path, debug_log_shot,
                     debug_log_dodge, debug_log_flag, debug_log_tele):
@@ -718,7 +726,13 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
             if info.is_human and self._is_bot_callsign(info.callsign):
                 info.is_human = False
         self.human_count = sum(1 for p in list(self.players.values()) if p.is_human)
+        self._recompute_presence()
         self._notify_count()
+
+    def _recompute_presence(self) -> None:
+        """Berechnet den Anwesenheits-Cache (_presence) neu — nur bei Add/Remove/
+        Callsign-Listen-Update aufgerufen, NICHT pro Tick (siehe _has_presence)."""
+        self._presence = any(not self._is_bot_callsign(p.callsign) for p in list(self.players.values()))
 
     def _emit_status(self) -> None:
         """Managed-Modus: sendet den aktuellen Spielerstand als getaggte stdout-Zeile
@@ -767,15 +781,13 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         target_id = initial if initial is not None else (
             self.target_player if self.target_player is not None else 255
         )
-        payload = (
-            struct.pack(">B",   self.player_id)
-            + struct.pack(">H",   gm["shot_id"])
-            + struct.pack(">fff", px, py, pz)
-            + struct.pack(">fff", *gm["vel"])
-            + struct.pack(">f",   dt)
-            + struct.pack(">h",   gm["team"])
-            + struct.pack(">B",   target_id & 0xFF)
-        )
+        # Ein struct.pack statt sieben Einzel-packs + Konkatenation (P5, analog build_player_update).
+        vel = gm["vel"]
+        payload = struct.pack(">BH3f3ffhB",
+                               self.player_id, gm["shot_id"],
+                               px, py, pz,
+                               vel[0], vel[1], vel[2],
+                               dt, gm["team"], target_id & 0xFF)
         self.client.send(MsgGMUpdate, payload)
         logger.info("[%s] GMUpdate gesendet: target=%d (dt=%.2fs)",
                     self.callsign, target_id, dt)

@@ -1,6 +1,7 @@
 """State-Machine: Zustandsuebergaenge, 60-Hz-Dispatch und alle _tick_*-Zustaende ausser COMBAT (W4, FABLE-PLAN Teil 3)."""
 
 import math
+import random
 import time
 import logging
 
@@ -148,6 +149,16 @@ class StateMachineMixin(BZBotBase):
             # Fertige Async-Vollsuche (P4-INF-01) vor dem State-Tick übernehmen — nur in
             # navigierbaren Bodenstates (NAV_JUMP/NAV_TELE/FALLING returnen vorher).
             self._poll_async_plan()
+            # B4: Rand-Bounce-Replan aus dem 60-Hz-Physik-Pfad (_apply_bounds) hierher
+            # verlagert — kein synchroner A*-Lauf im Physik-Pfad, kein Ziel-Überschreiben
+            # in committed States (EVADING etc. laufen hier gar nicht erst ein).
+            if self._bounce_replan:
+                self._bounce_replan = False
+                # In COMBAT kein Zufalls-Ziel — der Combat-Tick replant ohnehin zum Gegner.
+                if self._ai_state in (AIState.SEEKING, AIState.IDLE):
+                    h = self.world_half
+                    self._plan_path(random.uniform(-h * 0.85, h * 0.85),
+                                    random.uniform(-h * 0.85, h * 0.85))
             if self._ai_state == AIState.IDLE:
                 self._tick_idle(now)
             elif self._ai_state == AIState.SEEKING:
@@ -414,10 +425,11 @@ class StateMachineMixin(BZBotBase):
         if self._ai_state == AIState.EVADING:
             fwd_vx = math.cos(self.azimuth) * self._tank_speed
             fwd_vy = math.sin(self.azimuth) * self._tank_speed
-            if (self._find_incoming_shot(now)[0] is None
-                    and self._find_incoming_shot(now, bot_vel=(0.0, 0.0))[0] is None
-                    and self._find_incoming_shot(now, bot_vel=(fwd_vx, fwd_vy))[0] is None
-                    and self._find_incoming_shot(now, bot_vel=(-fwd_vx, -fwd_vy))[0] is None):
+            # P3: ein Scan über alle Schüsse statt vier separater _find_incoming_shot-Aufrufe
+            # (je ein Shots-Lock + voller Schuss-/Ricochet-Scan) mit identischer Bedrohungslogik.
+            if not self._any_incoming_threat(now, (
+                    (self.vel[0], self.vel[1]), (0.0, 0.0),
+                    (fwd_vx, fwd_vy), (-fwd_vx, -fwd_vy))):
                 self._dodging = False
                 self._dodge_forward = False
                 self._dodge_reverse = False
@@ -425,9 +437,12 @@ class StateMachineMixin(BZBotBase):
                 # Fix EV2: Per-Schuss-Grace — denselben Schuss 1 s ignorieren damit nach
                 # dem Early-Exit weder EVADING noch DODGE_JUMP neu ausgelöst werden.
                 if self._last_threat_id is not None:
+                    # B7: abgelaufene Einträge beim Einfügen mit ausfiltern (seltener Pfad) —
+                    # sonst leakt das Dict über eine lange Session (nie sonst aufgeräumt).
+                    self._evade_cleared_shots = {k: v for k, v in self._evade_cleared_shots.items() if v > now}
                     self._evade_cleared_shots[self._last_threat_id] = now + EVADE_CLEAR_GRACE
                 self._last_threat_id = None
-                
+
                 if getattr(self, '_debug_log_dodge', False):
                     logger.debug("[%s] Ausweichen: Bedrohung vorbei – frühzeitiger EVADING-Exit", self.callsign)
                 if self.target_player is not None and self._has_presence():
@@ -464,9 +479,11 @@ class StateMachineMixin(BZBotBase):
         # Fix EV2: Per-Schuss-Grace — denselben Schuss 1 s ignorieren damit nach
         # dem Early-Exit weder EVADING noch DODGE_JUMP neu ausgelöst werden.
         if self._last_threat_id is not None:
+            # B7: abgelaufene Einträge beim Einfügen mit ausfiltern (siehe oben).
+            self._evade_cleared_shots = {k: v for k, v in self._evade_cleared_shots.items() if v > now}
             self._evade_cleared_shots[self._last_threat_id] = now + EVADE_CLEAR_GRACE
         self._last_threat_id = None
-        
+
         if self._ai_state == AIState.JUMP_WINDUP:
             if self._jump_pending:
                 self._execute_jump()
