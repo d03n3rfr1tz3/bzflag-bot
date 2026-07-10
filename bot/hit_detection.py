@@ -46,6 +46,16 @@ class HitDetectionMixin(BZBotBase):
         half_h   = self._tank_height / 2 * sc + self._shot_radius
         return half_len, half_w, half_h
 
+    def _phantom_shot_harmless(self, shot: Shot) -> bool:
+        """True für Phantom-Schüsse: Wire-Flag „PZ" bedeutet, der Schütze war beim
+        Feuern gezoned (sein Client nullt das Flag sonst, ShotPath.cxx:46). Solche
+        Schüsse phasen durch Wände, treffen aber nur ebenfalls gezonede Ziele
+        (LocalPlayer::checkHit: „zoned shots only kill zoned tanks"). Der Bot zoned
+        sich nie selbst (P4-FLG-03 offen) → für ihn sind sie weder Treffer- noch
+        Ausweich-relevant. Bei einer FLG-03-Umsetzung muss hier der eigene
+        Zoned-Status geprüft werden."""
+        return shot.flag_abbr == b"PZ"
+
     def _instant_shot_hits(self, shooter: int, shot_id: int,
                            px: float, py: float, pz: float,
                            vx: float, vy: float, vz: float,
@@ -129,6 +139,10 @@ class HitDetectionMixin(BZBotBase):
                     to_remove.append(key); continue
                 if shot.is_thief:
                     to_remove.append(key); continue
+                # Phantom-Schuss (Schütze war gezoned) → kann den ungezoneden Bot
+                # nicht treffen; bleibt bis zum Ablauf in _shots (MsgShotEnd-Buchhaltung).
+                if self._phantom_shot_harmless(shot):
+                    continue
                 if shot.is_sw:
                     if shot.shooter_id == self.player_id:
                         continue

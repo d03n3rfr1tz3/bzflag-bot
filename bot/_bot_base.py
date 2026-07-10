@@ -1,8 +1,9 @@
 """Gemeinsame @trait-Basis für die BZBot-Mixins (Track 5, mypyc).
 
-Auto-generiert/aktualisiert (scratchpad/gen_base.py): deklariert die über die Mixins
-geteilten Attribute/Methoden EINMAL, damit mypy/mypyc die cross-mixin-Zugriffe auflösen
-und die Mehrfachvererbung (mypyc erlaubt sie nur mit @trait) kompilieren können.
+MANUELL GEPFLEGT: deklariert die über die Mixins geteilten Attribute/Methoden EINMAL,
+damit mypy/mypyc die cross-mixin-Zugriffe auflösen und die Mehrfachvererbung (mypyc
+erlaubt sie nur mit @trait) kompilieren können. Pflegeregel: neue oder geänderte
+geteilte Attribute/Methoden hier alphabetisch nachziehen (siehe DEVELOPER.md §12).
 Daten-Attribute sind bewusst `Any` (keine Zuweisungskonflikte über die Mixins; die
 Methoden-Bodies kompilieren dennoch nativ). Methoden sind Stubs — die realen Mixins
 überschreiben sie (Signaturen exakt aus der Quelle → Liskov-kompatibel).
@@ -349,6 +350,8 @@ class BZBotBase:
     def _notify_count(self) -> None:
         raise NotImplementedError
     def _own_flag_bytes(self) -> bytes:
+        raise NotImplementedError
+    def _phantom_shot_harmless(self, shot: Shot) -> bool:
         raise NotImplementedError
     def _plan_path(self, goal_x: float, goal_y: float, goal_z: float | None=None, *, cap_wps: int | None=None) -> None:
         raise NotImplementedError
