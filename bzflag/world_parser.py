@@ -71,8 +71,11 @@ def parse_world(data: bytes, world_half: float = 200.0,
     """
     try:
         return _parse(data, world_half, world_hash)
-    except _ParseError as exc:
-        logger.warning("[PTH] Weltparse-Fehler: %s — kein Karten-Wissen", exc)
+    except _ParseError as perr:
+        # Getrennte Variablennamen pro except-Zweig: mypyc typisiert die as-Variable
+        # funktionsweit mit dem ERSTEN Handler-Typ — ein gemeinsames "exc" ließe den
+        # Exception-Zweig im Kompilat mit TypeError sterben statt graceful zu degradieren.
+        logger.warning("[PTH] Weltparse-Fehler: %s — kein Karten-Wissen", perr)
         return None
     except Exception as exc:
         logger.warning("[PTH] Weltparse-Ausnahme: %s — kein Karten-Wissen", exc)

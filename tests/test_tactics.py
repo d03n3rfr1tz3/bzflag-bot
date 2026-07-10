@@ -22,7 +22,7 @@ class TestTacticalJump:
     def _setup(self, bot, dist=30.0, enemy_vel=(-15.0, 0.0, 0.0)):
         """Setzt Bot+Gegner: Bot bei (0,0,0), Gegner bei (dist,0,0); beide aufeinander zu."""
         from conftest import make_player
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_player = 2
         p = make_player(bot, 2, pos=(dist, 0.0, 0.0))
@@ -92,7 +92,7 @@ class TestTacticalJump:
     def test_phase_two_executes_jump(self, bot):
         """Nach Wind-Up-Ende (JUMP_WINDUP-State, dodge expired) führt _tick_committed den Sprung aus."""
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._jump_pending = True
         bot._dodging = False
         bot._jumping = False
@@ -101,13 +101,13 @@ class TestTacticalJump:
         bot._dodge_until = 0.0  # Wind-Up abgelaufen
         bot._update_movement(0.02, time.monotonic(), ai_tick=False)
         assert bot._jumping is True
-        assert bot.vel[2] == pytest.approx(bot._jump_velocity)
+        assert bot.vel_z == pytest.approx(bot._jump_velocity)
         assert bot._jump_ang_vel == pytest.approx(0.5)
         assert bot._jump_pending is False
 
     def test_phase_two_waits_during_dodge(self, bot):
         """Während Wind-Up-Dodge läuft, Phase 2 noch nicht aktiv."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._jump_pending = True
         bot._dodging = True  # Dodge läuft noch
         bot._jumping = False
@@ -126,7 +126,7 @@ class TestTacticalJumpReverseOverride:
 
     def test_wind_up_sets_override_window(self, bot, monkeypatch):
         from conftest import make_player
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_player = 2
         p = make_player(bot, 2, pos=(30.0, 0.0, 0.0))
@@ -140,9 +140,9 @@ class TestTacticalJumpReverseOverride:
     def test_phase_two_sets_forward_velocity(self, bot):
         """Phase 2 (JUMP_WINDUP → JUMPING) setzt vel[0]/vel[1] auf volle Vorwärts-Geschwindigkeit."""
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0  # blickt nach +X
-        bot.vel = [-10.0, 0.0, 0.0]  # fährt rückwärts
+        bot.vel_x = -10.0; bot.vel_y = 0.0; bot.vel_z = 0.0  # fährt rückwärts
         bot._jump_pending = True
         bot._dodging = False
         bot._jumping = False
@@ -150,14 +150,14 @@ class TestTacticalJumpReverseOverride:
         bot._dodge_until = 0.0
         bot._update_movement(0.02, time.monotonic(), ai_tick=False)
         assert bot._jumping is True
-        assert bot.vel[0] == pytest.approx(bot._tank_speed)
-        assert bot.vel[1] == pytest.approx(0.0)
-        assert bot.vel[2] == pytest.approx(bot._jump_velocity)
+        assert bot.vel_x == pytest.approx(bot._tank_speed)
+        assert bot.vel_y == pytest.approx(0.0)
+        assert bot.vel_z == pytest.approx(bot._jump_velocity)
 
     def test_random_50_percent_threshold(self, bot, monkeypatch):
         """50%-Sperre (Vorwärtssprung): random=0.1 → Trigger, random=0.6 → Block."""
         from conftest import make_player
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0  # Bot schaut direkt auf Gegner (angle_to_enemy < 45°)
         bot.target_player = 2
         p = make_player(bot, 2, pos=(30.0, 0.0, 0.0))
@@ -179,7 +179,7 @@ class TestWindUpInterruptible:
         """In JUMP_WINDUP-State: Schuss bricht Wind-Up nicht mehr ab (Entscheidung steht)."""
         from conftest import make_shot
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.alive = True
         bot.human_count = 1
@@ -204,8 +204,8 @@ class TestWindUpAbortTiming:
     def test_windup_committed_continues_despite_threat(self, bot):
         """State Machine: JUMP_WINDUP-State läuft trotz ankommendem Schuss weiter."""
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.player_id = 1
         bot._dodging = True
         bot._jump_pending = True
@@ -223,8 +223,8 @@ class TestWindUpAbortTiming:
     def test_distant_shot_does_not_abort_wind_up(self, bot):
         """JUMP_WINDUP-State: auch 0.5s-Schuss unterbricht Wind-Up nicht (kein Abort mehr)."""
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.player_id = 1
         bot._dodging = True
         bot._jump_pending = True
@@ -243,8 +243,8 @@ class TestSelfShotFilter:
 
     def test_own_shot_not_detected_as_threat(self, bot):
         """Schuss mit shooter_id=player_id wird nicht als Bedrohung gewertet."""
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.player_id = 1
         # Eigener Schuss: shooter_id=1 = player_id, direkt auf Bot zufliegend
         make_shot(bot, shooter_id=1, shot_id=99,
@@ -254,8 +254,8 @@ class TestSelfShotFilter:
 
     def test_enemy_shot_still_detected(self, bot):
         """Schuss eines Gegners (shooter_id≠player_id) wird weiterhin erkannt."""
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.player_id = 1
         make_shot(bot, shooter_id=2, shot_id=1,
                   pos=(15.0, 0.0, 0.0), vel=(-100.0, 0.0, 0.0))
@@ -264,8 +264,8 @@ class TestSelfShotFilter:
 
     def test_wind_up_not_aborted_by_own_shot(self, bot):
         """Eigener Schuss bricht Wind-Up des taktischen Übersprungs nicht ab."""
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.player_id = 1
         bot._dodging = True
         bot._jump_pending = True
@@ -282,8 +282,8 @@ class TestJumpFacingCheck:
     """Schritt 1 Fix A: Sprung nur wenn bot_faces_enemy UND enemy_faces_bot (±70°)."""
 
     def _setup(self, bot, bot_az, enemy_az, dist=40.0):
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = bot_az
         bot.alive = True
         bot.human_count = 1
@@ -332,8 +332,8 @@ class TestJumpCooldown:
     """Schritt 1 Fix A (Sicherheitsnetz): JUMP_COOLDOWN=4s verhindert Re-Jump."""
 
     def _setup_jump_ready(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0
         bot.alive = True
         bot.human_count = 1
@@ -400,7 +400,7 @@ class TestJumpDirectionSnap:
         bot.target_player = 99
         # Bot zeigt nach oben (90° neben Gegner, der bei az=0 wäre)
         bot.azimuth = math.pi / 2
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._jump_pending = True
         bot._dodging = False
         bot._jumping = False
@@ -409,8 +409,8 @@ class TestJumpDirectionSnap:
         bot._update_movement(0.02, time.monotonic(), ai_tick=False)
         # Azimuth soll auf (40, 0) gerastet haben → az ≈ 0
         assert bot.azimuth == pytest.approx(0.0, abs=0.01)
-        assert bot.vel[0] == pytest.approx(bot._tank_speed, abs=0.1)
-        assert abs(bot.vel[1]) < 0.5
+        assert bot.vel_x == pytest.approx(bot._tank_speed, abs=0.1)
+        assert abs(bot.vel_y) < 0.5
         assert bot._jumping is True
 
 
@@ -419,8 +419,8 @@ class TestJumpTriggerRound4:
 
     def _setup_facing(self, bot, bot_az, enemy_az, dist=40.0, enemy_closing=25.0):
         """Bot bei (0,0) mit bot_az, Gegner bei (dist, 0) mit enemy_az."""
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = bot_az
         bot.alive = True
         bot.human_count = 1
@@ -470,8 +470,8 @@ class TestEscapeJump:
 
     def _setup_escape(self, bot, enemy_closing=15.0, dist=40.0):
         """Bot zeigt WEG vom Gegner (az=0, Gegner bei (dist,0) = rechts von Bot)."""
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = math.pi  # Bot schaut nach links (weg vom Gegner rechts)
         bot.alive = True
         bot.human_count = 1
@@ -518,7 +518,7 @@ class TestEscapeJump:
     def test_escape_phase2_no_azimuth_snap(self, bot):
         """Phase 2 Escape-Jump (JUMP_WINDUP): Azimuth bleibt, _jump_ang_vel = escape_ang_vel."""
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = math.pi
         bot._jump_pending = True
         bot._dodging = False
@@ -540,8 +540,8 @@ class TestReverseJump:
     """Rückwärtssprung: Bot zeigt Rücken, Gegner schaut auf Bot, Gegner closing ≥ 5."""
 
     def _setup(self, bot, enemy_closing=10.0):
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = math.pi  # Bot zeigt Rücken zu Gegner (bei +x)
         bot.alive = True
         bot.human_count = 1
@@ -637,8 +637,8 @@ class TestStateMachineTransitions:
         bot.human_count = 1
         bot._ai_state = AIState.JUMPING
         bot._jumping = True
-        bot.vel[2] = -5.0   # Fallgeschwindigkeit
-        bot.pos[2] = 0.001  # fast auf Boden
+        bot.vel_z = -5.0   # Fallgeschwindigkeit
+        bot.pos_z = 0.001  # fast auf Boden
         bot._gravity = -9.8
         bot._update_movement(0.02, time.monotonic(), ai_tick=False)
         assert bot._ai_state == AIState.COMBAT
@@ -674,8 +674,8 @@ class TestStateMachineTransitions:
         bot._ai_state = AIState.JUMPING
         bot._jumping = True
         bot.target_player = 99  # nicht validiert solange JUMPING
-        bot.pos[2] = 5.0        # in der Luft
-        bot.vel[2] = -1.0
+        bot.pos_z = 5.0        # in der Luft
+        bot.vel_z = -1.0
         bot._update_movement(0.02, time.monotonic(), ai_tick=True)
         # target_player soll unverändert sein (kein AI-Tick in JUMPING)
         assert bot.target_player == 99
@@ -685,8 +685,8 @@ class TestLandingShotTiming:
     """Schritt 2: tof_to_landing-Prüfung verhindert Schuss bei falscher Timing."""
 
     def _setup_jumping_target(self, bot, z0, vz, target_dist):
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0
         bot._next_shoot = 0.0
         bot._shot_speed = 100.0
@@ -730,7 +730,7 @@ class TestLandingShotOscillation:
         info.vel = [0.0, 0.0, -3.0]
         info.is_airborne = True
         bot.target_player = 99
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.human_count = 1
         bot._ai_state = AIState.LANDING_SHOT
         bot._landing_shot_until = time.monotonic() + 2.0
@@ -749,23 +749,23 @@ class TestLandingShotOscillation:
         info.vel = [0.0, 0.0, -3.0]
         info.is_airborne = True
         bot.target_player = 99
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [10.0, 5.0, 0.0]  # Startet mit Geschwindigkeit
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 10.0; bot.vel_y = 5.0; bot.vel_z = 0.0  # Startet mit Geschwindigkeit
         bot.human_count = 1
         bot._ai_state = AIState.LANDING_SHOT
         bot._landing_shot_until = time.monotonic() + 2.0
         bot._landing_aim_pos = (50.0, 0.0)
         bot._update_movement(0.02, time.monotonic(), ai_tick=False)
-        assert bot.vel[0] == pytest.approx(0.0)
-        assert bot.vel[1] == pytest.approx(0.0)
+        assert bot.vel_x == pytest.approx(0.0)
+        assert bot.vel_y == pytest.approx(0.0)
 
 
 class TestLandingShotFeasibility:
     """_maybe_shoot: Drehtzeit + tof muss < t_land-0.1 sein für LANDING_SHOT-Entry."""
 
     def _setup_jumping_target(self, bot, z0, vz, target_dist, bot_az=0.0):
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = bot_az
         bot._next_shoot = 0.0
         bot._shot_speed = 100.0
@@ -815,8 +815,8 @@ class TestLandingShotZAwareness:
 
     def _setup(self, bot, z0, vz, dist, bot_z=0.0, bot_az=0.0):
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, bot_z]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = bot_z
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = bot_az
         bot._next_shoot = 0.0
         bot._shot_speed = 100.0
@@ -875,8 +875,8 @@ class TestLandingShotGMHoming:
 
     def _setup(self, bot, enemy_flag=""):
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0
         bot._next_shoot = 0.0
         bot._shot_speed = 100.0
@@ -913,8 +913,8 @@ class TestLandingShotTickFires:
 
     def _setup_landing_state(self, bot, enemy_z, enemy_vz):
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0
         bot._shot_speed = 100.0
         bot._next_shoot = 0.0
@@ -1012,8 +1012,8 @@ class TestJumpEnemyFacesBot:
     solange der Gegner sich mit > 5 u/s nähert (velocity fallback)."""
 
     def _setup(self, bot, enemy_az=math.pi, enemy_closing=25.0, dist=40.0):
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0  # bot schaut direkt auf Gegner
         bot.alive = True
         bot.human_count = 1
@@ -1061,7 +1061,7 @@ class TestOffensiveRicochet:
         from bzflag.world_map import BoxObstacle
         # Bot (0,-90), Gegner (0,90), 30×30-Box bei (0,0) um 45° rotiert → direkte LoS blockiert,
         # aber Schüsse über (±50, 0) prallen an der Box-Fläche und treffen den Gegner.
-        bot.pos = [0.0, -90.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = -90.0; bot.pos_z = 0.0
         bot.azimuth = math.pi / 2  # schaut Richtung Norden
         bot.world_half = 100.0
         bot._server_ricochet = server_ricochet
@@ -1129,7 +1129,7 @@ class TestOffensiveRicochet:
 def test_cross_floor_indirect_true_for_elevated_with_teleporters(bot):
     """Gegner auf anderer Etage + Teleporter vorhanden → indirekter Schuss kommt in Frage
     (NICHT an die Sprunghöhe gekoppelt)."""
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.own_flag = ""
     bot._server_ricochet = False
     wmap = MagicMock(); wmap.teleporters = [object()]
@@ -1140,7 +1140,7 @@ def test_cross_floor_indirect_true_for_elevated_with_teleporters(bot):
 
 def test_cross_floor_indirect_false_same_height(bot):
     """Gleiche Höhe → Direktschuss reicht, kein Indirekt-Trigger (auch mit Ricochet)."""
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.own_flag = ""
     bot._server_ricochet = True
     info = make_player(bot, 2, pos=(50.0, 0.0, 0.0))
@@ -1149,7 +1149,7 @@ def test_cross_floor_indirect_false_same_height(bot):
 
 def test_z_attack_skipped_when_teleporter_shot_available(bot):
     """A4: Liegt ein Teleporter-Schuss vor, wird der Z-Sprung übersprungen (sicherer Schuss)."""
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.target_player = 2
     info = make_player(bot, 2, pos=(50.0, 0.0, 5.0))
     info.is_airborne = False

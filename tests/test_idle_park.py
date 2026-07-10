@@ -19,7 +19,7 @@ def test_advance_path_end_parks_in_idle(bot):
     """Pfadende im IDLE → parken statt _new_target: target_pos None, vel/ang_vel 0."""
     _idle(bot)
     bot._nav_path = []          # Pfad bereits leer → Pfadende-Zweig
-    bot.vel = [5.0, 5.0, 0.0]
+    bot.vel_x = 5.0; bot.vel_y = 5.0; bot.vel_z = 0.0
     bot.ang_vel = 1.0
     bot.target_pos = (10.0, 0.0)
 
@@ -28,7 +28,7 @@ def test_advance_path_end_parks_in_idle(bot):
     assert bot.target_pos is None
     assert bot._nav_path == []
     assert bot._nav_goal is None
-    assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
+    assert bot.vel_x == 0.0 and bot.vel_y == 0.0
     assert bot.ang_vel == 0.0
     bot._new_target.assert_not_called()
 
@@ -76,11 +76,11 @@ def test_parked_idle_stays_stopped_in_movement(bot):
     bot._ai_state = AIState.IDLE
     bot.target_pos = None
     bot._jumping = False
-    bot.vel = [7.0, -3.0, 0.0]
+    bot.vel_x = 7.0; bot.vel_y = -3.0; bot.vel_z = 0.0
     bot.ang_vel = 0.8
 
     # ai_tick=False: nur den 60-Hz-Bewegungszweig ausführen, kein KI-Tick.
     bot._dispatch_movement(1.0 / 60.0, time.monotonic(), ai_tick=False)
 
-    assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
+    assert bot.vel_x == 0.0 and bot.vel_y == 0.0
     assert bot.ang_vel == 0.0

@@ -140,7 +140,7 @@ def main():
         if dump_path:
             def _dump_extra(wm):
                 if wm is not None:
-                    _dump_world_map(wm, dump_path, nav=getattr(b, '_nav_graph', None))
+                    _dump_world_map(wm, dump_path, nav=b._nav_graph)
             b.on_world_ready_extra = _dump_extra
         if raw_dump_prefix:
             # Komposition: falls dump_path bereits einen Callback gesetzt hat, ruft

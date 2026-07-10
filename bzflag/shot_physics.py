@@ -12,8 +12,8 @@ Koordinaten-Konvention: identisch zu world_map.py (BZFlag big-endian, Z nach obe
 """
 
 import math
-from typing import Optional, List, Tuple, TYPE_CHECKING
-from collections import namedtuple
+import typing
+from typing import Optional, List, Tuple, TYPE_CHECKING, Final
 
 from .world_map import BoxObstacle, TeleporterObstacle
 # Generische Geometrie-Primitive liegen jetzt in intersect.py (Port bzfs Intersect.cxx).
@@ -28,15 +28,19 @@ from .intersect import (  # noqa: F401
 if TYPE_CHECKING:   # nur Typ-Annotation (obs_grid) — kein Laufzeit-Import nötig
     from .obstacle_grid import ObstacleGrid
 
-# Segment eines Schuss-Pfades (alle absoluten Zeitstempel in Sekunden)
-Segment = namedtuple('Segment', ['px', 'py', 'pz',   # Startpunkt
-                                  'ex', 'ey', 'ez',   # Endpunkt
-                                  't_start', 't_end'])
+# Segment eines Schuss-Pfades (alle absoluten Zeitstempel in Sekunden).
+# Track 5 (mypyc): typing.NamedTuple statt collections.namedtuple — typisierter
+# Attributzugriff in den Hit-Detection-Schleifen (._px statt Tupel-Index), Konstruktion per
+# Positionsargumenten und ._replace()/._fields bleiben wie beim namedtuple kompatibel.
+class Segment(typing.NamedTuple):
+    px: float; py: float; pz: float   # Startpunkt
+    ex: float; ey: float; ez: float   # Endpunkt
+    t_start: float; t_end: float
 
 # Physikalischer Mindestabstand (Einheiten) um Selbst-Treffer nach Bounce zu vermeiden.
 # Wird in simulate_shot_path() per eps = _EPSILON_DIST / speed in Sekunden umgerechnet,
 # damit Laser (100.000 u/s) keinen 100-Einheiten-Blindspot erhält.
-_EPSILON_DIST = 0.1
+_EPSILON_DIST: Final = 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -422,7 +426,7 @@ def _world_boundary_hits(ox: float, oy: float, oz: float,
 # Hauptfunktion: Schuss-Pfad-Simulation
 # ---------------------------------------------------------------------------
 
-_MAX_BOUNCES_DEFAULT = 100  # BZFlag-Standard (SegmentedShotStrategy::makeSegments)
+_MAX_BOUNCES_DEFAULT: Final = 100  # BZFlag-Standard (SegmentedShotStrategy::makeSegments)
 
 
 def simulate_shot_path(pos: Tuple[float, float, float],

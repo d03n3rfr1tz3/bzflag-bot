@@ -41,7 +41,7 @@ class TestCrossingWall:
     def test_oo_in_wand_setzt_ps_crossing(self, bot):
         bot.own_flag = "OO"
         bot._world_map = _make_world(boxes=[_solid_box()])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         status = _sent_status(bot)
         assert status & PS_ALIVE
         assert status & PS_CROSSING
@@ -49,34 +49,34 @@ class TestCrossingWall:
     def test_oo_frei_kein_ps_crossing(self, bot):
         bot.own_flag = "OO"
         bot._world_map = _make_world(boxes=[_solid_box()])
-        bot.pos = [50.0, 0.0, 0.0]   # neben der Box
+        bot.pos_x = 50.0; bot.pos_y = 0.0; bot.pos_z = 0.0   # neben der Box
         assert not (_sent_status(bot) & PS_CROSSING)
 
     def test_nicht_oo_in_wand_kein_ps_crossing(self, bot):
         # Nur OO phast durch Wände — eine andere Flagge in derselben Box crosst nicht.
         bot.own_flag = ""
         bot._world_map = _make_world(boxes=[_solid_box()])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert not (_sent_status(bot) & PS_CROSSING)
 
     def test_teleporter_straddle_setzt_ps_crossing(self, bot):
         # Gilt für jede Flagge (hier ohne).
         bot.own_flag = ""
         bot._world_map = _make_world(teleporters=[_teleporter()])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert _sent_status(bot) & PS_CROSSING
 
     def test_neben_teleporter_kein_ps_crossing(self, bot):
         bot.own_flag = ""
         bot._world_map = _make_world(teleporters=[_teleporter()])
-        bot.pos = [10.0, 0.0, 0.0]   # außerhalb des Querungsfelds
+        bot.pos_x = 10.0; bot.pos_y = 0.0; bot.pos_z = 0.0   # außerhalb des Querungsfelds
         assert not (_sent_status(bot) & PS_CROSSING)
 
     def test_ps_teleporting_bleibt_erhalten(self, bot):
         # Regression: PS_CROSSING-Logik darf PS_TELEPORTING nicht verdrängen.
         bot.own_flag = ""
         bot._world_map = _make_world()
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._teleporting_until = time.monotonic() + 1.0
         status = _sent_status(bot)
         assert status & PS_TELEPORTING

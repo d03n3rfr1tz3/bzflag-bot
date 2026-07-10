@@ -68,8 +68,8 @@ class HitDetectionMixin(BZBotBase):
         segs = self._ricochet_paths.get((shooter, shot_id))
         if segs:
             half_len, half_w, half_h = self._hitbox_half_dims()
-            tcx = self.pos[0]; tcy = self.pos[1]
-            tcz = self.pos[2] + self._tank_height / 2
+            tcx = self.pos_x; tcy = self.pos_y
+            tcz = self.pos_z + self._tank_height / 2
             for seg in segs:
                 if _segment_hits_obb_3d(seg.px, seg.py, seg.pz,
                                          seg.ex, seg.ey, seg.ez,
@@ -82,7 +82,7 @@ class HitDetectionMixin(BZBotBase):
             return False
         dnx, dny, dnz = vx / speed_xyz, vy / speed_xyz, vz / speed_xyz
         shot_range = speed_xyz * lifetime
-        cx = self.pos[0]; cy = self.pos[1]; cz = self.pos[2] + self._tank_height / 2
+        cx = self.pos_x; cy = self.pos_y; cz = self.pos_z + self._tank_height / 2
         dx, dy, dz = cx - px, cy - py, cz - pz
         t_proj = dx * dnx + dy * dny + dz * dnz
         if not (0.0 <= t_proj <= shot_range):
@@ -100,11 +100,11 @@ class HitDetectionMixin(BZBotBase):
         # und Relativ-Sweep beim ersten Schuss genauso aufsetzen wie bisher.
         if not self._shots:
             self._last_hit_check_t   = now
-            self._last_hit_check_pos = (self.pos[0], self.pos[1], self.pos[2])
+            self._last_hit_check_pos = (self.pos_x, self.pos_y, self.pos_z)
             return
-        tank_cx = self.pos[0]
-        tank_cy = self.pos[1]
-        tank_cz = self.pos[2] + self._tank_height / 2
+        tank_cx = self.pos_x
+        tank_cy = self.pos_y
+        tank_cz = self.pos_z + self._tank_height / 2
         eff_r   = self._effective_hit_radius()
         # Teil C: echtes Prüf-Fenster [letzter Check, now] statt des per Stall-Clamp
         # geklemmten dt — der Segment-Test ist für beliebig lange Segmente exakt,
@@ -124,14 +124,14 @@ class HitDetectionMixin(BZBotBase):
         inv_window = 1.0 / window if window > 1.0e-6 else 0.0
         own_dx = own_dy = own_dz = 0.0
         if self._last_hit_check_pos is not None and inv_window > 0.0:
-            own_dx = self.pos[0] - self._last_hit_check_pos[0]
-            own_dy = self.pos[1] - self._last_hit_check_pos[1]
-            own_dz = self.pos[2] - self._last_hit_check_pos[2]
+            own_dx = self.pos_x - self._last_hit_check_pos[0]
+            own_dy = self.pos_y - self._last_hit_check_pos[1]
+            own_dz = self.pos_z - self._last_hit_check_pos[2]
             _max_plaus = 2.0 * self._tank_speed * window + 5.0
             if own_dx*own_dx + own_dy*own_dy + own_dz*own_dz > _max_plaus*_max_plaus:
                 own_dx = own_dy = own_dz = 0.0
         self._last_hit_check_t   = now
-        self._last_hit_check_pos = (self.pos[0], self.pos[1], self.pos[2])
+        self._last_hit_check_pos = (self.pos_x, self.pos_y, self.pos_z)
         # Einmal pro Tick statt pro Schuss: die eigene Flagge (und damit die Hitbox-Masse)
         # ändert sich nicht innerhalb eines Ticks.
         _half_len, _half_w, _half_h = self._hitbox_half_dims()
@@ -174,7 +174,10 @@ class HitDetectionMixin(BZBotBase):
                                 if _p is not None:
                                     gm_tx = _p.pos[0]; gm_ty = _p.pos[1]
                                     gm_tz = _p.pos[2] + self._tank_height / 2
-                        if gm_tx is not None:
+                        # gm_tx/gm_ty/gm_tz werden immer gemeinsam gesetzt (Tupel oben) — alle
+                        # drei prüfen, damit mypy die Narrowing-Lücke schließt (Track 5 M2a:
+                        # players jetzt typisiert, _p.pos[i] kein Any mehr).
+                        if gm_tx is not None and gm_ty is not None and gm_tz is not None:
                             _dx = gm_tx - prev_x; _dy = gm_ty - prev_y; _dz = gm_tz - prev_z
                             _dist = math.sqrt(_dx*_dx + _dy*_dy + _dz*_dz)
                             if _dist > 1e-6:
@@ -332,11 +335,11 @@ class HitDetectionMixin(BZBotBase):
             if not info.alive: continue
             # BU wirkt nur eingegraben (pos[2] < 0), wie überall sonst im Code
             # (_effective_tank_speed, _find_incoming_shot, _effective_optimal_range).
-            if info.flag != "SR" and not (self.own_flag == "BU" and self.pos[2] < 0.0): continue
+            if info.flag != "SR" and not (self.own_flag == "BU" and self.pos_z < 0.0): continue
             if now - info.last_seen > 1.0: continue
-            dx = info.pos[0] - self.pos[0]
-            dy = info.pos[1] - self.pos[1]
-            dz = info.pos[2] - self.pos[2]
+            dx = info.pos[0] - self.pos_x
+            dy = info.pos[1] - self.pos_y
+            dz = info.pos[2] - self.pos_z
             # quadrierter Vergleich statt sqrt (mathematisch identisch, spart die Wurzel pro Kandidat)
             dist_sq = dx*dx + dy*dy + 4.0*dz*dz
             thr = TANK_RADIUS * (1.0 + self._sr_radius_mult)

@@ -1597,7 +1597,7 @@ Verbindung und Server-Kommunikation passieren in Tests nie.
 ```python
 def test_new_threat_behavior(bot):
     bot._ai_state = AIState.COMBAT
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     # Shot aufbauen:
     shot = Shot(shooter_id=1, shot_id=1, pos=[50.0, 0.0, 0.0],
                 vel=[-100.0, 0.0, 0.0], fire_time=time.monotonic(),
@@ -1610,13 +1610,14 @@ def test_new_threat_behavior(bot):
 **Physik-Test** (Beispiel: Decken-Kollision):
 ```python
 def test_ceiling_collision(bot):
-    # Bot aufsteigend unter einem Gebäude
-    bot.pos  = [0.0, 0.0, 5.0]
-    bot.vel  = [0.0, 0.0, 10.0]
+    # Bot aufsteigend unter einem Gebäude (self.pos/self.vel sind seit Track 5 skalare
+    # Attribute — pos_x/pos_y/pos_z, vel_x/vel_y/vel_z — statt Listen; s. Abschnitt 12)
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 5.0
+    bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 10.0
     obs = BoxObstacle(cx=0, cy=0, bottom_z=7.0, height=5.0, ...)
     bot._world_map = mock_world_map(boxes=[obs])
     bot._apply_obstacle_bounds(dt=0.02)
-    assert bot.vel[2] == 0.0    # Decken-Kollision gestoppt
+    assert bot.vel_z == 0.0    # Decken-Kollision gestoppt
 ```
 
 **Wichtig**: Vor dem Test `time.monotonic()` in einer Variable speichern und
@@ -1674,32 +1675,97 @@ Das Fixture `load_map_fixture(name)` ist in `tests/conftest.py` definiert.
 
 ---
 
-## 12. mypyc-Kompilierung (Track 5)
+## 12. Track 5: mypyc-Kompilierung
 
-Der Bot läuft produktiv **mypyc-kompiliert** (AOT, PR #14); unkompiliert bleibt er voll
-lauffähig (Entwicklung/Tests). Build-Kommandos: README, Abschnitt „Kompilieren mit mypyc".
-Das Deployment (Docker-Builder-Stage) liegt außerhalb dieses Repos.
+Der Bot wird mit `mypyc --namespace-packages bot bzflag` zu nativen Erweiterungsmodulen
+kompiliert. mypyc kompiliert nur, was es beweisbar sauber typisieren kann — die folgenden
+Regeln haben sich dabei als notwendig erwiesen und gelten für neuen Code in `bot/`/`bzflag/`.
 
 **Harte Laufzeit-Abhängigkeit `mypy-extensions`:** `from mypy_extensions import trait` läuft
 beim Import in `bot/_bot_base.py` und allen Mixins — **auch unkompiliert**. (`pip install mypy`
 zieht es als Dependency mit; in schlanken Runtime-Umgebungen muss es explizit installiert
 werden, sonst ImportError beim Start.)
 
-**Muster, die mypyc erzwingt (bei Code-Änderungen einhalten):**
+### `getattr(self, "x", default)` vermeiden
 
-1. **`@trait`-Mixins:** mypyc erlaubt Mehrfachvererbung nur, wenn alle Basisklassen Traits
-   sind. Jedes Mixin (`bot/ai/*.py`, `bot/hit_detection.py`, …) trägt `@trait` und erbt von
-   `BZBotBase`.
-2. **`bot/_bot_base.py`:** deklariert alle über die Mixins geteilten Attribute (bewusst `Any`,
-   keine Zuweisungskonflikte) und Methoden (Stubs mit Signaturen exakt aus der Quelle →
-   Liskov-kompatibel) genau einmal, damit mypy/mypyc cross-mixin-Zugriffe auflösen kann.
-   **Pflegeregel: neue oder geänderte geteilte Attribute/Methoden müssen dort manuell
-   nachgezogen werden** (der ursprüngliche Generator existiert nicht mehr — Pflege von Hand,
-   alphabetisch einsortieren).
-3. **Explizite Importe:** kein `from bot.constants import *` — mypyc löst Wildcard-Importe
-   nicht auf; Import-Listen explizit pflegen.
-4. **Statisches `__all__` in `bot/constants.py`:** die Liste ist handgepflegt (kein
-   berechnetes `__all__`); neue UPPERCASE-Konstanten dort eintragen.
+`getattr` mit Default erzwingt unter mypyc den generischen Objekt-Pfad statt des nativen
+Attribut-Slots und verhindert Typinferenz — IMMER direkten Attributzugriff (`self.x`)
+verwenden. Voraussetzung: das Attribut muss in `_bot_base.py::BZBotBase` deklariert UND in
+einer `bot/core.py::_init_*`-Methode garantiert gesetzt sein (sonst wirft der Direktzugriff
+unter mypyc `AttributeError`, wo `getattr` früher still den Default lieferte). Neue lazy
+erzeugte Attribute also immer gleich in `_init_*` initialisieren, nicht erst bei erster
+Verwendung. Ausnahme bleibt dynamischer Dispatch mit berechnetem Namen (Tabellen-Dispatch,
+z.B. `getattr(self, hook)()` in `bot/handlers.py::_apply_set_var`) — das ist kein
+Default-getattr und unter mypyc unproblematisch.
+
+Dieselbe Regel gilt für `getattr` auf fremde Objekte (z.B. `NavGraph`, `FloorLayer`): nur
+durch Direktzugriff ersetzen, wenn die Klasse das Attribut IMMER in `__init__` setzt.
+Fehlt es dann in einem Test-Stub, den Stub ergänzen statt den Produktionscode wieder
+aufzuweichen.
+
+### `Final`-Konstanten
+
+mypyc faltet mit `Final` annotierte Modul-Konstanten zur Compile-Zeit in den generierten
+Code — sie sind danach **nicht mehr per `monkeypatch.setattr("modul.NAME", ...)`
+patchbar** (der native Code liest den eingebrannten Wert, nicht das Modul-Attribut).
+Deshalb: heiße, nie von Tests gepatchte Konstanten (Geometrie-/Physik-/Timing-Werte in
+`bzflag/nav_graph.py`, `bzflag/obstacle_grid.py`, `bzflag/shot_physics.py`,
+`bot/constants.py`) sind mit `Final` annotiert (`CELL_SIZE: Final = 4`). Konstanten, die
+Tests aktiv patchen — aktuell `ASTAR_MAX_EXPANSIONS`/`ASTAR_MAX_MS`
+(`bzflag/nav_graph.py`, s. `tests/test_nav_graph.py`), `NAV_ASYNC_TRIGGER_MS`
+(`bot/constants.py`, s. `tests/test_async_plan.py`) und `TELE_AIM_Z_TOL`
+(`bot/constants.py`, s. `tests/test_teleporter.py`) — bleiben bewusst OHNE `Final`. Neue
+heiße Konstanten defaulten auf `Final`; wird eine später testseitig patchbar gebraucht,
+`Final` explizit weglassen und hier ergänzen.
+
+### GIL-Yield in langen nativen Schleifen
+
+Als interpretierter Bytecode gibt Python an Loop-Grenzen automatisch das GIL frei; als
+mypyc-natives Modul entfallen diese impliziten Yield-Punkte. Lange Schleifen in
+Zweit-Threads (z.B. die A*-Vollsuche des asynchronen Planers, `_astar` in
+`bzflag/nav_graph.py`) können dadurch den 60-Hz-Game-Loop-Thread verhungern lassen. Abhilfe:
+alle ~1024 Iterationen (nicht öfter — `time.sleep`/`perf_counter` sind nicht gratis) ein
+explizites `time.sleep(0)` einstreuen; das gibt das GIL frei, verhält sich interpretiert wie
+kompiliert identisch und ist im Schnellplan (selten >1024 Iterationen) vernachlässigbar.
+
+### Typisierung statt `Any` (M2a/M2b)
+
+`bot/_bot_base.py::BZBotBase` deklariert die über die Mixins geteilten Attribute. Ein
+Attribut bekommt einen konkreten Typ (`bool`/`int`/`str`/Container), NUR wenn es über
+ALLE Zuweisungen im Code hinweg repräsentationskonfliktfrei ist (grep-geprüft) — mypyc kann
+dann native Slots statt des generischen Objekt-Pfads erzeugen. Bei echtem
+Mischtyp (Optional/Union, Threads/Locks/Callbacks) bleibt das Attribut `Any`.
+
+**`float` ist in `@trait`-Klassen tabu** (Stand mypy/mypyc 2.2.0): unboxed float-Attribute
+brauchen Bitmap-Definedness-Tracking, das mypyc für Traits nicht unterstützt — der Codegen
+crasht mit `ValueError: value is not in list` (emitfunc.get_attr_expr), sobald eine
+Trait-Methode ein solches Attribut schreibt (Minimal-Repro: @trait mit `x: float` +
+Trait-Methode mit `self.x = …`). Float-Attribute in `BZBotBase` bleiben deshalb bewusst
+`Any` (boxed); `bool`/`int`/`str`/Container haben Sentinel-Werte und sind nicht betroffen.
+In NICHT-Trait-Klassen (`FloorLayer`, `NavGraph`, `Shot`, …) sind float-Attribute
+unproblematisch und erwünscht.
+
+### Exception-Variablen: ein Name pro Typ
+
+mypyc typisiert eine `except … as exc`-Variable funktionsweit mit dem Typ ihres ERSTEN
+Handlers. Zwei Handler unterschiedlichen Typs mit demselben Variablennamen in einer
+Funktion (`except _ParseError as exc: … except Exception as exc: …`) kompilieren, aber der
+zweite Handler stirbt zur Laufzeit mit `TypeError: … object expected` — genau dort, wo er
+graceful degradieren sollte (so geschehen in `bzflag/world_parser.py::parse_world`).
+Regel: pro except-Zweig ein eigener Variablenname, wenn die Typen differieren.
+
+### Stand der Suite gegen den kompilierten Build
+
+`mypyc --namespace-packages bot bzflag` kompiliert vollständig; der Kern der Suite läuft
+auch kompiliert (Stand Track 5: 1111 von 1207 Tests grün). Die verbleibenden Failures sind
+KEINE Produktionsfehler, sondern Test-Infrastruktur: Tests, die Methoden auf `BZBot`-
+Instanzen monkeypatchen (`bot._tick_combat = …`), scheitern am read-only-Attribut nativer
+Klassen. Wer die Suite vollständig gegen das Kompilat fahren will, muss diese Patterns auf
+Callback-/Subclass-Muster umstellen (eigener Track, bisher bewusst nicht gemacht). Der eigene
+Tank-Zustand (`self.pos`/`self.vel`, ehemals 3-elementige Listen) ist aus demselben Grund
+in sechs skalare Attribute aufgelöst (`pos_x/pos_y/pos_z`, `vel_x/vel_y/vel_z`) — das
+betrifft NUR den eigenen Bot; `PlayerInfo.pos`/`Shot.pos` (andere Spieler/Schüsse,
+`bot/models.py`) bleiben unverändert Listen.
 
 ---
 

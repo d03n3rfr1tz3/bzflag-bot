@@ -36,7 +36,7 @@ class NavigationMixin(BZBotBase):
 
     def _wp_reach_radius(self) -> float:
         """Engerer Radius direkt vor NAV_JUMP-Anlauf-WP (aufwärts), sonst NAV_CELL_SIZE."""
-        nav_path = getattr(self, "_nav_path", [])
+        nav_path = self._nav_path
         if len(nav_path) >= 2 and nav_path[1][2] - self._get_floor_z() > 1.5:
             return NAV_CELL_SIZE
         return NAV_CELL_SIZE * 1.25
@@ -47,8 +47,8 @@ class NavigationMixin(BZBotBase):
         Front-Catch (Pixel-on): der Tank landet, sobald seine Front die Zielkante erreicht —
         die effektiv zu überbrückende Strecke ist daher hdist - JUMP_EDGE_TOL (deckungsgleich
         mit der Sprungkanten-Planung in nav_graph._vertical_neighbors)."""
-        dx, dy = target_wp[0] - self.pos[0], target_wp[1] - self.pos[1]
-        dz = target_wp[2] - self.pos[2]
+        dx, dy = target_wp[0] - self.pos_x, target_wp[1] - self.pos_y
+        dz = target_wp[2] - self.pos_z
         v0 = self._effective_jump_velocity()
         g_abs = abs(self._effective_gravity())
         disc = v0 * v0 - 2.0 * g_abs * dz
@@ -62,9 +62,9 @@ class NavigationMixin(BZBotBase):
         """True wenn Bot Ziel-WP beim Abstieg physikalisch erreichen kann
         und der Bot bereits präzise in Sprungrichtung zeigt (±5°).
         Front-Catch wie in _nav_jump_geometry_ok (hdist - JUMP_EDGE_TOL)."""
-        dx, dy = target_wp[0] - self.pos[0], target_wp[1] - self.pos[1]
+        dx, dy = target_wp[0] - self.pos_x, target_wp[1] - self.pos_y
         hdist  = math.hypot(dx, dy)
-        dz     = target_wp[2] - self.pos[2]
+        dz     = target_wp[2] - self.pos_z
         v0 = self._effective_jump_velocity()
         g_abs = abs(self._effective_gravity())
         disc = v0 * v0 - 2.0 * g_abs * dz
@@ -91,16 +91,16 @@ class NavigationMixin(BZBotBase):
                 and now - self._wp_start_time > self._wp_timeout):
             self._wp_fail_count += 1
             _wp_z = nav_path[0][2]
-            _d2d  = math.hypot(self.target_pos[0] - self.pos[0],
-                               self.target_pos[1] - self.pos[1])
-            if getattr(self, '_debug_log_path', False):
+            _d2d  = math.hypot(self.target_pos[0] - self.pos_x,
+                               self.target_pos[1] - self.pos_y)
+            if self._debug_log_path:
                 logger.debug(
                     "[%s] Pfad: WP-Timeout #%d Bot=(%.1f,%.1f z=%.2f floor=%.2f)"
                     " WP=(%.1f,%.1f z=%.2f) dist2d=%.2f dz=%.2f r=%.1f",
                     self.callsign, self._wp_fail_count,
-                    self.pos[0], self.pos[1], self.pos[2], self._get_floor_z(),
+                    self.pos_x, self.pos_y, self.pos_z, self._get_floor_z(),
                     self.target_pos[0], self.target_pos[1], _wp_z,
-                    _d2d, self.pos[2] - _wp_z, self._wp_reach_radius())
+                    _d2d, self.pos_z - _wp_z, self._wp_reach_radius())
             if self._wp_fail_count >= 2:
                 self._nav_path = []
                 self._nav_goal = None
@@ -116,11 +116,11 @@ class NavigationMixin(BZBotBase):
             wp_x, wp_y, wp_z = nav_path[0][0], nav_path[0][1], nav_path[0][2]
         else:
             wp_x, wp_y = self.target_pos
-            wp_z = self.pos[2]
+            wp_z = self.pos_z
         aim_x, aim_y = wp_x, wp_y
         r = self._wp_reach_radius()
-        dist_to_wp = math.hypot(wp_x - self.pos[0], wp_y - self.pos[1])
-        dx, dy = aim_x - self.pos[0], aim_y - self.pos[1]
+        dist_to_wp = math.hypot(wp_x - self.pos_x, wp_y - self.pos_y)
+        dx, dy = aim_x - self.pos_x, aim_y - self.pos_y
         if math.hypot(dx, dy) < 0.001:
             self._new_target()
             return True
@@ -152,27 +152,27 @@ class NavigationMixin(BZBotBase):
                 sin_d = max(math.sin(abs(diff)), 0.02)
                 speed = min(_eff_speed,
                             _eff_turn * dist_to_wp / (2.0 * sin_d))
-            if getattr(self, '_debug_log_path', False) and dist_to_wp < r * 3.0:
+            if self._debug_log_path and dist_to_wp < r * 3.0:
                 _t = time.monotonic()
-                if _t - getattr(self, '_debug_wp_near_t', 0.0) > 0.5:
+                if _t - self._debug_wp_near_t > 0.5:
                     self._debug_wp_near_t = _t
                     logger.debug(
                         "[%s] Pfad: Nahe WP (%.1f,%.1f,%.1f) Bot=(%.1f,%.1f,%.1f)"
                         " dist=%.2f r=%.1f spd=%.1f diff=%.0f° az=%.0f°",
                         self.callsign, wp_x, wp_y, wp_z,
-                        self.pos[0], self.pos[1], self.pos[2],
+                        self.pos_x, self.pos_y, self.pos_z,
                         dist_to_wp, r, speed,
                         math.degrees(diff), math.degrees(self.azimuth))
         speed, self.ang_vel = self._apply_movement_caps(speed, self.ang_vel)
-        self.vel[0] = math.cos(self.azimuth) * speed
-        self.vel[1] = math.sin(self.azimuth) * speed
+        self.vel_x = math.cos(self.azimuth) * speed
+        self.vel_y = math.sin(self.azimuth) * speed
         self._apply_bounds(dt, half)
-        if getattr(self, '_debug_log_path', False) and self._is_inside_obstacle():
+        if self._debug_log_path and self._is_inside_obstacle():
             _t = time.monotonic()
-            if _t - getattr(self, '_debug_obstacle_logged', 0.0) > 1.0:
+            if _t - self._debug_obstacle_logged > 1.0:
                 self._debug_obstacle_logged = _t
                 logger.debug("[%s] Pfad: Kollision bei (%.0f,%.0f) Ziel:%s",
-                             self.callsign, self.pos[0], self.pos[1], self.target_pos)
+                             self.callsign, self.pos_x, self.pos_y, self.target_pos)
         return True
 
     def _move_to_target(self, dt: float, half: float) -> None:
@@ -192,16 +192,16 @@ class NavigationMixin(BZBotBase):
         Port von LocalPlayer::doUpdateMotion (crossesTeleporter → getPointWRT → sendTeleport).
         Läuft in jedem State (auch im Sprung/Fall): teleport_through erhält die Z-Höhe relativ zu
         bottom_z und reicht vel[2] unverändert durch — der AI-/Sprung-State bleibt unangetastet."""
-        world_map = getattr(self, "_world_map", None)
+        world_map = self._world_map
         if world_map is None or not world_map.teleporters:
             return
         # PhantomZone togglet zoned statt zu teleportieren (P4-FLG-03) → hier nicht teleportieren.
         if self.own_flag == "PZ":
             return
-        if now < getattr(self, "_teleporting_until", 0.0):
+        if now < self._teleporting_until:
             return  # Re-Trigger-Sperre (mirror isTeleporting())
         ox, oy, oz = old
-        dx, dy, dz = self.pos[0] - ox, self.pos[1] - oy, self.pos[2] - oz
+        dx, dy, dz = self.pos_x - ox, self.pos_y - oy, self.pos_z - oz
         if abs(dx) < 1e-9 and abs(dy) < 1e-9:
             return  # keine Horizontalbewegung → keine Feld-Ebene gequert
         # Frühestes gequertes Feld (t ∈ [0,1]) bestimmen
@@ -215,7 +215,7 @@ class NavigationMixin(BZBotBase):
                 best_t, best_ti, best_face = t, ti, face
         if best_ti < 0:
             return
-        link_map = getattr(self, "_link_map", None) or {}
+        link_map = self._link_map or {}
         target = link_map.get(2 * best_ti + best_face)
         if target is None:
             return
@@ -227,17 +227,17 @@ class NavigationMixin(BZBotBase):
         # Position UND Velocity in einem Aufruf transformieren (Z relativ zu bottom_z bleibt
         # erhalten → Sprunghöhe; vel[2] unverändert → Sprung-/Fallbewegung läuft nahtlos weiter).
         npx, npy, npz, nvx, nvy, nvz = teleport_through(
-            self.pos[0], self.pos[1], self.pos[2],
-            self.vel[0], self.vel[1], self.vel[2],
+            self.pos_x, self.pos_y, self.pos_z,
+            self.vel_x, self.vel_y, self.vel_z,
             src_tele, best_face, dst_tele, exit_face)
         # Exit-Validierung: liegt der Austritt in einem Hindernis → Teleport verwerfen (revert wie
         # LocalPlayer: Position zurück, Horizontal-Velocity 0, vel[2] behalten).
-        self.pos[0], self.pos[1], self.pos[2] = npx, npy, npz
+        self.pos_x, self.pos_y, self.pos_z = npx, npy, npz
         if self._is_inside_obstacle():
-            self.pos[0], self.pos[1], self.pos[2] = ox, oy, oz
-            self.vel[0] = self.vel[1] = 0.0
+            self.pos_x, self.pos_y, self.pos_z = ox, oy, oz
+            self.vel_x = self.vel_y = 0.0
             return
-        self.vel[0], self.vel[1], self.vel[2] = nvx, nvy, nvz
+        self.vel_x, self.vel_y, self.vel_z = nvx, nvy, nvz
         radians1 = src_tele.angle + (0.0 if best_face == 0 else math.pi)
         radians2 = dst_tele.angle + (0.0 if exit_face == 1 else math.pi)
         self.azimuth = _wrap(self.azimuth + (radians2 - radians1))
@@ -249,15 +249,15 @@ class NavigationMixin(BZBotBase):
         # --debug-log-tele. „geplant" = ein A*-Pfad führte hindurch und besteht nach dem Resync fort.
         logger.info("[%s] Teleporter genutzt (Tor %d→%d)",
                     self.callsign, 2 * best_ti + best_face, target)
-        if getattr(self, "_debug_log_tele", False):
-            _planned = bool(getattr(self, "_nav_path", None))
+        if self._debug_log_tele:
+            _planned = bool(self._nav_path)
             logger.debug(
                 "[%s] Tele-Detail: (%.1f,%.1f,%.1f)→(%.1f,%.1f,%.1f) Δz=%+.1f vz=%.1f "
                 "Δaz=%+.1f° %s%s",
-                self.callsign, ox, oy, oz, npx, npy, npz, npz - oz, self.vel[2],
+                self.callsign, ox, oy, oz, npx, npy, npz, npz - oz, self.vel_z,
                 math.degrees(radians2 - radians1),
                 "geplant" if _planned else "ungeplant",
-                "" if self.vel[2] == 0.0 else " (im Sprung/Fall)")
+                "" if self.vel_z == 0.0 else " (im Sprung/Fall)")
 
     def _resync_path_after_teleport(self, ox: float, oy: float,
                                     nx: float, ny: float) -> None:
@@ -265,7 +265,7 @@ class NavigationMixin(BZBotBase):
         Eintritts- als an der Austrittsseite) — verhindert Zurückfahren zum Eingang. Führte ein
         geplanter Pfad durch den Teleporter, bleibt der Austritts-WP Ziel (kein Replan); war der
         Teleport ungewollt, leert sich der Pfad → der nächste Boden-Tick plant neu (deferred)."""
-        nav_path = getattr(self, "_nav_path", None)
+        nav_path = self._nav_path
         if nav_path:
             while nav_path and (math.hypot(nav_path[0][0] - ox, nav_path[0][1] - oy)
                                 < math.hypot(nav_path[0][0] - nx, nav_path[0][1] - ny)):
@@ -280,7 +280,7 @@ class NavigationMixin(BZBotBase):
                 self.target_pos = None
             return
         # Direktziel: nur invalidieren, wenn es jetzt hinter uns liegt
-        tp = getattr(self, "target_pos", None)
+        tp = self.target_pos
         if tp is not None and (math.hypot(tp[0] - ox, tp[1] - oy)
                                < math.hypot(tp[0] - nx, tp[1] - ny)):
             self._nav_goal = None
@@ -293,7 +293,7 @@ class NavigationMixin(BZBotBase):
 
         cap_wps deckelt die WP-Anzahl (COMBAT: 8). Dauerte die Haupt-Thread-Suche länger als
         NAV_ASYNC_TRIGGER_MS, wird zusätzlich eine Hintergrund-Vollsuche angestoßen (P4-INF-01)."""
-        nav = getattr(self, "_nav_graph", None)
+        nav = self._nav_graph
         self._nav_goal = (goal_x, goal_y)
         # Jeder Plan-Request invalidiert ältere (in-flight/fertige) Async-Ergebnisse.
         self._plan_gen += 1
@@ -302,22 +302,22 @@ class NavigationMixin(BZBotBase):
         # Nur die Achse(n) halbieren, die zu nah am Rand sind.
         _EDGE_MARGIN = 15.0
         _half = self.world_half
-        if abs(self.pos[0]) > _half - _EDGE_MARGIN or abs(self.pos[1]) > _half - _EDGE_MARGIN:
-            ex = (((_half / 2.0) * (1.0 if self.pos[0] > 0.0 else -1.0))
-                  if abs(self.pos[0]) > _half - _EDGE_MARGIN else self.pos[0])
-            ey = (((_half / 2.0) * (1.0 if self.pos[1] > 0.0 else -1.0))
-                  if abs(self.pos[1]) > _half - _EDGE_MARGIN else self.pos[1])
+        if abs(self.pos_x) > _half - _EDGE_MARGIN or abs(self.pos_y) > _half - _EDGE_MARGIN:
+            ex = (((_half / 2.0) * (1.0 if self.pos_x > 0.0 else -1.0))
+                  if abs(self.pos_x) > _half - _EDGE_MARGIN else self.pos_x)
+            ey = (((_half / 2.0) * (1.0 if self.pos_y > 0.0 else -1.0))
+                  if abs(self.pos_y) > _half - _EDGE_MARGIN else self.pos_y)
             self._nav_path  = []
             self.target_pos = (ex, ey)
             self._wp_start_time = time.monotonic()
             self._wp_fail_count = 0
             self._wp_timeout    = (WP_TIMEOUT_BASE
-                                   + math.hypot(ex - self.pos[0], ey - self.pos[1])
+                                   + math.hypot(ex - self.pos_x, ey - self.pos_y)
                                    * WP_TIMEOUT_SCALE)
             return
 
         if nav is None or self._can_drive_through_obstacles():
-            if getattr(self, '_debug_log_path', False):
+            if self._debug_log_path:
                 logger.debug("[%s] Pfad: Direktpfad (%s) → (%.0f,%.0f)",
                              self.callsign,
                              "Flagge" if self._can_drive_through_obstacles() else "kein NavGraph",
@@ -326,7 +326,7 @@ class NavigationMixin(BZBotBase):
             self._nav_path  = []
             return
         blocked = {k for k, v in self._nav_jump_cooldowns.items() if v > time.monotonic()}
-        sx, sy, sz = self.pos[0], self.pos[1], self.pos[2]
+        sx, sy, sz = self.pos_x, self.pos_y, self.pos_z
         # Reisegeschwindigkeit einmal snapshotten (Flaggen-Boost → weitere Sprünge planbar,
         # deckungsgleich zum reaktiven Executor). Plain-Value → reentrant an Sync- und Async-Plan.
         ts = self._travel_tank_speed()
@@ -336,7 +336,7 @@ class NavigationMixin(BZBotBase):
                              label="Schnellplan", partial_level=logging.DEBUG,
                              tank_speed=ts)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        if getattr(self, '_debug_log_path', False):
+        if self._debug_log_path:
             logger.debug("[%s] Pfad: %d WPs von (%.0f,%.0f) → (%.0f,%.0f) [%.0fms]%s",
                          self.callsign, len(path), sx, sy, goal_x, goal_y, elapsed_ms,
                          f": {path[:2]}" if path else " → kein Pfad (Direktziel)")
@@ -363,8 +363,8 @@ class NavigationMixin(BZBotBase):
             self._wp_start_time = time.monotonic()
             self._wp_fail_count = 0
             self._wp_timeout = (WP_TIMEOUT_BASE
-                                + math.hypot(path[0][0] - self.pos[0],
-                                             path[0][1] - self.pos[1])
+                                + math.hypot(path[0][0] - self.pos_x,
+                                             path[0][1] - self.pos_y)
                                 * WP_TIMEOUT_SCALE)
         else:
             self._nav_path  = []
@@ -372,8 +372,8 @@ class NavigationMixin(BZBotBase):
             self._wp_start_time = time.monotonic()
             self._wp_fail_count = 0
             self._wp_timeout = (WP_TIMEOUT_BASE
-                                + math.hypot(goal_x - self.pos[0],
-                                             goal_y - self.pos[1])
+                                + math.hypot(goal_x - self.pos_x,
+                                             goal_y - self.pos_y)
                                 * WP_TIMEOUT_SCALE)
 
     def _submit_async_plan(self, sx: float, sy: float, sz: float,
@@ -385,7 +385,7 @@ class NavigationMixin(BZBotBase):
         Der NavGraph ist reentrant; der Worker bekommt nur Plain-Value-Snapshots und liest nie
         self.*-Mutables. Läuft bereits eine Suche, wird sie nur bei Ziel-Wechsel kooperativ
         abgebrochen (sonst weiterlaufen lassen) und KEINE zweite gestartet."""
-        nav = getattr(self, "_nav_graph", None)
+        nav = self._nav_graph
         if nav is None:
             return
         th = self._async_plan_thread
@@ -425,7 +425,7 @@ class NavigationMixin(BZBotBase):
         seinem aktuellen Fortschritt, statt zu WP0 zurückzudrehen. z fließt ein, damit eine
         xy-nahe Oberetage nicht fälschlich matcht.
         Rückgabe: (gedroppte WP-Anzahl, perpendikulärer Routen-Abstand, Rest-Pfad)."""
-        px, py, pz = self.pos[0], self.pos[1], self.pos[2]
+        px, py, pz = self.pos_x, self.pos_y, self.pos_z
         if len(path) == 1:
             wx, wy, wz = path[0]
             return 0, math.hypot(wx - px, wy - py, wz - pz), path
@@ -471,7 +471,7 @@ class NavigationMixin(BZBotBase):
         dropped, route_d, path = self._trim_traversed_prefix(path)
         if route_d > NAV_ASYNC_RESYNC_TOL:
             return                                   # Bot nicht (mehr) auf dieser Route
-        if getattr(self, '_debug_log_path', False):
+        if self._debug_log_path:
             logger.debug("[%s] Pfad: Async-Vollsuche übernommen (%d WPs, %d Prefix gedroppt, d=%.1f) "
                          "→ (%.0f,%.0f)", self.callsign, len(path), dropped, route_d, gx, gy)
         self._apply_planned_path(path, gx, gy, cap_wps)
@@ -480,17 +480,17 @@ class NavigationMixin(BZBotBase):
         """Rückt im Pfad vor; löst NAV_JUMP aus wenn nächster WP auf anderer Etage."""
         if not timed_out:
             self._wp_fail_count = 0
-        nav_path = getattr(self, "_nav_path", [])
+        nav_path = self._nav_path
         if nav_path:
             _reached_wp   = nav_path[0]
-            _reached_dist = math.hypot(_reached_wp[0] - self.pos[0],
-                                       _reached_wp[1] - self.pos[1])
+            _reached_dist = math.hypot(_reached_wp[0] - self.pos_x,
+                                       _reached_wp[1] - self.pos_y)
             nav_path.pop(0)
         else:
             _reached_wp, _reached_dist = None, 0.0
         if nav_path:
             wp = nav_path[0]
-            if getattr(self, '_debug_log_path', False):
+            if self._debug_log_path:
                 logger.debug(
                     "[%s] Pfad: WP (%s dist=%.2f timed=%s) → (%.0f,%.0f,z=%.1f), %d verbleibend",
                     self.callsign,
@@ -501,9 +501,9 @@ class NavigationMixin(BZBotBase):
             # P3-NAV-02-Folgefix: Teleport-Exit-WP (z.B. z=30 am Ziel-Tor) wird NICHT angesprungen,
             # sondern durch das Tor angefahren — der reaktive _check_teleport_crossing warpt den Bot
             # samt Höhe. Sonst löste der z-Sprung des Exit-WP hier fälschlich NAV_JUMP aus.
-            _nav = getattr(self, "_nav_graph", None)
+            _nav = self._nav_graph
             _is_tele_exit = (_nav is not None
-                             and (round(wp[0], 1), round(wp[1], 1)) in getattr(_nav, "_tele_exit_wps", set()))
+                             and (round(wp[0], 1), round(wp[1], 1)) in _nav._tele_exit_wps)
             # OO ausgeschlossen: man kann mit OO nicht auf einem Dach landen (fällt zurück durch) →
             # ein Sprung dorthin wäre sinnlos und würde sich endlos wiederholen; WP wird am Boden phasend angefahren.
             if wp[2] - floor_z > 1.5 and self.own_flag not in ("NJ", "BU", "OO") and not _is_tele_exit:
@@ -531,7 +531,7 @@ class NavigationMixin(BZBotBase):
                     self._wp_start_time = None
                     self.target_pos = None
                     return
-                az_to_wp = math.atan2(wp[1] - self.pos[1], wp[0] - self.pos[0])
+                az_to_wp = math.atan2(wp[1] - self.pos_y, wp[0] - self.pos_x)
                 self._nav_jump_align_wp = wp
                 self._nav_jump_align_start = time.monotonic()
                 self._nav_jump_align_return_state = self._ai_state
@@ -540,18 +540,18 @@ class NavigationMixin(BZBotBase):
             # Tor-Austritts-WP erreicht (Eingang gerade abgehakt) → letztes Stück direkt in die
             # Tor-Mitte fahren (NAV_TELE), statt am mittenseitigen Exit-WP davor zu stoppen.
             if _is_tele_exit:
-                center = getattr(_nav, "_tele_cross_centers", {}).get(
+                center = _nav._tele_cross_centers.get(
                     (round(wp[0], 1), round(wp[1], 1)))
                 if center is not None and self._try_engage_nav_tele(center):
                     return
             self.target_pos = (wp[0], wp[1])
             self._wp_start_time = time.monotonic()
             self._wp_timeout = (WP_TIMEOUT_BASE
-                                + math.hypot(wp[0] - self.pos[0],
-                                             wp[1] - self.pos[1])
+                                + math.hypot(wp[0] - self.pos_x,
+                                             wp[1] - self.pos_y)
                                 * WP_TIMEOUT_SCALE)
         else:
-            if getattr(self, '_debug_log_path', False):
+            if self._debug_log_path:
                 logger.debug("[%s] Pfad: Fertig → Neuziel", self.callsign)
             self._wp_start_time = None
             if self._ai_state == AIState.COMBAT and self.target_player is not None:
@@ -567,8 +567,8 @@ class NavigationMixin(BZBotBase):
                 self.target_pos = None
                 self._nav_path  = []
                 self._nav_goal  = None
-                self.vel[0]  = 0.0
-                self.vel[1]  = 0.0
+                self.vel_x  = 0.0
+                self.vel_y  = 0.0
                 self.ang_vel = 0.0
             else:
                 self._new_target()
@@ -579,7 +579,7 @@ class NavigationMixin(BZBotBase):
         bestehende Rate). Auf _tank_turn_rate gedeckelt — BZFlag: am Absprung fixiert, in der Luft
         unveränderlich. vel[0/1] müssen vor dem Aufruf gesetzt sein."""
         fallback = self._jump_ang_vel if self.own_flag == "WG" else 0.0
-        disc = v0 * v0 - 2.0 * g_abs * (wp[2] - self.pos[2])
+        disc = v0 * v0 - 2.0 * g_abs * (wp[2] - self.pos_z)
         if disc < 0:
             return fallback
         t_flight = (v0 + math.sqrt(disc)) / max(g_abs, 1e-6)   # absteigende Nulldurchgangszeit
@@ -593,13 +593,13 @@ class NavigationMixin(BZBotBase):
             if ep is not None and info is not None and abs(wp[2] - info.pos[2]) <= NAV_JUMP_Z_TOL:
                 target = ep
         if target is None:
-            nav_path = getattr(self, "_nav_path", [])          # Invariante: nav_path[0] == wp
+            nav_path = self._nav_path          # Invariante: nav_path[0] == wp
             if len(nav_path) >= 2:
                 target = (nav_path[1][0], nav_path[1][1])
         if target is None:
             return fallback
-        lx = self.pos[0] + self.vel[0] * t_flight              # voraussichtl. Landepunkt (ballistisch)
-        ly = self.pos[1] + self.vel[1] * t_flight
+        lx = self.pos_x + self.vel_x * t_flight              # voraussichtl. Landepunkt (ballistisch)
+        ly = self.pos_y + self.vel_y * t_flight
         delta = _angle_diff(math.atan2(target[1] - ly, target[0] - lx), self.azimuth)
         return math.copysign(min(abs(delta / t_flight), self._tank_turn_rate), delta)
 
@@ -608,10 +608,10 @@ class NavigationMixin(BZBotBase):
         self._nav_jump_target_z = wp[2]
         v0 = self._effective_jump_velocity()
         g_abs = abs(self._effective_gravity())
-        self.vel[2] = self._jump_launch_vz(self.vel[2])
-        dz       = wp[2] - self.pos[2]
-        hdist    = math.hypot(wp[0] - self.pos[0], wp[1] - self.pos[1])
-        az_to_wp = math.atan2(wp[1] - self.pos[1], wp[0] - self.pos[0])
+        self.vel_z = self._jump_launch_vz(self.vel_z)
+        dz       = wp[2] - self.pos_z
+        hdist    = math.hypot(wp[0] - self.pos_x, wp[1] - self.pos_y)
+        az_to_wp = math.atan2(wp[1] - self.pos_y, wp[0] - self.pos_x)
         disc     = v0 * v0 - 2.0 * g_abs * dz
         _ts      = self._travel_tank_speed()   # deckungsgleich zur Sprungkanten-Planung (Flaggen-Boost)
         needed_hspeed = _ts
@@ -623,8 +623,8 @@ class NavigationMixin(BZBotBase):
             if 1.0 < calc <= _ts:
                 needed_hspeed = calc
         # Velocity in Blickrichtung (self.azimuth) — NAV_JUMP_ALIGN hat Ausrichtung sichergestellt
-        self.vel[0]       = math.cos(self.azimuth) * needed_hspeed
-        self.vel[1]       = math.sin(self.azimuth) * needed_hspeed
+        self.vel_x       = math.cos(self.azimuth) * needed_hspeed
+        self.vel_y       = math.sin(self.azimuth) * needed_hspeed
         self._jumping      = True
         # Lande-Drehung am Absprung fixieren (BZFlag: in der Luft unveränderlich, außer WG):
         # zum nächsten Wegpunkt, bzw. zum Gegner wenn der Landepunkt auf Gegner-Höhe liegt.
@@ -635,7 +635,7 @@ class NavigationMixin(BZBotBase):
         # 5-s-Timeout „steigt auf sich selbst aus" (No-Op) → Endlosfalle.
         _owner = self._ai_state
         if _owner == AIState.NAV_JUMP_ALIGN:
-            _owner = getattr(self, "_nav_jump_align_return_state", AIState.SEEKING)
+            _owner = self._nav_jump_align_return_state
         self._nav_jump_return_state = _owner
         self._transition_to(AIState.NAV_JUMP)
         logger.info("[%s] NAV_JUMP → (%.1f, %.1f, z=%.1f) hdist=%.1fu hspeed=%.1f az=%.0f° ziel=%.0f°",
@@ -652,10 +652,10 @@ class NavigationMixin(BZBotBase):
         cx, cy = center
         now = time.monotonic()
         self._nav_tele_cooldowns = {k: v for k, v in self._nav_tele_cooldowns.items() if v > now}
-        dist = math.hypot(cx - self.pos[0], cy - self.pos[1])
+        dist = math.hypot(cx - self.pos_x, cy - self.pos_y)
         key = (round(cx), round(cy))
         if dist > NAV_TELE_ENGAGE_DIST or self._nav_tele_cooldowns.get(key, 0) > now:
-            if getattr(self, "_debug_log_tele", False):
+            if self._debug_log_tele:
                 logger.debug("[%s] NAV_TELE nicht engaged (dist=%.1fu cd=%s)",
                              self.callsign, dist, self._nav_tele_cooldowns.get(key, 0) > now)
             return False
@@ -666,5 +666,5 @@ class NavigationMixin(BZBotBase):
         self._wp_start_time = None
         self._transition_to(AIState.NAV_TELE)
         logger.info("[%s] NAV_TELE → Tor-Mitte (%.1f, %.1f) von (%.1f, %.1f) dist=%.1fu",
-                    self.callsign, cx, cy, self.pos[0], self.pos[1], dist)
+                    self.callsign, cx, cy, self.pos_x, self.pos_y, dist)
         return True

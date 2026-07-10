@@ -28,7 +28,7 @@ def test_on_pause_unknown_player_noop(bot):
 
 def test_paused_enemy_not_acquired(bot):
     """Pausierter Gegner (in FoV + Radar) wird NICHT als Ziel gewählt."""
-    bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
     bot.human_count = 1
     info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0))
     assert bot._find_target_player() == 2      # Kontrolle: ohne Pause anvisierbar
@@ -50,7 +50,7 @@ def test_paused_target_not_shot(bot, monkeypatch):
     """Pausiertes Ziel → kein gezielter Schuss (Slots/limitierte Schüsse bleiben erhalten)."""
     bot.own_flag = ""
     bot.human_count = 1
-    bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
     bot._next_shoot = 0.0
     monkeypatch.setattr(bot, "_can_shoot", lambda: True)
     monkeypatch.setattr(bot, "_next_slot_ready", lambda now: True)
@@ -72,7 +72,7 @@ def test_paused_target_dropped_after_wait(bot):
     """Pausiertes Ziel: kurz halten, nach PAUSE_WAIT_S aufgeben → SEEKING."""
     from bot.constants import PAUSE_WAIT_S
     from bot.models import AIState
-    bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
     bot.human_count = 1
     bot._ai_state = AIState.COMBAT
     info = make_player(bot, pid=2, pos=(30.0, 0.0, 0.0))
@@ -92,7 +92,7 @@ def test_paused_target_dropped_after_wait(bot):
 
 def test_unpause_allows_reacquire(bot):
     """Nach Un-Pause ist der Gegner wieder anvisierbar."""
-    bot.pos = [0.0, 0.0, 0.0]; bot.azimuth = 0.0
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.azimuth = 0.0
     bot.human_count = 1
     info = make_player(bot, pid=2, pos=(50.0, 0.0, 0.0))
     info.paused = True

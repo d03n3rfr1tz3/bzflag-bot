@@ -248,10 +248,10 @@ class HandlersMixin(BZBotBase):
             if (self.own_flag
                     and self.own_flag not in self.good_flags
                     and self.own_flag not in self.bad_flags):
-                self._dropped_neutrals.append((self.own_flag, self.pos[0], self.pos[1]))
+                self._dropped_neutrals.append((self.own_flag, self.pos_x, self.pos_y))
             if self.own_flag == "BU":
-                self.pos[2] = 0.0
-                self.vel[2] = 0.0
+                self.pos_z = 0.0
+                self.vel_z = 0.0
             logger.info("[%s] Flag %r erfolgreich abgelegt", self.callsign, self.own_flag)
             self.own_flag = ""
         elif pid in self.players:
@@ -271,8 +271,8 @@ class HandlersMixin(BZBotBase):
             self.players[to_id].flag = flag_abbv
         if from_id == self.player_id:
             if self.own_flag == "BU":
-                self.pos[2] = 0.0
-                self.vel[2] = 0.0
+                self.pos_z = 0.0
+                self.vel_z = 0.0
             logger.info("[%s] MsgTransferFlag: Flagge '%s' gestohlen → Spieler %d",
                         self.callsign, self.own_flag, to_id)
             self.own_flag = ""
@@ -307,7 +307,8 @@ class HandlersMixin(BZBotBase):
             return
         x, y, z     = unpack_vec3(payload, 1)
         self.azimuth = unpack_float(payload, 13) if len(payload) >= 17 else 0.0
-        self.pos     = [x, y, z]; self.vel = [0.0, 0.0, 0.0]
+        self.pos_x = x; self.pos_y = y; self.pos_z = z
+        self.vel_x = 0.0; self.vel_y = 0.0; self.vel_z = 0.0
         self.alive   = True; self.death_time = None
         self._has_spawned = True          # hat diese Session gespielt → Rundenende darf reconnecten
         self._exploding_until = 0.0       # evtl. laufende Explosion beim Respawn beenden
@@ -651,14 +652,14 @@ class HandlersMixin(BZBotBase):
                                 "Abpraller" if _rico else "Schuss", shooter)
                     self.client.send(MsgTransferFlag,
                                      struct.pack(">BB", self.player_id, shooter))
-                elif getattr(self, '_debug_log_shot', False):
+                elif self._debug_log_shot:
                     logger.debug("[%s] Schuss: TH-Treffer von %d – keine eigene Flagge vorhanden",
                                  self.callsign, shooter)
         if shot.is_sw and self.alive and self.player_id is not None:
-            tank_cz_sw = self.pos[2] + self._tank_height / 2
+            tank_cz_sw = self.pos_z + self._tank_height / 2
             _sw_dist = math.sqrt(
-                (px - self.pos[0])**2 +
-                (py - self.pos[1])**2 +
+                (px - self.pos_x)**2 +
+                (py - self.pos_y)**2 +
                 (pz - tank_cz_sw)**2
             )
             # Punktblank-Treffer: die Front in _resolve_incoming_shots startet erst bei
@@ -721,8 +722,8 @@ class HandlersMixin(BZBotBase):
                 s.pos = [px, py, pz]; s.vel = [vx, vy, vz]
                 s.last_gm_update = time.monotonic()
                 s.gm_target_pid  = target
-        tank_cz = self.pos[2] + self._tank_height / 2
-        dist3d  = math.sqrt((px-self.pos[0])**2 + (py-self.pos[1])**2 + (pz-tank_cz)**2)
+        tank_cz = self.pos_z + self._tank_height / 2
+        dist3d  = math.sqrt((px-self.pos_x)**2 + (py-self.pos_y)**2 + (pz-tank_cz)**2)
         if self.alive and self.player_id is not None and dist3d < HIT_RADIUS:
             shot_obj = None
             with self._shots_lock:
@@ -777,7 +778,7 @@ class HandlersMixin(BZBotBase):
         flag_name = payload[16:16 + name_len].decode('ascii', errors='replace')
         abbr = FLAG_NAME_TO_ABBR.get(flag_name, "")
         if not abbr:
-            if getattr(self, '_debug_log_flag', False):
+            if self._debug_log_flag:
                 logger.debug("[%s] Flagge: MsgNearFlag – unbekannter Flagname %r", self.callsign, flag_name)
             return
         best_fi = None
@@ -789,7 +790,7 @@ class HandlersMixin(BZBotBase):
                 best_fi = fi
         if best_fi is None:
             return
-        if getattr(self, '_debug_log_flag', False):
+        if self._debug_log_flag:
             logger.debug("[%s] Flagge: MsgNearFlag – Flag %d bei (%.0f,%.0f) = %r (%s)",
                          self.callsign, best_fi.flag_id, x, y, abbr, flag_name)
         best_fi.abbr = abbr

@@ -17,7 +17,6 @@ from bot.constants import (
     RADAR_COOLDOWN_DEFAULT,
     RADAR_COOLDOWN_CL,
     PLAYER_LOS_TTL_S,
-    RADAR_RANGE,
     TARGET_FOV,
 )
 from bot.util import _angle_diff
@@ -38,17 +37,17 @@ class PerceptionMixin(BZBotBase):
 
     def _in_fov(self, px: float, py: float) -> bool:
         """True wenn (px, py) im Fenster-Sichtkegel des Bots liegt (Halbwinkel = _effective_fov())."""
-        if math.hypot(px - self.pos[0], py - self.pos[1]) < 1.0:
+        if math.hypot(px - self.pos_x, py - self.pos_y) < 1.0:
             return True
-        angle_to = math.atan2(py - self.pos[1], px - self.pos[0])
+        angle_to = math.atan2(py - self.pos_y, px - self.pos_x)
         return abs(_angle_diff(angle_to, self.azimuth)) < self._effective_fov()
 
     def _is_ahead(self, px: float, py: float) -> bool:
         """Geometrie „liegt vor mir" (±90°), KEIN Sicht-FoV: für Nav-WP-Skip (Startzelle hinter dem
         Bot) und Flag-Grab (nicht rückwärts greifen). Bewusst weiter als der Sicht-FoV."""
-        if math.hypot(px - self.pos[0], py - self.pos[1]) < 1.0:
+        if math.hypot(px - self.pos_x, py - self.pos_y) < 1.0:
             return True
-        angle_to = math.atan2(py - self.pos[1], px - self.pos[0])
+        angle_to = math.atan2(py - self.pos_y, px - self.pos_x)
         return abs(_angle_diff(angle_to, self.azimuth)) < AHEAD_HALF_ANGLE
 
     # ── Sichtbarkeit: zwei Kanäle (Radar / Fenster), zentral statt verstreut ──────
@@ -133,8 +132,8 @@ class PerceptionMixin(BZBotBase):
         # _shots (Lookup unten), ohne Schüsse kann es also keine Bedrohung geben.
         if not self._shots:
             return None, float("inf")
-        bvx = self.vel[0] if bot_vel is None else bot_vel[0]
-        bvy = self.vel[1] if bot_vel is None else bot_vel[1]
+        bvx = self.vel_x if bot_vel is None else bot_vel[0]
+        bvy = self.vel_y if bot_vel is None else bot_vel[1]
         best = None
         best_t = float("inf")
         with self._shots_lock:
@@ -156,7 +155,7 @@ class PerceptionMixin(BZBotBase):
                 else:
                     sx, sy, sz = shot.position_at(now)
                 if shot.is_sw:
-                    _sw_dist = math.hypot(sx - self.pos[0], sy - self.pos[1])
+                    _sw_dist = math.hypot(sx - self.pos_x, sy - self.pos_y)
                     if self._shock_in_radius < _sw_dist < self._shock_out_radius:
                         sw_elapsed = max(0.0, now - shot.fire_time)
                         t = max(0.0,
@@ -165,16 +164,16 @@ class PerceptionMixin(BZBotBase):
                             best_t = t; best = shot
                     continue  # SW hat vel≈0, normales d/t-Verfahren nicht anwendbar
                 # Eingegrabener BU-Bot: nur SW und GM können ihn treffen
-                if self.own_flag == "BU" and self.pos[2] < 0.0 and not shot.is_gm:
+                if self.own_flag == "BU" and self.pos_z < 0.0 and not shot.is_gm:
                     continue
-                if abs(sz - self.pos[2]) > HIT_RADIUS * 2:
+                if abs(sz - self.pos_z) > HIT_RADIUS * 2:
                     continue  # Schuss auf anderer Etage → keine Bedrohung
                 # Relativgeschwindigkeit: Schuss minus Bot-Eigengeschwindigkeit
                 # (ermöglicht Voraussage ob der Schuss den Bot trotz Ausweichen noch trifft)
                 rvx = shot.vel[0] - bvx
                 rvy = shot.vel[1] - bvy
-                rx  = sx - self.pos[0]
-                ry  = sy - self.pos[1]
+                rx  = sx - self.pos_x
+                ry  = sy - self.pos_y
                 rel_spd_sq = rvx * rvx + rvy * rvy
                 if rel_spd_sq > 1e-6:
                     t_rel_raw = -(rx * rvx + ry * rvy) / rel_spd_sq
@@ -193,13 +192,16 @@ class PerceptionMixin(BZBotBase):
             for (pid, sid), segs in self._ricochet_paths.items():
                 if pid == self.player_id:
                     continue
-                shot = self._shots.get((pid, sid))
-                if shot is None or shot.is_expired(now):
+                # Track 5 (mypyc): eigener Name statt `shot` — _shots.get() liefert
+                # Optional[Shot], das `for shot in self._shots.values()` oben (nicht-optional)
+                # widerspräche einer Wiederverwendung derselben Variable.
+                rico_shot = self._shots.get((pid, sid))
+                if rico_shot is None or rico_shot.is_expired(now):
                     continue
                 # Phantom-Schüsse: auch der Phase-Pfad-Cache ist keine Bedrohung
                 if self._phantom_shot_harmless(shot):
                     continue
-                if self.own_flag == "BU" and self.pos[2] < 0.0:
+                if self.own_flag == "BU" and self.pos_z < 0.0:
                     continue
                 for seg in segs:
                     if seg.t_end <= now:
@@ -212,14 +214,14 @@ class PerceptionMixin(BZBotBase):
                     sx = seg.px + (seg.ex - seg.px) * frac
                     sy = seg.py + (seg.ey - seg.py) * frac
                     sz = seg.pz + (seg.ez - seg.pz) * frac
-                    if abs(sz - self.pos[2]) > HIT_RADIUS * 2:
+                    if abs(sz - self.pos_z) > HIT_RADIUS * 2:
                         continue
                     svx = (seg.ex - seg.px) / seg_dt
                     svy = (seg.ey - seg.py) / seg_dt
                     rvx = svx - bvx
                     rvy = svy - bvy
-                    rx = sx - self.pos[0]
-                    ry = sy - self.pos[1]
+                    rx = sx - self.pos_x
+                    ry = sy - self.pos_y
                     rel_spd_sq = rvx * rvx + rvy * rvy
                     seg_rem = seg.t_end - t_from
                     if rel_spd_sq > 1e-6:
@@ -234,7 +236,7 @@ class PerceptionMixin(BZBotBase):
                         t_threat = t_from - now
                     if d < DODGE_DIST and t_threat < best_t and t_threat < RICO_DODGE_LOOKAHEAD:
                         best_t = t_threat
-                        best = shot
+                        best = rico_shot
         return best, best_t
 
     def _any_incoming_threat(self, now: float, vels) -> bool:
@@ -260,16 +262,16 @@ class PerceptionMixin(BZBotBase):
                 else:
                     sx, sy, sz = shot.position_at(now)
                 if shot.is_sw:
-                    _sw_dist = math.hypot(sx - self.pos[0], sy - self.pos[1])
+                    _sw_dist = math.hypot(sx - self.pos_x, sy - self.pos_y)
                     if self._shock_in_radius < _sw_dist < self._shock_out_radius:
                         return True                # SW-Bedrohung ist velocity-unabhängig
                     continue
-                if self.own_flag == "BU" and self.pos[2] < 0.0 and not shot.is_gm:
+                if self.own_flag == "BU" and self.pos_z < 0.0 and not shot.is_gm:
                     continue
-                if abs(sz - self.pos[2]) > HIT_RADIUS * 2:
+                if abs(sz - self.pos_z) > HIT_RADIUS * 2:
                     continue
-                rx = sx - self.pos[0]
-                ry = sy - self.pos[1]
+                rx = sx - self.pos_x
+                ry = sy - self.pos_y
                 for bvx, bvy in vels:
                     rvx = shot.vel[0] - bvx
                     rvy = shot.vel[1] - bvy
@@ -288,10 +290,11 @@ class PerceptionMixin(BZBotBase):
             for (pid, sid), segs in self._ricochet_paths.items():
                 if pid == self.player_id:
                     continue
-                shot = self._shots.get((pid, sid))
-                if shot is None or shot.is_expired(now):
+                # Track 5 (mypyc): eigener Name statt `shot` (s. _find_incoming_shot).
+                rico_shot = self._shots.get((pid, sid))
+                if rico_shot is None or rico_shot.is_expired(now):
                     continue
-                if self.own_flag == "BU" and self.pos[2] < 0.0:
+                if self.own_flag == "BU" and self.pos_z < 0.0:
                     continue
                 for seg in segs:
                     if seg.t_end <= now:
@@ -304,12 +307,12 @@ class PerceptionMixin(BZBotBase):
                     sx = seg.px + (seg.ex - seg.px) * frac
                     sy = seg.py + (seg.ey - seg.py) * frac
                     sz = seg.pz + (seg.ez - seg.pz) * frac
-                    if abs(sz - self.pos[2]) > HIT_RADIUS * 2:
+                    if abs(sz - self.pos_z) > HIT_RADIUS * 2:
                         continue
                     svx = (seg.ex - seg.px) / seg_dt
                     svy = (seg.ey - seg.py) / seg_dt
-                    rx = sx - self.pos[0]
-                    ry = sy - self.pos[1]
+                    rx = sx - self.pos_x
+                    ry = sy - self.pos_y
                     seg_rem = seg.t_end - t_from
                     for bvx, bvy in vels:
                         rvx = svx - bvx
@@ -338,8 +341,8 @@ class PerceptionMixin(BZBotBase):
         ein Mensch sieht nie permanent die ganze Karte. Da der Bot über
         FoV+LoS bereits kartenweit schauen darf, wäre ein Voll-Radar
         Allwissenheit; das Halbe-Welt-Limit hält ihn fair. Nicht „fixen"!"""
-        base = getattr(self, "world_half", RADAR_RANGE)
-        if self.own_flag == "BU" and self.pos[2] < 0.0:
+        base = self.world_half
+        if self.own_flag == "BU" and self.pos_z < 0.0:
             return base * 0.25
         return base
 
@@ -349,13 +352,12 @@ class PerceptionMixin(BZBotBase):
         (ox,oy,oz)→(ex,ey,ez) schneidet. Generischer Slab-Test mit frei wählbarem Ursprung —
         Basis für _has_los_to_point (Bot-Auge) und das GM-Aktivierungspunkt-Gate (beliebige Punkte).
         Teleporter zählen bewusst NICHT als Blocker (Schuss-/Kurven-Routing s. _has_los_to_enemy)."""
-        nav = getattr(self, "_nav_graph", None)
+        nav = self._nav_graph
         if nav is None:
             return True
         dx = ex - ox; dy = ey - oy; dz = ez - oz
         # Broad-Phase: nur Boxen entlang des Strahls (DDA) statt linear über alle _los_obs.
-        # Fallback (nav ohne _los_grid, z.B. Test-Stub) auf den linearen Scan.
-        _grid = getattr(nav, "_los_grid", None)
+        _grid = nav._los_grid
         _boxes = _grid.query_ray(ox, oy, ex, ey) if _grid is not None else nav._los_obs
         for box in _boxes:
             cos_a = box.cos_a; sin_a = box.sin_a
@@ -365,18 +367,39 @@ class PerceptionMixin(BZBotBase):
             ldx =  dx * cos_a + dy * sin_a
             ldy = -dx * sin_a + dy * cos_a
             t_min = 0.0; t_max = 1.0; hit = True
-            for o_v, d_v, lo_v, hi_v in (
-                (lox, ldx, -box.half_w,   box.half_w),
-                (loy, ldy, -box.half_d,   box.half_d),
-                (oz,  dz,   box.bottom_z, box.bottom_z + box.height),
-            ):
-                if abs(d_v) < 1e-9:
-                    if o_v < lo_v or o_v > hi_v:
-                        hit = False; break
+
+            # Track 5 (mypyc): Tupel-Loop ausgerollt — drei explizite Achsen-Blöcke statt
+            # heterogener Tupel-Iteration (Closures/Tupel-Loops sind unter mypyc teuer).
+            # Achse x (lokal, Box-Breite)
+            if abs(ldx) < 1e-9:
+                if lox < -box.half_w or lox > box.half_w:
+                    hit = False
+            else:
+                t1 = (-box.half_w - lox) / ldx; t2 = (box.half_w - lox) / ldx
+                t_min = max(t_min, min(t1, t2))
+                t_max = min(t_max, max(t1, t2))
+
+            # Achse y (lokal, Box-Tiefe)
+            if hit:
+                if abs(ldy) < 1e-9:
+                    if loy < -box.half_d or loy > box.half_d:
+                        hit = False
                 else:
-                    t1 = (lo_v - o_v) / d_v; t2 = (hi_v - o_v) / d_v
+                    t1 = (-box.half_d - loy) / ldy; t2 = (box.half_d - loy) / ldy
                     t_min = max(t_min, min(t1, t2))
                     t_max = min(t_max, max(t1, t2))
+
+            # Achse z (Höhe)
+            if hit:
+                hi_z = box.bottom_z + box.height
+                if abs(dz) < 1e-9:
+                    if oz < box.bottom_z or oz > hi_z:
+                        hit = False
+                else:
+                    t1 = (box.bottom_z - oz) / dz; t2 = (hi_z - oz) / dz
+                    t_min = max(t_min, min(t1, t2))
+                    t_max = min(t_max, max(t1, t2))
+
             if hit and t_min <= t_max:
                 return False
         return True
@@ -406,14 +429,14 @@ class PerceptionMixin(BZBotBase):
 
     def _steep_wall_ahead_raycast(self, az: float, max_dist: float) -> Optional[float]:
         """Unveränderte Raycast-Logik von _steep_wall_ahead, jetzt hinter dessen 0.1s-Cache."""
-        nav = getattr(self, "_nav_graph", None)
+        nav = self._nav_graph
         if nav is None or max_dist <= 0.0:
             return None
-        ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + self._tank_height * 0.5
+        ox = self.pos_x; oy = self.pos_y; oz = self.pos_z + self._tank_height * 0.5
         dx = math.cos(az) * max_dist; dy = math.sin(az) * max_dist
         best_t = 2.0; best_axis = -1; best_box = None
-        # Broad-Phase: nur Boxen entlang des Strahls (DDA); Fallback auf linearen Scan ohne _los_grid.
-        _grid = getattr(nav, "_los_grid", None)
+        # Broad-Phase: nur Boxen entlang des Strahls (DDA).
+        _grid = nav._los_grid
         _boxes = _grid.query_ray(ox, oy, ox + dx, oy + dy) if _grid is not None else nav._los_obs
         for box in _boxes:
             cos_a = box.cos_a; sin_a = box.sin_a
@@ -423,20 +446,40 @@ class PerceptionMixin(BZBotBase):
             ldx =  dx * cos_a + dy * sin_a
             ldy = -dx * sin_a + dy * cos_a
             t_min = 0.0; t_max = 1.0; hit = True; t_min_axis = -1
-            for ax, (o_v, d_v, lo_v, hi_v) in enumerate((
-                (lox, ldx, -box.half_w,   box.half_w),
-                (loy, ldy, -box.half_d,   box.half_d),
-                (oz,  0.0,  box.bottom_z, box.bottom_z + box.height),
-            )):
-                if abs(d_v) < 1e-9:
-                    if o_v < lo_v or o_v > hi_v:
-                        hit = False; break
+
+            # Track 5 (mypyc): Tupel-Loop ausgerollt (wie _segment_clear). Achsindex-Semantik
+            # exakt erhalten: Achse 2 (z) zählt NIE als Eintritts-Achse (t_min_axis bleibt bei
+            # ihr unverändert) — sie ist hier nur ein statisches Höhen-Gate (d_v ist immer 0.0,
+            # der Ray ist horizontal), kein Sonderfall der Iteration.
+            # Achse 0: x (lokal, Box-Breite)
+            if abs(ldx) < 1e-9:
+                if lox < -box.half_w or lox > box.half_w:
+                    hit = False
+            else:
+                t1 = (-box.half_w - lox) / ldx; t2 = (box.half_w - lox) / ldx
+                t_near = min(t1, t2)
+                if t_near > t_min:
+                    t_min = t_near; t_min_axis = 0
+                t_max = min(t_max, max(t1, t2))
+
+            # Achse 1: y (lokal, Box-Tiefe)
+            if hit:
+                if abs(ldy) < 1e-9:
+                    if loy < -box.half_d or loy > box.half_d:
+                        hit = False
                 else:
-                    t1 = (lo_v - o_v) / d_v; t2 = (hi_v - o_v) / d_v
+                    t1 = (-box.half_d - loy) / ldy; t2 = (box.half_d - loy) / ldy
                     t_near = min(t1, t2)
                     if t_near > t_min:
-                        t_min = t_near; t_min_axis = ax
+                        t_min = t_near; t_min_axis = 1
                     t_max = min(t_max, max(t1, t2))
+
+            # Achse 2: z (Höhe, statisches Gate — d_v == 0.0)
+            if hit:
+                hi_z = box.bottom_z + box.height
+                if oz < box.bottom_z or oz > hi_z:
+                    hit = False
+
             if not hit or t_min > t_max or t_min >= best_t or t_min_axis not in (0, 1):
                 continue   # kein Treffer / weiter weg / Eintritt über Z-Ebene (Dach/Boden)
             best_t = t_min; best_axis = t_min_axis; best_box = box
@@ -462,7 +505,7 @@ class PerceptionMixin(BZBotBase):
     def _has_los_to_point(self, ex: float, ey: float, ez: float) -> bool:
         """Reine Sicht-LoS: True, wenn keine solide Box zwischen Bot-Auge und (ex,ey,ez) liegt.
         Teleporter blockieren KEINE Sicht (das ist nur Schuss-LoS, s. _has_los_to_enemy)."""
-        return self._segment_clear(self.pos[0], self.pos[1], self.pos[2] + self._tank_height * 0.5,
+        return self._segment_clear(self.pos_x, self.pos_y, self.pos_z + self._tank_height * 0.5,
                                    ex, ey, ez)
 
     def _muzzle_clear(self, az: float) -> bool:
@@ -471,16 +514,16 @@ class PerceptionMixin(BZBotBase):
         liegt eine dünne Wand zwischen Tank-Mitte und Mündung, würde bzfs den Schuss serverseitig
         'fressen' bzw. er ginge unfair durch die Wand → solche Schüsse unterdrücken (s. _maybe_shoot)."""
         # P4a: Per-Tick-Memo — wird pro Tick mit identischem az mehrfach geprüft.
-        memo = getattr(self, "_tick_memo", None)
-        key = ("muzzle", az, self.pos[0], self.pos[1], self.pos[2])
+        memo = self._tick_memo
+        key = ("muzzle", az, self.pos_x, self.pos_y, self.pos_z)
         if memo is not None:
             cached = memo.get(key)
             if cached is not None:
                 return cached
-        mz = self.pos[2] + self._muzzle_height
-        mx = self.pos[0] + math.cos(az) * self._muzzle_front
-        my = self.pos[1] + math.sin(az) * self._muzzle_front
-        result = self._segment_clear(self.pos[0], self.pos[1], mz, mx, my, mz)
+        mz = self.pos_z + self._muzzle_height
+        mx = self.pos_x + math.cos(az) * self._muzzle_front
+        my = self.pos_y + math.sin(az) * self._muzzle_front
+        result = self._segment_clear(self.pos_x, self.pos_y, mz, mx, my, mz)
         if memo is not None:
             memo[key] = result
         return result
@@ -496,8 +539,8 @@ class PerceptionMixin(BZBotBase):
         # (_execute_combat_move 2×, _maybe_shoot_standard 1×). Key enthält
         # beide Positionen → bewegt sich der Gegner mittendrin (Recv-Thread),
         # gibt es schlicht einen Miss statt eines stalen Treffers.
-        memo = getattr(self, "_tick_memo", None)
-        key = ("los", target_pid, self.pos[0], self.pos[1], self.pos[2], ex, ey, ez)
+        memo = self._tick_memo
+        key = ("los", target_pid, self.pos_x, self.pos_y, self.pos_z, ex, ey, ez)
         if memo is not None:
             cached = memo.get(key)
             if cached is not None:
@@ -508,11 +551,11 @@ class PerceptionMixin(BZBotBase):
         else:
             # Teleporter-Feld zwischen Bot und Ziel → ein Direktschuss würde wegteleportiert,
             # also kein sauberer Direktschuss (der indirekte Aim-Sweep übernimmt dann, s. A4).
-            wm = getattr(self, "_world_map", None)
+            wm = self._world_map
             if wm and wm.teleporters:
-                ox = self.pos[0]; oy = self.pos[1]; oz = self.pos[2] + self._tank_height * 0.5
+                ox = self.pos_x; oy = self.pos_y; oz = self.pos_z + self._tank_height * 0.5
                 dx = ex - ox; dy = ey - oy; dz = ez - oz
-                lmap = getattr(self, "_link_map", {})
+                lmap = self._link_map
                 for ti, tele in enumerate(wm.teleporters):
                     res = ray_teleporter_crossing(ox, oy, oz, dx, dy, dz, tele)
                     if res is None:

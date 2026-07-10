@@ -5,8 +5,13 @@ damit mypy/mypyc die cross-mixin-Zugriffe auflösen und die Mehrfachvererbung (m
 erlaubt sie nur mit @trait) kompilieren können. Pflegeregel: neue oder geänderte
 geteilte Attribute/Methoden hier alphabetisch nachziehen (siehe DEVELOPER.md §12).
 Daten-Attribute sind bewusst `Any` (keine Zuweisungskonflikte über die Mixins; die
-Methoden-Bodies kompilieren dennoch nativ). Methoden sind Stubs — die realen Mixins
-überschreiben sie (Signaturen exakt aus der Quelle → Liskov-kompatibel).
+Methoden-Bodies kompilieren dennoch nativ).
+Daten-Attribute sind konkret typisiert (float/bool/int/Container), WENN sie über alle
+Zuweisungen hinweg repräsentationskonfliktfrei sind (grep-geprüft, Track 5 M2a) — das
+erlaubt mypyc native Unboxing-Slots statt des generischen Objekt-Pfads. Attribute mit
+echtem Mischtyp (Optional/Union, Threads/Locks/Callbacks, pos/vel) bleiben bewusst `Any`.
+Methoden sind Stubs — die realen Mixins überschreiben sie (Signaturen exakt aus der
+Quelle → Liskov-kompatibel).
 """
 from typing import Any, Dict, List, Optional, Tuple, Callable
 from mypy_extensions import trait
@@ -18,7 +23,13 @@ from bot.models import Shot, PlayerInfo, FlagInfo, AIState
 class BZBotBase:
     """Deklariert die geteilten Member. Keine eigene Logik/Instanziierung."""
 
-    # ── Geteilte Daten-Attribute (bewusst Any) ───────────────────────────
+    # ── Geteilte Daten-Attribute (typisiert wo eindeutig, sonst Any) ─────
+    # WICHTIG: KEINE float-Annotationen in dieser @trait-Klasse — mypyc (Stand 2.2.0)
+    # crasht im Codegen ("ValueError: value is not in list", emitfunc.get_attr_expr),
+    # sobald ein unboxed float-Trait-Attribut aus einer Trait-Methode geschrieben wird
+    # (Bitmap-Tracking für Definedness wird für Traits nicht unterstützt; bool/int/str/
+    # Container haben Sentinel-Werte und sind nicht betroffen). Float-Attribute daher
+    # bewusst Any; siehe DEVELOPER.md §12 (Track 5).
     _active_gm: Any
     _agility_ad_vel: Any
     _ai_state: Any
@@ -30,50 +41,50 @@ class BZBotBase:
     _async_plan_result: Any
     _async_plan_thread: Any
     _bounce_next: Any
-    _bounce_replan: Any
+    _bounce_replan: bool
     _burrow_ang_ad: Any
     _burrow_depth: Any
     _burrow_speed_ad: Any
-    _combat_avoid: Any
-    _connection_lost: Any
-    _debug_log_dodge: Any
-    _debug_log_flag: Any
-    _debug_log_path: Any
-    _debug_log_shot: Any
-    _debug_log_tele: Any
+    _combat_avoid: dict
+    _connection_lost: bool
+    _debug_log_dodge: bool
+    _debug_log_flag: bool
+    _debug_log_path: bool
+    _debug_log_shot: bool
+    _debug_log_tele: bool
     _debug_nav_tele_t: Any
-    _debug_no_jump: Any
-    _debug_no_shoot: Any
+    _debug_no_jump: bool
+    _debug_no_shoot: bool
     _debug_obstacle_logged: Any
     _debug_wp_near_t: Any
     _dodge_dir: Any
-    _dodge_forward: Any
-    _dodge_reverse: Any
+    _dodge_forward: bool
+    _dodge_reverse: bool
     _dodge_until: Any
-    _dodging: Any
+    _dodging: bool
     _drop_bad_flag_delay: Any
     _dropped_neutrals: Any
     _escape_jump_ang_vel: Any
-    _evade_cleared_shots: Any
+    _evade_cleared_shots: dict
     _exploding_until: Any
     _flag_radius: Any
-    _game_over: Any
+    _game_over: bool
     _gm_activation_time: Any
     _gm_ad_life: Any
     _gm_min_range: Any
-    _gm_need_update: Any
+    _gm_need_update: bool
     _gm_resend_at: Any
     _gm_send_at: Any
     _gm_turn_angle: Any
     _gravity: Any
-    _has_spawned: Any
+    _has_spawned: bool
     _identify_range: Any
     _indirect_hold_until: Any
-    _join_rejected: Any
+    _join_rejected: bool
     _jump_ang_vel: Any
-    _jump_pending: Any
+    _jump_pending: bool
     _jump_velocity: Any
-    _jumping: Any
+    _jumping: bool
     _landing_aim_pos: Any
     _landing_hit_z: Any
     _landing_second_shot_at: Any
@@ -92,15 +103,15 @@ class BZBotBase:
     _last_status_emit: Any
     _last_threat_id: Any
     _lg_gravity: Any
-    _limited_flags: Any
+    _limited_flags: set
     _linear_acceleration: Any
     _link_map: Any
     _lock_on_angle: Any
-    _max_shots: Any
+    _max_shots: int
     _mgun_ad_life: Any
     _mgun_ad_rate: Any
     _mgun_ad_vel: Any
-    _move_reverse: Any
+    _move_reverse: bool
     _muzzle_front: Any
     _muzzle_height: Any
     _narrow_hw: Any
@@ -110,51 +121,51 @@ class BZBotBase:
     _nav_jump_align_return_state: Any
     _nav_jump_align_start: Any
     _nav_jump_align_wp: Any
-    _nav_jump_cooldowns: Any
+    _nav_jump_cooldowns: dict
     _nav_jump_return_state: Any
     _nav_jump_target_z: Any
-    _nav_path: Any
+    _nav_path: list
     _nav_tele_center: Any
-    _nav_tele_cooldowns: Any
+    _nav_tele_cooldowns: dict
     _nav_tele_return_state: Any
     _nav_tele_start: Any
     _next_server_update: Any
     _next_shoot: Any
     _obese_factor: Any
-    _order: Any
+    _order: int
     _own_flag_since: Any
     _plan_gen: Any
     _pre_fall_state: Any
-    _presence: Any
+    _presence: bool
     _recent_flag_targets: Any
-    _reconnect_needed: Any
+    _reconnect_needed: bool
     _reload_time: Any
     _rfire_ad_life: Any
     _rfire_ad_rate: Any
     _rfire_ad_vel: Any
     _rico_aim_cache: Any
-    _ricochet_paths: Any
-    _round_over: Any
+    _ricochet_paths: dict
+    _round_over: bool
     _round_over_until: Any
-    _running: Any
-    _server_jumping: Any
-    _server_ricochet: Any
+    _running: bool
+    _server_jumping: bool
+    _server_ricochet: bool
     _server_time_offset: Any
     _server_update_interval: Any
     _shield_flight: Any
     _shock_ad_life: Any
     _shock_in_radius: Any
     _shock_out_radius: Any
-    _shot_gen: Any
+    _shot_gen: int
     _shot_grid: Any
     _shot_lifetime: Any
     _shot_radius: Any
     _shot_range: Any
-    _shot_slot: Any
+    _shot_slot: int
     _shot_speed: Any
-    _shots: Any
+    _shots: Dict[Tuple[int, int], Shot]
     _shots_lock: Any
-    _shots_remaining: Any
+    _shots_remaining: int
     _slot_reload_at: Any
     _spawn_sent_at: Any
     _sr_radius_mult: Any
@@ -182,11 +193,11 @@ class BZBotBase:
     _thief_tiny_factor: Any
     _thief_vel_ad: Any
     _threat_detected_at: Any
-    _tick_count: Any
-    _tick_memo: Any
+    _tick_count: int
+    _tick_memo: dict
     _tiny_factor: Any
     _tlog: Any
-    _unreach_phase: Any
+    _unreach_phase: int
     _unreach_replan_at: Any
     _unreach_target: Any
     _unreach_until: Any
@@ -194,44 +205,51 @@ class BZBotBase:
     _wall_height: Any
     _wide_angle_ang: Any
     _wings_gravity: Any
-    _wings_jump_count: Any
+    _wings_jump_count: int
     _wings_jump_velocity: Any
-    _wings_jumps_used: Any
+    _wings_jumps_used: int
     _world_map: Any
-    _wp_fail_count: Any
+    _wp_fail_count: int
     _wp_start_time: Any
     _wp_timeout: Any
     _z_attack_fire_z: Any
-    _z_attack_mode: Any
+    _z_attack_mode: bool
     _z_attack_retry_after: Any
-    alive: Any
+    alive: bool
     ang_vel: Any
     azimuth: Any
-    bad_flags: Any
-    bot_callsigns: Any
+    bad_flags: set
+    bot_callsigns: set
     bot_name_prefix: Any
-    callsign: Any
+    callsign: str
     client: Any
     death_time: Any
-    flags: Any
-    good_flags: Any
-    host: Any
-    human_count: Any
-    managed: Any
+    flags: Dict[int, FlagInfo]
+    good_flags: set
+    host: str
+    human_count: int
+    managed: bool
     motto: Any
-    observer_count: Any
+    observer_count: int
     on_player_count_changed: Any
     on_world_ready_extra: Any
-    own_flag: Any
+    own_flag: str
     player_id: Any
-    players: Any
-    port: Any
-    pos: Any
+    players: Dict[int, PlayerInfo]
+    port: int
+    # Track 5 (mypyc): eigener Tank-Zustand als skalare float-Attribute statt Listen-`pos`/`vel`
+    # (native Unboxing-Slots im 60-Hz-Physik-/Hit-Detection-Pfad). PlayerInfo.pos/vel und
+    # Shot.pos/vel (andere Spieler/Schüsse, bot/models.py) bleiben unverändert Listen.
+    pos_x: Any
+    pos_y: Any
+    pos_z: Any
     target_player: Any
     target_pos: Any
     team: Any
     token: Any
-    vel: Any
+    vel_x: Any
+    vel_y: Any
+    vel_z: Any
     world_half: Any
 
     # ── Geteilte Methoden (Stubs; reale Impl. in den Mixins) ─────────────

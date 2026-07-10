@@ -213,8 +213,8 @@ class TestGmCloseRange:
     """Schritt 3 Problem A: bei dist < GM_MIN_RANGE aim_threshold 4° statt 25°."""
 
     def _setup_gm(self, bot, target_dist, aim_offset_deg):
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.own_flag = "GM"
         bot._next_shoot = 0.0
         bot._shot_speed = 100.0
@@ -253,6 +253,10 @@ class _StubNav:
     def __init__(self, los=None):
         self._los_obs = los or []
         self._tele_exit_wps = set()
+        self._tele_cross_centers = {}
+        self._los_grid = None
+        self._solid_grid = None
+        self._teleport_edges = {}
     def get_floor_z(self, x, y, z, overhang=0.0):
         return 0.0
 
@@ -269,7 +273,7 @@ class TestGmActivationLosGate:
     ohne Tor-/Kurvenschüsse zu unterbinden."""
 
     def _setup(self, bot, wall_x):
-        bot.pos = [0.0, 0.0, 0.0]; bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0; bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.own_flag = "GM"; bot._next_shoot = 0.0; bot._shot_speed = 100.0
         bot._recompute_gm_min_range()              # _gm_min_range = 0.5 * 100 = 50
         bot.azimuth = 0.0                          # exakt auf den Gegner (+x)
@@ -441,7 +445,7 @@ class TestLaserZAxis:
     def test_laser_blocked_when_enemy_above(self, bot):
         from conftest import make_player
         bot.own_flag = "L"
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_player = 2
         p = make_player(bot, 2, pos=(50.0, 0.0, 10.0))  # 10u höher
@@ -453,7 +457,7 @@ class TestLaserZAxis:
     def test_laser_shoots_when_z_diff_small(self, bot):
         from conftest import make_player
         bot.own_flag = "L"
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_player = 2
         p = make_player(bot, 2, pos=(50.0, 0.0, 1.0))  # nur 1u höher → erlaubt
@@ -465,7 +469,7 @@ class TestLaserZAxis:
     def test_gm_shoots_despite_z_diff(self, bot):
         from conftest import make_player
         bot.own_flag = "GM"
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_player = 2
         p = make_player(bot, 2, pos=(50.0, 0.0, 10.0))  # 10u höher
@@ -484,7 +488,7 @@ class TestLaserZAxis:
         max_jump_h = JUMP_VELOCITY ** 2 / (2.0 * abs(GRAVITY))
         z = max_jump_h  # über max_jump_h − HIT_RADIUS → harter Block
         bot.own_flag = ""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_player = 2
         p = make_player(bot, 2, pos=(50.0, 0.0, z))
@@ -498,7 +502,7 @@ class TestLaserZAxis:
         from conftest import make_player
         from unittest.mock import patch
         bot.own_flag = ""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_player = 2
         p = make_player(bot, 2, pos=(50.0, 0.0, 10.0))  # z=10 in ZJ1-Zone
@@ -514,7 +518,7 @@ class TestLaserZAxis:
         from conftest import make_player
         from unittest.mock import patch
         bot.own_flag = ""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_player = 2
         p = make_player(bot, 2, pos=(50.0, 0.0, 10.0))
@@ -529,7 +533,7 @@ class TestLaserZAxis:
         """Crash-Fix: info=None darf keinen IndexError durch ep[2] auslösen."""
         from unittest.mock import patch
         bot.own_flag = "L"
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_player = 2
         bot._next_shoot = 0.0
@@ -877,7 +881,7 @@ class TestCrossFloorTeleporterShot:
         bot._next_shoot = 0.0
         bot.azimuth = 0.0
         bot.human_count = 1
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._server_ricochet = True          # → _cross_floor_indirect liefert True
         p = make_player(bot, 2, pos=(50.0, 0.0, 30.0))   # Gegner 30u höher (Cross-Floor)
         p.vel = [0.0, 0.0, 0.0]
@@ -925,25 +929,25 @@ class TestMuzzleOcclusionGate:
     def test_muzzle_clear_false_when_wall_in_front(self, bot):
         """Dünne Wand bei x=2 (< _muzzle_front 4.42) → Mündung steckt dahinter → False."""
         self._nav(bot, [(2.0, 0.0, 0.5, 10.0)])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._muzzle_clear(0.0) is False
 
     def test_muzzle_clear_true_no_wall(self, bot):
         self._nav(bot, [])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._muzzle_clear(0.0) is True
 
     def test_muzzle_clear_true_wall_beyond_muzzle(self, bot):
         """Wand erst hinter der Mündung (x=8 > 4.42) → Mündung selbst frei."""
         self._nav(bot, [(8.0, 0.0, 0.5, 10.0)])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._muzzle_clear(0.0) is True
 
     def test_gate_blocks_standard_shot(self, bot):
         """Mündung hinter Wand → Dispatcher feuert nicht (Schütze gar nicht aufgerufen)."""
         from bot.models import AIState
         self._nav(bot, [(2.0, 0.0, 0.5, 10.0)])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.own_flag = ""
         bot._ai_state = AIState.COMBAT
@@ -959,7 +963,7 @@ class TestMuzzleOcclusionGate:
         """SB (durchschlägt Wände) ist vom Gate ausgenommen → Schütze wird aufgerufen."""
         from bot.models import AIState
         self._nav(bot, [(2.0, 0.0, 0.5, 10.0)])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.own_flag = "SB"
         bot._ai_state = AIState.COMBAT

@@ -42,7 +42,7 @@ def test_new_target_clears_target_player(bot):
 # ── _dist_to_target ───────────────────────────────────────────────────────────
 
 def test_dist_to_target_correct(bot):
-    bot.pos        = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.target_pos = (30.0, 40.0)
     assert bot._dist_to_target() == pytest.approx(50.0)
 
@@ -61,19 +61,19 @@ def test_passive_stays_parked_when_none(bot):
     now = time.monotonic()
     bot._update_movement(0.02, now, ai_tick=True)
     assert bot.target_pos is None
-    assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
+    assert bot.vel_x == 0.0 and bot.vel_y == 0.0
 
 
 def test_passive_parks_when_waypoint_reached(bot):
     """human_count=0, Bot steht am Waypoint → Pfadende → parken (target_pos=None)."""
     bot.human_count = 0
-    bot.pos         = [50.0, 0.0, 0.0]
+    bot.pos_x = 50.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.target_pos  = (50.0, 0.0)   # bereits am Ziel
     now = time.monotonic()
     bot._update_movement(0.02, now, ai_tick=True)
     # Ziel erreicht, kein neues gesetzt → geparkt
     assert bot.target_pos is None
-    assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
+    assert bot.vel_x == 0.0 and bot.vel_y == 0.0
 
 
 def test_active_mode_no_crash_without_players(bot):
@@ -91,30 +91,30 @@ def test_active_mode_no_crash_without_players(bot):
 def test_bounce_flag_triggers_jump(bot):
     """own_flag='BY', Bot am Boden → _update_movement setzt Sprung."""
     bot.own_flag    = "BY"
-    bot.pos         = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._jumping    = False
     bot._bounce_next = 0.0   # bereits fällig
     bot.target_pos  = (50.0, 0.0)
     now = time.monotonic()
     bot._update_movement(0.02, now, ai_tick=False)
     assert bot._jumping is True
-    assert bot.vel[2] > 0.0
+    assert bot.vel_z > 0.0
 
 
 def test_bounce_flag_not_triggered_in_air(bot):
     """own_flag='BY', Bot bereits in der Luft → kein erneuter Sprung."""
     bot.own_flag    = "BY"
-    bot.pos         = [0.0, 0.0, 3.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 3.0
     bot._jumping    = True
     bot._bounce_next = 0.0
     bot.target_pos  = (50.0, 0.0)
     initial_vel_z   = 5.0
-    bot.vel[2]      = initial_vel_z
+    bot.vel_z      = initial_vel_z
     now = time.monotonic()
     bot._update_movement(0.02, now, ai_tick=False)
     # Sprung soll nicht neu gesetzt werden
     assert bot._jumping is True
-    assert bot.vel[2] != pytest.approx(19.0, abs=0.5)  # wurde nicht auf JUMP_VELOCITY gesetzt
+    assert bot.vel_z != pytest.approx(19.0, abs=0.5)  # wurde nicht auf JUMP_VELOCITY gesetzt
 
 
 # ── Rand-Bounce-Replan (B4): deferred in den KI-Tick, kein A* im Physik-Pfad ──────
@@ -122,9 +122,9 @@ def test_bounce_flag_not_triggered_in_air(bot):
 def test_apply_bounds_sets_flag_instead_of_sync_replan(bot):
     """_apply_bounds plant beim Rand-Abprall NICHT mehr synchron — nur das Flag wird gesetzt."""
     bot._bounce_replan = False
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     half = 100.0
-    bot.vel = [half * 100.0, 0.0, 0.0]   # garantiert außerhalb der Grenze nach einem Tick
+    bot.vel_x = half * 100.0; bot.vel_y = 0.0; bot.vel_z = 0.0   # garantiert außerhalb der Grenze nach einem Tick
     bot._apply_bounds(0.02, half)
     assert bot._bounce_replan is True
 
@@ -169,24 +169,24 @@ def test_bounce_replan_in_seeking_plans_on_next_ai_tick(bot, monkeypatch):
 
 def test_gravity_applied_when_airborne(bot):
     """Bot ohne Sprung-Flag in der Luft → vel[2] nimmt durch Gravity ab."""
-    bot.pos[2]   = 5.0
+    bot.pos_z   = 5.0
     bot._jumping = False
-    bot.vel[2]   = 0.0
+    bot.vel_z   = 0.0
     bot.target_pos = (50.0, 0.0)
     now = time.monotonic()
     bot._update_movement(0.02, now, ai_tick=False)
-    assert bot.vel[2] < 0.0   # Schwerkraft hat nach unten beschleunigt
+    assert bot.vel_z < 0.0   # Schwerkraft hat nach unten beschleunigt
 
 
 def test_gravity_not_applied_on_ground(bot):
     """Bot am Boden (pos[2]<=0.1), kein Sprung → kein gravity-Drift."""
-    bot.pos[2]   = 0.0
+    bot.pos_z   = 0.0
     bot._jumping = False
-    bot.vel[2]   = 0.0
+    bot.vel_z   = 0.0
     bot.target_pos = (50.0, 0.0)
     now = time.monotonic()
     bot._update_movement(0.02, now, ai_tick=False)
-    assert bot.vel[2] == pytest.approx(0.0, abs=1e-6)
+    assert bot.vel_z == pytest.approx(0.0, abs=1e-6)
 
 
 # ── Phase 2 ──────────────────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ class TestMovementImprovements:
         # target_az = π (hinter Bot) → diff = ±π ≥ 90° → speed = 0
         bot._move_reverse = False
         bot._move_to_target(0.02, bot.world_half)
-        speed_magnitude = math.hypot(bot.vel[0], bot.vel[1])
+        speed_magnitude = math.hypot(bot.vel_x, bot.vel_y)
         assert speed_magnitude == pytest.approx(0.0)  # steht, dreht nur
 
     def test_reverse_speed_is_negative(self, bot):
@@ -210,7 +210,7 @@ class TestMovementImprovements:
         bot._move_reverse = True
         bot._move_to_target(0.02, bot.world_half)
         # vel[0] sollte negativ sein (Rückwärts)
-        assert bot.vel[0] < 0 or bot.vel[1] != 0  # fährt rückwärts oder dreht
+        assert bot.vel_x < 0 or bot.vel_y != 0  # fährt rückwärts oder dreht
 
     def test_optimal_range_target_stays_near_enemy(self, bot):
         """Bei Optimalabstand zeigt target_pos 2u Richtung Gegner, nicht self.pos."""
@@ -218,7 +218,7 @@ class TestMovementImprovements:
         p = make_player(bot, 2, pos=(80.0, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [30.0, 0.0, 0.0]  # dist = 50 → bei Optimalabstand
+        bot.pos_x = 30.0; bot.pos_y = 0.0; bot.pos_z = 0.0  # dist = 50 → bei Optimalabstand
         bot.azimuth = 0.0
         # AI-Tick ausführen
         now = time.monotonic()
@@ -234,8 +234,8 @@ class TestNoReverseWhenEnemyJumping:
     def test_hold_position_when_enemy_airborne(self, bot):
         """Gegner is_airborne=True, dist < OPTIMAL_RANGE → _move_reverse=False."""
         from bot.constants import OPTIMAL_RANGE
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0
         bot.alive = True
         bot.human_count = 1
@@ -253,8 +253,8 @@ class TestNoReverseWhenEnemyJumping:
         Neue Architektur: _execute_combat_move setzt negative Geschwindigkeit statt _move_reverse."""
         from bot.constants import OPTIMAL_RANGE
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0
         bot.alive = True
         bot.human_count = 1
@@ -266,7 +266,7 @@ class TestNoReverseWhenEnemyJumping:
         bot._next_shoot = float("inf")
         bot._update_movement(0.02, time.monotonic(), ai_tick=True)
         # Gegner bei (40,0) < OPTIMAL_RANGE=60 → rückwärts fahren (vel[0] < 0)
-        assert bot.vel[0] < 0.0
+        assert bot.vel_x < 0.0
 
 
 class TestRamBurrowedEnemy:
@@ -278,8 +278,8 @@ class TestRamBurrowedEnemy:
         Spiegel zu test_reverse_when_enemy_on_ground: dort 40 < 60 → rückwärts; hier
         _opt = TANK_RADIUS*SR_RADIUS_MULT ≈ 8.64 < 40 → voll vorwärts zum Rammen."""
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0
         bot.alive = True
         bot.human_count = 1
@@ -290,7 +290,7 @@ class TestRamBurrowedEnemy:
         bot.target_player = 99
         bot._next_shoot = float("inf")
         bot._update_movement(0.02, time.monotonic(), ai_tick=True)
-        assert bot.vel[0] > 0.0
+        assert bot.vel_x > 0.0
 
     def test_no_ram_when_gm_can_hit_burrowed(self, bot):
         """GM trifft den Eingegrabenen aus der Distanz → kein Rammen, Optimaldistanz bleibt 100u."""
@@ -326,7 +326,7 @@ def test_reverse_speed_capped_at_50_percent(bot):
     bot._move_reverse = True
     bot._move_to_target(0.02, bot.world_half)
     max_reverse = -bot._tank_speed * 0.5
-    assert bot.vel[0] >= max_reverse - 0.01  # vel[0] nicht kleiner als -50% tankSpeed
+    assert bot.vel_x >= max_reverse - 0.01  # vel[0] nicht kleiner als -50% tankSpeed
 
 
 def test_move_toward_enemy_when_close_in_combat(bot):
@@ -337,14 +337,14 @@ def test_move_toward_enemy_when_close_in_combat(bot):
     p = make_player(bot, 2, pos=(20.0, 0.0, 0.0))  # dist = 20 < OPTIMAL_RANGE
     p.vel = [0.0, 0.0, 0.0]
     bot.target_player = 2
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = 0.0
     bot._ai_state = AIState.COMBAT  # direkt in COMBAT setzen
     bot.human_count = 1
     now = time.monotonic()
     bot._update_movement(0.02, now, ai_tick=True)
     # Bot soll sich vom Gegner wegbewegen (vel[0] < 0)
-    assert bot.vel[0] < 0.0
+    assert bot.vel_x < 0.0
 
 
 # ── Decken-Kollision ──────────────────────────────────────────────────────────
@@ -372,11 +372,11 @@ def test_ceiling_collision_stops_upward_movement(bot):
     from bot.constants import TANK_HEIGHT
     obs = _make_box_obstacle(cx=0.0, cy=0.0, bottom_z=7.0, half_w=5.0, half_d=5.0, height=2.0)
     _give_bot_world_with_box(bot, obs)
-    bot.pos = [0.0, 0.0, 5.5]   # bot_top = 5.5 + 2.05 = 7.55 > obs.bottom_z=7.0
-    bot.vel[2] = 10.0            # aufwärts
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 5.5   # bot_top = 5.5 + 2.05 = 7.55 > obs.bottom_z=7.0
+    bot.vel_z = 10.0            # aufwärts
     bot._apply_obstacle_bounds(0.02)
-    assert bot.vel[2] == pytest.approx(0.0)
-    assert bot.pos[2] == pytest.approx(obs.bottom_z - TANK_HEIGHT, abs=0.01)
+    assert bot.vel_z == pytest.approx(0.0)
+    assert bot.pos_z == pytest.approx(obs.bottom_z - TANK_HEIGHT, abs=0.01)
 
 
 def test_ceiling_no_stop_if_already_inside(bot):
@@ -384,24 +384,24 @@ def test_ceiling_no_stop_if_already_inside(bot):
     from bot.constants import TANK_HEIGHT
     obs = _make_box_obstacle(cx=0.0, cy=0.0, bottom_z=0.0, half_w=5.0, half_d=5.0, height=6.0)
     _give_bot_world_with_box(bot, obs)
-    bot.pos = [0.0, 0.0, 3.0]   # pz=3.0 >= bottom_z=0.0 → kein Decken-Check
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 3.0   # pz=3.0 >= bottom_z=0.0 → kein Decken-Check
     initial_vz = 5.0
-    bot.vel[2] = initial_vz
+    bot.vel_z = initial_vz
     bot._apply_obstacle_bounds(0.02)
     # vel[2] soll nicht durch Decken-Check genullt werden
     # (Wand-Check könnte XY verändern, aber vel[2] bleibt)
-    assert bot.vel[2] == pytest.approx(initial_vz)
+    assert bot.vel_z == pytest.approx(initial_vz)
 
 
 def test_ceiling_no_stop_outside_xy(bot):
     """Bot-Kopf wäre auf Decken-Höhe, aber XY außerhalb der Platform → kein Stopp."""
     obs = _make_box_obstacle(cx=50.0, cy=50.0, bottom_z=7.0, half_w=2.0, half_d=2.0, height=2.0)
     _give_bot_world_with_box(bot, obs)
-    bot.pos = [0.0, 0.0, 5.5]   # weit entfernt von Platform-XY
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 5.5   # weit entfernt von Platform-XY
     initial_vz = 10.0
-    bot.vel[2] = initial_vz
+    bot.vel_z = initial_vz
     bot._apply_obstacle_bounds(0.02)
-    assert bot.vel[2] == pytest.approx(initial_vz)
+    assert bot.vel_z == pytest.approx(initial_vz)
 
 
 def test_ceiling_obb_nose_under_platform_stops(bot):
@@ -410,12 +410,12 @@ def test_ceiling_obb_nose_under_platform_stops(bot):
     das verpasst (Zentrum 4u entfernt > 2+1,4)."""
     obs = _make_box_obstacle(cx=0.0, cy=0.0, bottom_z=7.0, half_w=2.0, half_d=2.0, height=2.0)
     _give_bot_world_with_box(bot, obs)
-    bot.pos = [4.0, 0.0, 5.5]         # Zentrum 4u vom Platform-Rand (x=2); bot_top=7.55>7
+    bot.pos_x = 4.0; bot.pos_y = 0.0; bot.pos_z = 5.5         # Zentrum 4u vom Platform-Rand (x=2); bot_top=7.55>7
     bot.azimuth = math.pi             # Nase zeigt in -x unter die Platform (x=4-3=1 < 2)
-    bot.vel[2] = 10.0
+    bot.vel_z = 10.0
     assert 4.0 > 2.0 + 1.4            # Kreis-Test hätte NICHT gestoppt
     bot._apply_obstacle_bounds(0.02)
-    assert bot.vel[2] == pytest.approx(0.0)
+    assert bot.vel_z == pytest.approx(0.0)
 
 
 def test_ceiling_obb_beyond_nose_no_stop(bot):
@@ -423,11 +423,11 @@ def test_ceiling_obb_beyond_nose_no_stop(bot):
     < Rand 2), bleibt der Aufstieg frei — der exakte OBB-Gate hält NUR die reale Tank-OBB fern."""
     obs = _make_box_obstacle(cx=0.0, cy=0.0, bottom_z=7.0, half_w=2.0, half_d=2.0, height=2.0)
     _give_bot_world_with_box(bot, obs)
-    bot.pos = [6.0, 0.0, 5.5]
+    bot.pos_x = 6.0; bot.pos_y = 0.0; bot.pos_z = 5.5
     bot.azimuth = math.pi
-    bot.vel[2] = 10.0
+    bot.vel_z = 10.0
     bot._apply_obstacle_bounds(0.02)
-    assert bot.vel[2] == pytest.approx(10.0)
+    assert bot.vel_z == pytest.approx(10.0)
 
 
 def test_is_airborne_set_from_ps_falling(bot):
@@ -498,7 +498,7 @@ class TestNavJumpFeasible:
         t_desc = self._t_desc(dz)
         max_reach = 25.0 * t_desc * 1.1
         hdist = max_reach * 0.95
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         target_wp = (hdist, 0.0, dz)
         assert bot._nav_jump_feasible(target_wp) is True
@@ -508,7 +508,7 @@ class TestNavJumpFeasible:
         dz = 10.0
         t_desc = self._t_desc(dz)
         hdist = 25.0 * t_desc * 0.9
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = math.radians(4)       # 4° daneben — innerhalb ±5°
         target_wp = (hdist, 0.0, dz)        # target_az = 0°
         assert bot._nav_jump_feasible(target_wp) is True
@@ -518,7 +518,7 @@ class TestNavJumpFeasible:
         dz = 10.0
         t_desc = self._t_desc(dz)
         hdist = 25.0 * t_desc * 0.9
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = math.radians(10)      # 10° daneben — > 5° Schwelle
         target_wp = (hdist, 0.0, dz)        # target_az = 0°
         assert bot._nav_jump_feasible(target_wp) is False
@@ -526,7 +526,7 @@ class TestNavJumpFeasible:
     def test_infeasible_target_too_high(self, bot):
         """Ziel über Sprungmaximum (disc < 0) → False."""
         max_height = 19.0**2 / (2 * 9.8)   # ≈ 18.4 u
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         target_wp = (10.0, 0.0, max_height + 1.0)
         assert bot._nav_jump_feasible(target_wp) is False
@@ -536,7 +536,7 @@ class TestNavJumpFeasible:
         dz = 10.0
         t_desc = self._t_desc(dz)
         max_reach = 25.0 * t_desc * 1.1
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         target_wp = (max_reach * 1.05, 0.0, dz)  # 5% über Schwelle
         assert bot._nav_jump_feasible(target_wp) is False
@@ -546,7 +546,7 @@ class TestNavJumpFeasible:
         dz = 10.0
         t_desc = self._t_desc(dz)
         max_reach = 25.0 * t_desc * 1.1
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         target_wp = (max_reach * (1.09 / 1.1), 0.0, dz)  # gerade noch innerhalb
         assert bot._nav_jump_feasible(target_wp) is True
@@ -566,7 +566,7 @@ class TestNavJumpTravelSpeedCongruence:
         ohne Flagge infeasible, mit V feasible — für geometry_ok UND feasible."""
         dz = 10.0
         t_desc = self._t_desc(dz)
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot._tank_speed = 25.0
         bot._velocity_ad = 1.6                      # V → 40 u/s
@@ -587,7 +587,7 @@ class TestNavJumpTravelSpeedCongruence:
         bot._tank_speed = 25.0
         bot._agility_ad_vel = 2.0
         bot.own_flag = "A"
-        bot.vel = [0.0, 0.0, 0.0]                   # Stillstand → _effective boostet
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0                   # Stillstand → _effective boostet
         assert bot._effective_tank_speed() == pytest.approx(50.0)
         assert bot._travel_tank_speed() == pytest.approx(25.0)
 
@@ -596,7 +596,7 @@ class TestNavJumpTravelSpeedCongruence:
         bot._tank_speed = 25.0
         bot._burrow_speed_ad = 0.5
         bot.own_flag = "BU"
-        bot.pos = [0.0, 0.0, -1.0]                  # eingegraben → _effective mit Malus
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = -1.0                  # eingegraben → _effective mit Malus
         assert bot._effective_tank_speed() == pytest.approx(12.5)
         assert bot._travel_tank_speed() == pytest.approx(25.0)
 
@@ -616,7 +616,7 @@ class TestAdvancePathNavJump:
         disc = JUMP_VELOCITY**2 - 2.0 * abs(GRAVITY) * dz
         t_desc = (JUMP_VELOCITY + math.sqrt(disc)) / abs(GRAVITY)
         ideal_hdist = TANK_SPEED * t_desc * 0.5   # deutlich innerhalb der Abstiegs-Schwelle
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         self._setup_path(bot, (0.0, 0.0, 0.0), (ideal_hdist, 0.0, dz))
         bot._advance_path()
@@ -629,7 +629,7 @@ class TestAdvancePathNavJump:
         disc = JUMP_VELOCITY**2 - 2.0 * abs(GRAVITY) * dz
         t_desc = (JUMP_VELOCITY + math.sqrt(disc)) / abs(GRAVITY)
         too_far = TANK_SPEED * t_desc * 1.2   # 20% über der Abstiegs-Schwelle
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         self._setup_path(bot, (0.0, 0.0, 0.0), (too_far, 0.0, dz))
         bot._advance_path()
@@ -640,7 +640,7 @@ class TestAdvancePathNavJump:
     def test_downward_no_jump(self, bot, monkeypatch):
         """Abwärts-WP (wp[2] < floor_z) → kein Sprung, target_pos normal gesetzt."""
         monkeypatch.setattr(bot, '_get_floor_z', lambda: 10.0)
-        bot.pos = [0.0, 0.0, 10.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0
         bot.azimuth = 0.0
         self._setup_path(bot, (0.0, 0.0, 10.0), (10.0, 0.0, 0.0))
         bot._advance_path()
@@ -659,14 +659,14 @@ class TestNavJumpGeometryOk:
         """hdist innerhalb TANK_SPEED × t_desc × 1.1 → True."""
         dz = 10.0
         max_reach = 25.0 * self._t_desc(dz) * 1.1
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         target_wp = (max_reach * 0.95, 0.0, dz)
         assert bot._nav_jump_geometry_ok(target_wp) is True
 
     def test_geometry_nok_too_high(self, bot):
         """dz über Sprungmaximum (disc < 0) → False."""
         max_h = 19.0**2 / (2 * 9.8)   # ≈ 18.4 u
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         target_wp = (10.0, 0.0, max_h + 1.0)
         assert bot._nav_jump_geometry_ok(target_wp) is False
 
@@ -674,14 +674,14 @@ class TestNavJumpGeometryOk:
         """hdist > TANK_SPEED × t_desc × 1.1 → False."""
         dz = 10.0
         max_reach = 25.0 * self._t_desc(dz) * 1.1
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         target_wp = (max_reach * 1.05, 0.0, dz)
         assert bot._nav_jump_geometry_ok(target_wp) is False
 
     def test_geometry_ok_ignores_azimuth(self, bot):
         """Geometrie OK trotz 90°-Azimuth-Abweichung — kein Azimuth-Check hier."""
         dz = 10.0
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = math.pi / 2   # schaut nach Norden, WP liegt im Osten
         target_wp = (25.0 * self._t_desc(dz) * 0.5, 0.0, dz)
         # _nav_jump_feasible würde hier False zurückgeben (Azimuth > 30°),
@@ -704,7 +704,7 @@ class TestNavJumpAlignState:
     def test_timeout_clears_path_and_transitions(self, bot):
         """Nach 5s Timeout → nav_path geleert, target_pos None, State → return_state."""
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         self._setup_align(bot, (20.0, 0.0, 10.0), azimuth=math.pi / 2, start_offset=6.0)
         bot._nav_path = [(20.0, 0.0, 10.0)]
         bot.target_pos = (20.0, 0.0)
@@ -722,7 +722,7 @@ class TestNavJumpAlignState:
         disc = JUMP_VELOCITY**2 - 2.0 * abs(GRAVITY) * dz
         t_desc = (JUMP_VELOCITY + math.sqrt(disc)) / abs(GRAVITY)
         hdist = TANK_SPEED * t_desc * 0.5  # klar erreichbar
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = math.radians(90)  # 90° vom Ziel → würde NAV_JUMP_ALIGN auslösen
         bot._nav_path = [(0.0, 0.0, 0.0), (hdist, 0.0, dz)]
         bot._wp_fail_count = 0
@@ -736,7 +736,7 @@ class TestNavJumpAlignState:
 
     def test_aligned_triggers_jump(self, bot):
         """Azimuth bereits ≤30° vom Ziel → Sprung wird initiiert."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         self._setup_align(bot, (20.0, 0.0, 10.0), azimuth=0.0)  # exakt auf Ziel
         now = time.monotonic()
         bot._tick_nav_jump_align(0.02, now)
@@ -744,15 +744,15 @@ class TestNavJumpAlignState:
 
     def test_not_yet_aligned_rotates_and_stops(self, bot):
         """Azimuth 90° vom Ziel → Bot dreht Richtung WP, vel bleibt 0."""
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [5.0, 3.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 5.0; bot.vel_y = 3.0; bot.vel_z = 0.0
         self._setup_align(bot, (20.0, 0.0, 10.0), azimuth=math.pi / 2)  # 90° daneben
         az_before = bot.azimuth
         now = time.monotonic()
         bot._tick_nav_jump_align(0.1, now)
         # Bot muss stehenbleiben
-        assert bot.vel[0] == pytest.approx(0.0)
-        assert bot.vel[1] == pytest.approx(0.0)
+        assert bot.vel_x == pytest.approx(0.0)
+        assert bot.vel_y == pytest.approx(0.0)
         # Azimuth muss sich Richtung 0° (Zielrichtung) bewegt haben
         assert bot.azimuth < az_before
 
@@ -768,7 +768,7 @@ class TestAdvancePathNavJumpAlign:
         disc = JUMP_VELOCITY**2 - 2.0 * abs(GRAVITY) * dz
         t_desc = (JUMP_VELOCITY + math.sqrt(disc)) / abs(GRAVITY)
         hdist = TANK_SPEED * t_desc * 0.5   # gut innerhalb der Reichweite
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = math.radians(60)       # 60° daneben → _nav_jump_feasible=False
         bot._nav_path = [(0.0, 0.0, 0.0), (hdist, 0.0, dz)]
         bot._wp_fail_count = 0
@@ -789,7 +789,7 @@ class TestNavJumpOvershootOffset:
 
     def test_overshoot_offset_applied(self, bot):
         """Speed basiert auf hdist + 2.5, nicht auf reinem hdist."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         dz = 10.0
         hdist = 15.0
@@ -797,18 +797,18 @@ class TestNavJumpOvershootOffset:
         bot._initiate_nav_jump(wp)
         t_desc = self._t_desc(dz)
         expected_speed = (hdist + 2.5) / t_desc
-        actual_speed = math.hypot(bot.vel[0], bot.vel[1])
+        actual_speed = math.hypot(bot.vel_x, bot.vel_y)
         assert actual_speed == pytest.approx(expected_speed, rel=0.01)
 
     def test_velocity_direction_uses_azimuth(self, bot):
         """Velocity zeigt in self.azimuth-Richtung, nicht in az_to_wp-Richtung."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = math.radians(20)   # Bot schaut 20° — NAV_JUMP_ALIGN hat ausgerichtet
         dz = 10.0
         wp = [15.0, 0.0, dz]            # WP liegt exakt östlich (az_to_wp = 0°)
         bot._initiate_nav_jump(wp)
         # Velocity muss in self.azimuth-Richtung (20°) zeigen, nicht az_to_wp (0°)
-        actual_az = math.atan2(bot.vel[1], bot.vel[0])
+        actual_az = math.atan2(bot.vel_y, bot.vel_x)
         assert actual_az == pytest.approx(math.radians(20), abs=0.01)
 
 
@@ -825,7 +825,7 @@ class TestNavJumpLandSpin:
     def test_faces_enemy_when_landing_at_enemy_level(self, bot):
         """Landepunkt z ≈ Gegner-z → Drehung zeigt zum Gegner, nicht zum nächsten WP."""
         from bot.util import _wrap
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         wp = (15.0, 0.0, 0.0)
         ex, ey = 20.0, 25.0
@@ -834,7 +834,7 @@ class TestNavJumpLandSpin:
         bot._nav_path = [wp, (40.0, 0.0, 0.0)]       # nächster WP geradeaus (≠ Gegnerrichtung)
         bot._initiate_nav_jump(wp)
         t = self._t_flight(wp[2] - 0.0)
-        lx, ly = bot.vel[0] * t, bot.vel[1] * t
+        lx, ly = bot.vel_x * t, bot.vel_y * t
         expected_az = math.atan2(ey - ly, ex - lx)
         assert bot._jump_ang_vel > 0.0               # dreht nach +y (zum Gegner)
         assert _wrap(bot._jump_ang_vel * t) == pytest.approx(expected_az, abs=0.02)
@@ -842,7 +842,7 @@ class TestNavJumpLandSpin:
     def test_faces_next_wp_when_not_at_enemy_level(self, bot):
         """Landepunkt z weit von Gegner-z (> NAV_JUMP_Z_TOL) → Drehung zum nächsten WP."""
         from bot.util import _wrap
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         wp = (15.0, 0.0, 10.0)                       # Landepunkt z=10 (machbar: < 18.4u)
         make_player(bot, 2, pos=(20.0, 25.0, 0.0))   # Gegner unten (z=0), 10u > NAV_JUMP_Z_TOL
@@ -851,14 +851,14 @@ class TestNavJumpLandSpin:
         bot._nav_path = [wp, (nx, ny, 10.0)]         # nächster WP nach Süden (≠ Gegner-Norden)
         bot._initiate_nav_jump(wp)
         t = self._t_flight(wp[2] - 0.0)
-        lx, ly = bot.vel[0] * t, bot.vel[1] * t
+        lx, ly = bot.vel_x * t, bot.vel_y * t
         expected_az = math.atan2(ny - ly, nx - lx)
         assert bot._jump_ang_vel < 0.0               # dreht nach -y (zum nächsten WP)
         assert _wrap(bot._jump_ang_vel * t) == pytest.approx(expected_az, abs=0.02)
 
     def test_capped_at_turn_rate(self, bot):
         """Lande-Ziel ~180° hinter Sprungrichtung → Drehrate auf _tank_turn_rate gedeckelt."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         wp = (15.0, 0.0, 0.0)
         make_player(bot, 2, pos=(-50.0, 0.0, 0.0))   # Gegner hinter Landepunkt, gleiche Höhe
@@ -869,7 +869,7 @@ class TestNavJumpLandSpin:
 
     def test_zero_without_target_or_next_wp(self, bot):
         """Kein Ziel und kein nächster WP → keine Drehung (bestehendes Verhalten, Nicht-WG)."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.own_flag = ""
         bot.target_player = None
@@ -881,8 +881,8 @@ class TestNavJumpLandSpin:
     def test_tick_integrates_spin_into_azimuth(self, bot):
         """_tick_nav_jump dreht die Azimuth um _jump_ang_vel * dt (Lande-Drehung wirkt im Flug)."""
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 10.0]
-        bot.vel = [5.0, 0.0, 5.0]                     # steigend → nicht gelandet
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = 5.0                     # steigend → nicht gelandet
         bot.azimuth = 0.0
         bot._jump_ang_vel = 0.3
         bot._jumping = True
@@ -898,7 +898,7 @@ class TestWpTimeoutScaling:
 
     def test_short_wp_timeout(self, bot):
         from bot.constants import WP_TIMEOUT_BASE, WP_TIMEOUT_SCALE
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._nav_path = [(0.0, 0.0, 0.0), (5.0, 0.0, 0.0)]
         bot._wp_fail_count = 0
         bot._advance_path()
@@ -907,7 +907,7 @@ class TestWpTimeoutScaling:
 
     def test_long_wp_timeout(self, bot):
         from bot.constants import WP_TIMEOUT_BASE, WP_TIMEOUT_SCALE
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._nav_path = [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0)]
         bot._wp_fail_count = 0
         bot._advance_path()
@@ -917,7 +917,7 @@ class TestWpTimeoutScaling:
     def test_jump_infeasible_clears_path(self, bot):
         """Aufwärts-WP über Sprungmax (dz>18.4u) → disc<0 → Pfad verworfen."""
         dz = 19.0  # disc = 19²-2*9.8*19 < 0 → physikalisch unmöglich
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot._nav_path = [(0.0, 0.0, 0.0), (15.0, 0.0, dz)]
         bot._wp_fail_count = 0
@@ -933,29 +933,29 @@ class TestLookaheadSmoothing:
     @pytest.mark.skip(reason="Phase 5: Lookahead nicht implementiert")
     def test_blend_toward_next_wp_when_close(self, bot):
         """Im Entry-Blend-Bereich (d < 2×r) zeigt aim leicht Richtung nächsten WP."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_pos = (10.0, 0.0)
         bot._nav_path = [(10.0, 0.0, 0.0), (10.0, 10.0, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        assert bot.vel[1] > 0.0, "Lookahead soll aim Richtung nächsten WP (y=10) blenden"
+        assert bot.vel_y > 0.0, "Lookahead soll aim Richtung nächsten WP (y=10) blenden"
 
     def test_no_blend_when_far(self, bot):
         """Außerhalb des Blend-Bereichs (dist > 3×r = 22.5u) kein Blend."""
         # Bot weit entfernt vom WP: dist = 30u > 3×7.5 = 22.5u → t = 0
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_pos = (30.0, 0.0)
         bot._nav_path = [(30.0, 0.0, 0.0), (30.0, 10.0, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
         # Kein Lookahead: aim direkt auf WP (0°), vel[1] ≈ 0
-        assert abs(bot.vel[1]) < 0.5, "Kein Lookahead bei großer Distanz erwartet"
+        assert abs(bot.vel_y) < 0.5, "Kein Lookahead bei großer Distanz erwartet"
 
     def test_no_blend_in_reverse_mode(self, bot):
         """Im Rückwärtsmodus (_move_reverse=True) kein Lookahead."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot._move_reverse = True
         bot.target_pos = (10.0, 0.0)
@@ -963,18 +963,18 @@ class TestLookaheadSmoothing:
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
         # Rückwärtsmodus nutzt andere Formel; kein Lookahead → vel[1] minimal
-        assert abs(bot.vel[1]) < 0.5, "Kein Lookahead im Rückwärtsmodus erwartet"
+        assert abs(bot.vel_y) < 0.5, "Kein Lookahead im Rückwärtsmodus erwartet"
 
     @pytest.mark.skip(reason="Phase 5: Lookahead nicht implementiert")
     def test_blend_before_nav_jump(self, bot):
         """Starkes Lookahead wenn nächster WP Höhenwechsel hat (NAV_JUMP Anfahrt)."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_pos = (10.0, 0.0)
         bot._nav_path = [(10.0, 0.0, 0.0), (20.0, 5.0, 10.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        assert bot.vel[1] > 0.0, "NAV_JUMP-Anfahrt: Lookahead soll aim Richtung Sprungziel blenden"
+        assert bot.vel_y > 0.0, "NAV_JUMP-Anfahrt: Lookahead soll aim Richtung Sprungziel blenden"
 
 
 class TestBlindTurn:
@@ -983,53 +983,53 @@ class TestBlindTurn:
     def test_speed_zero_at_inner_threshold(self, bot):
         """WP direkt hinter Bot (diff=π ≥ π/2) → Physik-Formel liefert speed=0 (turn in place)."""
         r = bot._wp_reach_radius()
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0   # schaut +x
         dist = r * 1.5
         bot.target_pos = (-dist, 0.0)   # WP direkt hinter Bot → diff=π
         bot._nav_path = [(-dist, 0.0, 0.0), (-dist * 2, 0.0, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        speed = math.hypot(bot.vel[0], bot.vel[1])
+        speed = math.hypot(bot.vel_x, bot.vel_y)
         assert speed == pytest.approx(0.0), "WP hinter Bot (diff=π): speed=0 erwartet"
 
     def test_speed_reduced_at_midpoint(self, bot):
         """WP hinter Bot (diff=π ≥ π/2) → speed=0 (turn in place), unabhängig von Distanz."""
         r = bot._wp_reach_radius()
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         dist = r * 2.0
         bot.target_pos = (-dist, 0.0)   # WP hinter Bot → diff=π
         bot._nav_path = [(-dist, 0.0, 0.0), (-dist * 2, 0.0, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        speed = math.hypot(bot.vel[0], bot.vel[1])
+        speed = math.hypot(bot.vel_x, bot.vel_y)
         assert speed == pytest.approx(0.0), "WP hinter Bot (diff=π): speed=0 erwartet"
 
     def test_no_reduction_when_wp_in_fov(self, bot):
         """WP nah und direkt voraus → keine Geschwindigkeitsreduktion."""
         r = bot._wp_reach_radius()
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0   # schaut +x
         dist = r * 1.5
         bot.target_pos = (dist, 0.0)    # WP direkt voraus (behind=0 → blind_factor=1.0)
         bot._nav_path = [(dist, 0.0, 0.0), (dist * 2, 0.0, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        speed = math.hypot(bot.vel[0], bot.vel[1])
+        speed = math.hypot(bot.vel_x, bot.vel_y)
         assert speed > 20.0, "WP direkt voraus: volle Geschwindigkeit erwartet"
 
     def test_speed_reduced_perpendicular(self, bot):
         """WP seitlich (90°) und nah → Geschwindigkeit stark reduziert (war Bug: kein Abbremsen)."""
         r = bot._wp_reach_radius()
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0          # schaut +x
         dist = r * 1.5             # d_raw=1.5, behind=1.0 bei 90°
         bot.target_pos = (0.0, dist)   # WP exakt links (90° seitlich)
         bot._nav_path = [(0.0, dist, 0.0), (0.0, dist * 2, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        speed = math.hypot(bot.vel[0], bot.vel[1])
+        speed = math.hypot(bot.vel_x, bot.vel_y)
         assert speed < 4.0, "WP seitlich bei 1.5×r: stark reduzierte Geschwindigkeit erwartet"
 
 
@@ -1056,7 +1056,7 @@ class TestRouteDiscardClearsTarget:
         p = make_player(bot, 7, pos=(100.0, 0.0, 15.0))  # elevated → _skip_nav=False
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 7
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._nav_goal   = (100.0, 0.0)
         bot._nav_goal_z = 15.0          # verhindert replan_z-Trigger
         bot._nav_path   = [(50.0, 0.0, 0.0)]
@@ -1079,7 +1079,7 @@ class TestDirectModeNoPlanning:
         p = make_player(bot, 7, pos=(40.0, 0.0, 0.0))  # gleiche Z → _not_below_enemy True
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 7
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._ai_state = AIState.COMBAT
         bot._nav_goal = None            # würde replan_xy=True erzwingen
         bot._nav_path = [(20.0, 0.0, 0.0)]
@@ -1097,7 +1097,7 @@ class TestNavJumpZLandingCheck:
         """Bot horizontal nah an erhöhtem WP, aber auf falscher Z-Ebene → timed_out=True."""
         from bot.constants import NAV_JUMP_Z_TOL
         # Bot steht auf Boden (z=0), WP ist auf z=10 (elevated)
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         wp_z = 10.0
         # Innerhalb Reach-Radius horizontal, aber Z-Abweichung = 10 > 2.5
         bot.target_pos = (2.0, 0.0)
@@ -1112,7 +1112,7 @@ class TestNavJumpZLandingCheck:
         from bot.constants import NAV_JUMP_Z_TOL
         # Bot fast auf Ziel-Z (Abweichung 1.0 < 2.5)
         wp_z = 10.0
-        bot.pos = [0.0, 0.0, wp_z - 1.0]   # 1u zu niedrig → akzeptabel
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = wp_z - 1.0   # 1u zu niedrig → akzeptabel
         bot.target_pos = (2.0, 0.0)
         bot._nav_path = [(2.0, 0.0, wp_z)]
         bot._wp_fail_count = 1
@@ -1122,7 +1122,7 @@ class TestNavJumpZLandingCheck:
 
     def test_flat_wp_not_affected_by_z_check(self, bot):
         """Flacher WP (z ≈ floor): kein Z-Check, normales Advance."""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.target_pos = (2.0, 0.0)
         bot._nav_path = [(2.0, 0.0, 0.0)]   # z = 0, nicht elevated
         bot._wp_fail_count = 1
@@ -1139,8 +1139,8 @@ class TestFallingState:
         """Bot in COMBAT, vel[2] < -0.1 und pos[2] > floor_z + 0.5 → FALLING."""
         from bot.models import AIState
         bot._ai_state = AIState.COMBAT
-        bot.pos  = [0.0, 0.0, 15.0]
-        bot.vel  = [5.0, 0.0, -0.5]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 15.0
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = -0.5
         bot._jumping = False
         # floor_z = 0 (kein NavGraph)
         bot._update_movement(0.02, time.monotonic(), ai_tick=False)
@@ -1154,8 +1154,8 @@ class TestFallingState:
         bot._ai_state = AIState.FALLING
         bot._pre_fall_state = AIState.COMBAT
         bot._jumping = True
-        bot.pos = [0.0, 0.0, 0.05]   # kurz über dem Boden
-        bot.vel = [5.0, 0.0, -0.1]   # leicht abwärts
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.05   # kurz über dem Boden
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = -0.1   # leicht abwärts
         bot._tick_falling(0.02, time.monotonic())
         assert bot._ai_state == AIState.COMBAT
         assert bot._jumping is False
@@ -1166,19 +1166,19 @@ class TestFallingState:
         bot._ai_state = AIState.FALLING
         bot._pre_fall_state = AIState.COMBAT
         bot._jumping = True
-        bot.pos  = [0.0, 0.0, 10.0]
-        bot.vel  = [7.0, 3.0, -1.0]
-        vx_before, vy_before = bot.vel[0], bot.vel[1]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0
+        bot.vel_x = 7.0; bot.vel_y = 3.0; bot.vel_z = -1.0
+        vx_before, vy_before = bot.vel_x, bot.vel_y
         bot._tick_falling(0.02, time.monotonic())
-        assert bot.vel[0] == pytest.approx(vx_before)
-        assert bot.vel[1] == pytest.approx(vy_before)
+        assert bot.vel_x == pytest.approx(vx_before)
+        assert bot.vel_y == pytest.approx(vy_before)
 
     def test_seeking_also_enters_falling(self, bot):
         """Auch SEEKING → FALLING wenn airborne."""
         from bot.models import AIState
         bot._ai_state = AIState.SEEKING
-        bot.pos  = [0.0, 0.0, 15.0]
-        bot.vel  = [0.0, 0.0, -0.5]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 15.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = -0.5
         bot._jumping = False
         bot._update_movement(0.02, time.monotonic(), ai_tick=False)
         assert bot._ai_state == AIState.FALLING
@@ -1188,8 +1188,8 @@ class TestFallingState:
         """Bot steht auf Dach (pos[2] == floor_z) → kein FALLING."""
         from bot.models import AIState
         bot._ai_state = AIState.COMBAT
-        bot.pos  = [0.0, 0.0, 0.0]
-        bot.vel  = [5.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot._jumping = False
         bot._update_movement(0.02, time.monotonic(), ai_tick=False)
         assert bot._ai_state != AIState.FALLING
@@ -1202,7 +1202,7 @@ class TestEdgeEscape:
 
     def test_near_x_edge_escapes_inward(self, bot):
         """pos[0] nahe +world_half → target_pos.x auf world_half/2."""
-        bot.pos = [bot.world_half - 5.0, 50.0, 0.0]
+        bot.pos_x = bot.world_half - 5.0; bot.pos_y = 50.0; bot.pos_z = 0.0
         bot._plan_path(0.0, 0.0)
         assert bot.target_pos is not None
         tx, ty = bot.target_pos
@@ -1211,14 +1211,14 @@ class TestEdgeEscape:
 
     def test_near_negative_x_edge(self, bot):
         """pos[0] nahe -world_half → target_pos.x auf -world_half/2."""
-        bot.pos = [-(bot.world_half - 5.0), 30.0, 0.0]
+        bot.pos_x = -(bot.world_half - 5.0); bot.pos_y = 30.0; bot.pos_z = 0.0
         bot._plan_path(0.0, 0.0)
         tx, _ = bot.target_pos
         assert tx == pytest.approx(-bot.world_half / 2.0)
 
     def test_near_y_edge_only_y_adjusted(self, bot):
         """pos[1] nahe +world_half, pos[0] im Inneren → nur Y halbiert."""
-        bot.pos = [20.0, bot.world_half - 8.0, 0.0]
+        bot.pos_x = 20.0; bot.pos_y = bot.world_half - 8.0; bot.pos_z = 0.0
         bot._plan_path(0.0, 0.0)
         tx, ty = bot.target_pos
         assert ty == pytest.approx(bot.world_half / 2.0)
@@ -1226,7 +1226,7 @@ class TestEdgeEscape:
 
     def test_corner_both_axes_adjusted(self, bot):
         """Ecke nahe beider Ränder → beide Achsen halbiert."""
-        bot.pos = [bot.world_half - 7.0, -(bot.world_half - 6.0), 0.0]
+        bot.pos_x = bot.world_half - 7.0; bot.pos_y = -(bot.world_half - 6.0); bot.pos_z = 0.0
         bot._plan_path(0.0, 0.0)
         tx, ty = bot.target_pos
         assert tx == pytest.approx(bot.world_half / 2.0)
@@ -1234,7 +1234,7 @@ class TestEdgeEscape:
 
     def test_interior_pos_not_affected(self, bot):
         """Bot weit vom Rand → _plan_path läuft normal (kein Edge-Escape)."""
-        bot.pos = [50.0, 30.0, 0.0]
+        bot.pos_x = 50.0; bot.pos_y = 30.0; bot.pos_z = 0.0
         bot.target_pos = None
         bot._plan_path(80.0, 40.0)
         # Ergebnis = Direktpfad (kein NavGraph) zu goal, nicht Edge-Escape
@@ -1252,7 +1252,7 @@ class TestExecuteCombatMoveElevated:
         p = make_player(bot, 2, pos=(30.0, 0.0, 15.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
 
 
@@ -1265,8 +1265,8 @@ class TestZAttackFeasible:
         p = make_player(bot, 2, pos=enemy_pos)
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = bot_azimuth
         bot._last_jump_at = 0.0
         return p
@@ -1317,8 +1317,8 @@ class TestSkipNavCondition:
         p = make_player(bot, 2, pos=(dist, 0.0, enemy_z))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, bot_z]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = bot_z
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot._nav_path = [(dist * 0.5, 5.0, bot_z)]  # WP vorhanden
         bot._nav_goal = (dist, 0.0)
         bot._nav_goal_z = enemy_z
@@ -1359,8 +1359,8 @@ class TestCombatDeadzone:
         p = make_player(bot, 2, pos=(dist, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0
         bot._nav_path = []
         bot._nav_goal = None
@@ -1369,19 +1369,19 @@ class TestCombatDeadzone:
         from bot.constants import OPTIMAL_RANGE
         self._setup(bot, dist=OPTIMAL_RANGE)          # exakt Optimaldistanz
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
-        assert bot.vel[0] == 0.0 and bot.vel[1] == 0.0
+        assert bot.vel_x == 0.0 and bot.vel_y == 0.0
 
     def test_reverse_just_below_deadzone(self, bot):
         from bot.constants import OPTIMAL_RANGE
         self._setup(bot, dist=OPTIMAL_RANGE - 2.0)    # 58u → rückwärts
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
-        assert bot.vel[0] < 0.0
+        assert bot.vel_x < 0.0
 
     def test_forward_just_above_deadzone(self, bot):
         from bot.constants import OPTIMAL_RANGE
         self._setup(bot, dist=OPTIMAL_RANGE + 2.0)    # 62u → langsam vorwärts
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
-        assert bot.vel[0] > 0.0
+        assert bot.vel_x > 0.0
 
 
 # ── _has_los_to_enemy ─────────────────────────────────────────────────────────
@@ -1408,7 +1408,7 @@ class TestHasLos:
         p = make_player(bot, 2, pos=(50.0, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._has_los_to_enemy(2) is True
 
     def test_returns_false_when_box_between(self, bot):
@@ -1418,7 +1418,7 @@ class TestHasLos:
         p = make_player(bot, 2, pos=(50.0, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._has_los_to_enemy(2) is False
 
     def test_returns_true_when_box_beside(self, bot):
@@ -1428,7 +1428,7 @@ class TestHasLos:
         p = make_player(bot, 2, pos=(50.0, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._has_los_to_enemy(2) is True
 
     def test_shoot_through_box_not_blocking(self, bot):
@@ -1438,7 +1438,7 @@ class TestHasLos:
         p = make_player(bot, 2, pos=(50.0, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._has_los_to_enemy(2) is True
 
     def test_returns_true_when_no_nav_graph(self, bot):
@@ -1447,7 +1447,7 @@ class TestHasLos:
         p = make_player(bot, 2, pos=(50.0, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._has_los_to_enemy(2) is True
 
 
@@ -1463,7 +1463,7 @@ class TestRoofEdgePrevention:
         p = make_player(bot, 2, pos=(10.0, 0.0, 15.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 15.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 15.0
         bot.azimuth = 0.0  # Bot schaut in +x, Gegner in +x → rückwärts = -x
 
         nav = MagicMock()
@@ -1474,7 +1474,7 @@ class TestRoofEdgePrevention:
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
 
         # Kante erkannt → vel[0] == 0 (Bot bleibt stehen)
-        assert bot.vel[0] == 0.0
+        assert bot.vel_x == 0.0
 
     def test_backward_allowed_on_flat_roof(self, bot):
         """Bot auf Dach (floor_z=15), keine Kante → Rückwärtsbewegung bleibt erhalten."""
@@ -1482,7 +1482,7 @@ class TestRoofEdgePrevention:
         p = make_player(bot, 2, pos=(10.0, 0.0, 15.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 15.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 15.0
         bot.azimuth = 0.0
 
         nav = MagicMock()
@@ -1493,7 +1493,7 @@ class TestRoofEdgePrevention:
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
 
         # Kein Abfall → Bot fährt rückwärts (vel[0] < 0)
-        assert bot.vel[0] < 0.0
+        assert bot.vel_x < 0.0
 
     def test_no_edge_check_on_ground(self, bot):
         """Bot auf Boden (floor_z=0) → Kanten-Check wird nicht ausgelöst."""
@@ -1501,7 +1501,7 @@ class TestRoofEdgePrevention:
         p = make_player(bot, 2, pos=(10.0, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
 
         nav = MagicMock()
@@ -1512,7 +1512,7 @@ class TestRoofEdgePrevention:
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
 
         # floor_z ≤ 0.5 → kein Kanten-Check → Bot fährt rückwärts (vel[0] < 0)
-        assert bot.vel[0] < 0.0
+        assert bot.vel_x < 0.0
 
 
 class TestJumpGeometryCooldown:
@@ -1523,7 +1523,7 @@ class TestJumpGeometryCooldown:
         from bot.models import AIState
         from unittest.mock import patch
         bot._ai_state = AIState.SEEKING
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         jump_wp = (10.0, 0.0, 30.0)
         bot._nav_path = [(5.0, 0.0, 0.0), jump_wp]
         bot.target_pos = (5.0, 0.0)
@@ -1542,7 +1542,7 @@ class TestJumpGeometryCooldown:
         from bot.models import AIState
         from unittest.mock import patch
         bot._ai_state = AIState.SEEKING
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot._nav_path = [(5.0, 0.0, 0.0), (10.0, 0.0, 30.0)]
         bot.target_pos = (5.0, 0.0)
 
@@ -1563,7 +1563,7 @@ class TestRecentFlagTargets:
         """Nach erster Auswahl ist die Flag im deque und wird beim nächsten Aufruf übersprungen."""
         from bot.models import FlagInfo
         bot.own_flag = ""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         fi_f = FlagInfo(flag_id=0, abbr="GM", status=1, pos=[10.0, 0.0, 0.0])
         fi_g = FlagInfo(flag_id=1, abbr="L",  status=1, pos=[20.0, 0.0, 0.0])
         bot.flags = {0: fi_f, 1: fi_g}
@@ -1602,7 +1602,7 @@ class TestRecentFlagTargets:
         """Fall B: kürzlich besuchte Flag wird im zweiten Loop übersprungen."""
         from bot.models import FlagInfo
         bot.own_flag = "ID"
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         # Zwei schlechte Flags außerhalb IDENTIFY_RANGE — eine davon im deque
         fi_a = FlagInfo(flag_id=0, abbr="NJ", status=1, pos=[60.0, 0.0, 0.0])
         fi_b = FlagInfo(flag_id=1, abbr="NJ", status=1, pos=[70.0, 0.0, 0.0])
@@ -1618,7 +1618,7 @@ class TestRecentFlagTargets:
         """Fall B zweiter Loop: Flag bei >50u ohne deque-Eintrag wird angesteuert."""
         from bot.models import FlagInfo
         bot.own_flag = "ID"
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         fi = FlagInfo(flag_id=0, abbr="GM", status=1, pos=[60.0, 0.0, 0.0])
         bot.flags = {0: fi}
         bot._recent_flag_targets = collections.deque(maxlen=10)
@@ -1632,7 +1632,7 @@ class TestRecentFlagTargets:
         """Degenerate-Pfad: Flag geht in deque → zweiter _new_target()-Aufruf wählt andere."""
         from bot.models import FlagInfo
         bot.own_flag = ""
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         fi_f = FlagInfo(flag_id=0, abbr="GM", status=1, pos=[10.0, 0.0, 0.0])
         fi_g = FlagInfo(flag_id=1, abbr="L",  status=1, pos=[30.0, 0.0, 0.0])
         bot.flags = {0: fi_f, 1: fi_g}
@@ -1659,7 +1659,7 @@ class TestAgilityBoost:
         """A-Flagge + vel≈0 → Geschwindigkeit = tankSpeed × AGILITY_AD_VEL."""
         from bot.constants import AGILITY_AD_VEL, TANK_SPEED
         bot.own_flag = "A"
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         result = bot._effective_tank_speed()
         assert result == pytest.approx(TANK_SPEED * AGILITY_AD_VEL)
 
@@ -1667,7 +1667,7 @@ class TestAgilityBoost:
         """A-Flagge + vel≥1m/s → kein Boost, normale tankSpeed."""
         from bot.constants import TANK_SPEED
         bot.own_flag = "A"
-        bot.vel = [5.0, 0.0, 0.0]
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         result = bot._effective_tank_speed()
         assert result == pytest.approx(TANK_SPEED)
 
@@ -1683,7 +1683,7 @@ class TestIdFallB2Filter:
         wirklich übersprungen wird (kein Fall-C-Fallthrough als false-positive)."""
         from bot.models import FlagInfo
         bot.own_flag = "ID"
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.good_flags = set()  # PZ ist nicht gut
         # Nahe Flagge (d=20u) mit bekannter schlechter Abkürzung → soll übersprungen werden
         fi_near = FlagInfo(flag_id=0, abbr="PZ", status=1, pos=[20.0, 0.0, 0.0])
@@ -1701,7 +1701,7 @@ class TestIdFallB2Filter:
         """Flagge mit abbr='' (unbekannt) bei d<50u → B2 überspringt sie NICHT."""
         from bot.models import FlagInfo
         bot.own_flag = "ID"
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.good_flags = set()
         # Flagge mit unbekannter Abkürzung bei d=20u (< IDENTIFY_RANGE) → soll angesteuert werden
         fi = FlagInfo(flag_id=0, abbr="", status=1, pos=[20.0, 0.0, 0.0])
@@ -1721,7 +1721,7 @@ class TestReverseToRunup:
     Sprung-rauf ist."""
 
     def _setup(self, bot, target, next_wp, azimuth=0.0, own_flag=""):
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = azimuth
         bot.own_flag = own_flag
         bot.target_pos = (target[0], target[1])
@@ -1749,7 +1749,7 @@ class TestReverseToRunup:
         assert bot._should_reverse_to_wp() is False
 
     def test_no_reverse_without_nav_path(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.own_flag = ""
         bot.target_pos = (-5.0, 0.0)
@@ -1789,13 +1789,13 @@ class TestPixelOnFloorSupport:
     def test_supported_when_center_slightly_past_edge(self, bot):
         bot._nav_graph = self._nav_with_platform()
         bot.own_flag = ""
-        bot.pos = [21.0, 0.0, 15.0]   # Mitte 1.0u über Kante (< Halbbreite 1.4) → noch getragen
+        bot.pos_x = 21.0; bot.pos_y = 0.0; bot.pos_z = 15.0   # Mitte 1.0u über Kante (< Halbbreite 1.4) → noch getragen
         assert bot._get_floor_z() == pytest.approx(15.0)
 
     def test_falls_when_center_well_past_edge(self, bot):
         bot._nav_graph = self._nav_with_platform()
         bot.own_flag = ""
-        bot.pos = [23.0, 0.0, 15.0]   # Mitte 3.0u über Kante → kein Pixel mehr auf → fällt
+        bot.pos_x = 23.0; bot.pos_y = 0.0; bot.pos_z = 15.0   # Mitte 3.0u über Kante → kein Pixel mehr auf → fällt
         assert bot._get_floor_z() == pytest.approx(0.0)
 
 
@@ -1811,8 +1811,8 @@ class TestCombatUnreachableEscalation:
         p = make_player(bot, 2, pos=(dist, 0.0, enemy_z))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot._nav_graph = None
         bot._nav_path = []
         bot._nav_goal = None
@@ -1897,7 +1897,7 @@ class TestCombatUnreachableEscalation:
         assert bot._unreach_target is None
 
     def test_pick_reposition_point_within_bounds(self, bot):
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         for _ in range(20):
             rx, ry = bot._pick_reposition_point((100.0, 0.0))
             assert abs(rx) <= bot.world_half - 5.0
@@ -1910,7 +1910,7 @@ class TestFindTargetAvoidPenalty:
 
     def test_prefers_non_avoided_foe(self, bot):
         bot.team = 0
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         near = make_player(bot, 2, pos=(50.0, 0.0, 0.0))   # näher
         near.vel = [0.0, 0.0, 0.0]
         far = make_player(bot, 3, pos=(60.0, 0.0, 0.0))    # weiter
@@ -1920,7 +1920,7 @@ class TestFindTargetAvoidPenalty:
 
     def test_avoided_foe_still_chosen_if_only_one(self, bot):
         bot.team = 0
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         only = make_player(bot, 2, pos=(50.0, 0.0, 0.0))
         only.vel = [0.0, 0.0, 0.0]
         bot._combat_avoid = {2: time.monotonic() + 30.0}
@@ -1935,7 +1935,7 @@ class TestNavJumpReturnState:
 
     def test_initiate_nav_jump_from_align_resolves_owner(self, bot):
         from bot.models import AIState
-        bot.pos = [0.0, 0.0, 15.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 15.0
         bot.azimuth = 0.0
         bot._ai_state = AIState.NAV_JUMP_ALIGN
         bot._nav_jump_align_return_state = AIState.COMBAT
@@ -2023,8 +2023,8 @@ class TestEffectiveJumpHelpers:
         """Konsistenz-Regression: LG hebt die Sprunghöhe jetzt auch in _z_attack_feasible (vorher
         rohes _gravity → ein mittelhoher Gegner galt dort fälschlich als unerreichbar)."""
         bot.team = 0
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot.azimuth = 0.0
         bot._last_jump_at = 0.0
         p = make_player(bot, 2, pos=(50.0, 0.0, 20.0))
@@ -2044,8 +2044,8 @@ class TestEffectiveJumpHelpers:
         p = make_player(bot, 2, pos=(50.0, 0.0, 30.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot._nav_graph = None
         bot._nav_path = []
         bot._nav_goal = None
@@ -2102,8 +2102,8 @@ class TestJumpLaunchVz:
         bot.own_flag = "WG"
         bot._wings_jump_count = 2
         bot._wings_jumps_used = 0
-        bot.pos = [0.0, 0.0, 50.0]
-        bot.vel = [0.0, 0.0, -10.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 50.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = -10.0
         bot.azimuth = 0.0
         bot._jump_ang_vel = 0.0
         bot._jumping = True
@@ -2112,7 +2112,7 @@ class TestJumpLaunchVz:
              patch.object(bot, "_can_drive_through_obstacles", return_value=True):
             bot._tick_jumping(0.01, now=1000.0)
         # gravity-Schritt (-10 - 9.8·0.01) + Flap (19 + …) ≈ 8.9 — NICHT 19.
-        assert bot.vel[2] == pytest.approx(19.0 + (-10.0 - 9.8 * 0.01))
+        assert bot.vel_z == pytest.approx(19.0 + (-10.0 - 9.8 * 0.01))
         assert bot._wings_jumps_used == 1
 
 
@@ -2136,7 +2136,7 @@ class TestSteepWallAhead:
         """Frontal (90°) auf eine quer liegende Wand → Tangente entlang der Wand (±90°)."""
         # Wand bei x=10, dünn in x (half_w=2), lang in y (half_d=20)
         _build_nav(bot, [(10.0, 0.0, 0.0, 0.0, 2.0, 20.0, 10.0)])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         tan = bot._steep_wall_ahead(0.0, 20.0)        # Richtung +x = senkrecht auf die Wandfläche
         assert tan is not None
         assert abs(abs(tan) - math.pi / 2) < 1e-6     # Tangente entlang der y-Achse
@@ -2144,19 +2144,19 @@ class TestSteepWallAhead:
     def test_shallow_returns_none(self, bot):
         """Flacher Einfall (45° < 60°) → kein Eingriff (der Bot gleitet die Wand entlang)."""
         _build_nav(bot, [(10.0, 0.0, 0.0, 0.0, 2.0, 20.0, 10.0)])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._steep_wall_ahead(math.radians(45), 20.0) is None
 
     def test_out_of_range_returns_none(self, bot):
         """Wand jenseits der Probe-Distanz → None."""
         _build_nav(bot, [(30.0, 0.0, 0.0, 0.0, 2.0, 20.0, 10.0)])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._steep_wall_ahead(0.0, 20.0) is None
 
     def test_wall_beside_path_returns_none(self, bot):
         """Wand seitlich neben dem Strahl → None."""
         _build_nav(bot, [(10.0, 30.0, 0.0, 0.0, 2.0, 5.0, 10.0)])
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         assert bot._steep_wall_ahead(0.0, 20.0) is None
 
     def test_no_nav_graph_returns_none(self, bot):
@@ -2172,8 +2172,8 @@ class TestCombatSteepWallRouting:
         p = make_player(bot, 2, pos=(dist, 0.0, 0.0))
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
-        bot.vel = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
         bot._nav_goal = None
         bot._nav_path = []
         return p
@@ -2211,7 +2211,7 @@ class TestCombatStallWatchdog:
         p = make_player(bot, 2, pos=(60.0, 0.0, 0.0))  # dist 60 = Optimaldistanz
         p.vel = [0.0, 0.0, 0.0]
         bot.target_player = 2
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot._nav_goal = None
         bot._nav_path = []
@@ -2279,8 +2279,8 @@ class TestCombatStallWatchdog:
         bot._stall_rev_dist = 10.0
         bot._stall_until = 1008.0
         bot._execute_combat_move(0.02, bot.world_half, now=1000.0)
-        assert bot.vel[0] < 0.0                        # fährt rückwärts (azimuth 0)
-        bot.pos = [-11.0, 0.0, 0.0]                    # Soll-Distanz überschritten
+        assert bot.vel_x < 0.0                        # fährt rückwärts (azimuth 0)
+        bot.pos_x = -11.0; bot.pos_y = 0.0; bot.pos_z = 0.0                    # Soll-Distanz überschritten
         bot._execute_combat_move(0.02, bot.world_half, now=1001.0)
         assert bot._stall_mode is None
 
@@ -2322,7 +2322,7 @@ class TestHigherEnemyNoLos:
     def test_higher_enemy_forces_path_planning(self, bot):
         from unittest.mock import MagicMock
         make_player(bot, 2, pos=(60.0, 0.0, 15.0))
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.target_player = 2
         bot._nav_goal = None
         bot._nav_path = []
@@ -2334,7 +2334,7 @@ class TestHigherEnemyNoLos:
     def test_higher_enemy_planfail_arms_watchdog(self, bot):
         _build_nav(bot, [(30.0, 0.0, 0.0, 0.0, 0.5, 40.0, 16.0)])   # blockt LoS zum Gegner z=15
         make_player(bot, 2, pos=(60.0, 0.0, 15.0))
-        bot.pos = [0.0, 0.0, 0.0]
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.target_player = 2
         bot._nav_goal = None
         bot._nav_path = []
@@ -2354,7 +2354,7 @@ class TestThinWallLos:
 
     def test_thin_hix_wall_blocks_los(self, bot):
         _build_nav(bot, [(0.0, 0.0, 14.0, 0.0, 0.5, 150.0, 16.0)])
-        bot.pos = [-30.0, 0.0, 15.0]                  # auf der z=15-Plattform
+        bot.pos_x = -30.0; bot.pos_y = 0.0; bot.pos_z = 15.0                  # auf der z=15-Plattform
         make_player(bot, 2, pos=(30.0, 0.0, 15.0))
         eye = 15.0 + bot._tank_height * 0.5
         assert not bot._segment_clear(-30.0, 0.0, eye, 30.0, 0.0, eye)   # dünne Wand blockt
@@ -2362,7 +2362,7 @@ class TestThinWallLos:
 
     def test_ray_above_and_below_thin_hix_wall_clear(self, bot):
         _build_nav(bot, [(0.0, 0.0, 14.0, 0.0, 0.5, 150.0, 16.0)])
-        bot.pos = [-30.0, 0.0, 15.0]
+        bot.pos_x = -30.0; bot.pos_y = 0.0; bot.pos_z = 15.0
         assert bot._segment_clear(-30.0, 0.0, 31.0, 30.0, 0.0, 31.0)    # über der Wand (>z=30)
         assert bot._segment_clear(-30.0, 0.0, 13.0, 30.0, 0.0, 13.0)    # unter der Basis (<z=14)
 
@@ -2374,7 +2374,7 @@ class TestThinWallLos:
         perp = (math.cos(ang), math.sin(ang))          # Wand-Normale
         bx, by = perp[0] * 30.0, perp[1] * 30.0
         ex, ey = -perp[0] * 30.0, -perp[1] * 30.0
-        bot.pos = [bx, by, 15.0]
+        bot.pos_x = bx; bot.pos_y = by; bot.pos_z = 15.0
         make_player(bot, 2, pos=(ex, ey, 15.0))
         eye = 15.0 + bot._tank_height * 0.5
         assert not bot._segment_clear(bx, by, eye, ex, ey, eye)         # 135°-Wand blockt

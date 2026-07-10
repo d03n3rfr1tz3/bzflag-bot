@@ -195,7 +195,7 @@ def test_perf_segment_obb_hitbox():
 
 
 def test_perf_resolve_incoming_shots(bot):
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = 0.0
     now = time.monotonic()
     # 60 anfliegende, aber verfehlende Schüsse → voller OBB-Test je Schuss, keine Treffer/Removes.
@@ -214,8 +214,8 @@ def test_perf_check_teleport_crossing(bot):
     bot.world_half = wm.world_half
     bot._world_map = wm
     bot._link_map = build_link_map(wm.links)
-    bot.pos = [0.0, 100.0, 3.0]          # weit weg von beiden Toren → kein Crossing
-    bot.vel = [25.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 100.0; bot.pos_z = 3.0          # weit weg von beiden Toren → kein Crossing
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     old = (-1.0, 100.0, 3.0)
     ms = _ms_per_call(lambda: bot._check_teleport_crossing(old, 0.0), iters=20000)
     print(f"\n[PERF] _check_teleport_crossing ({len(wm.teleporters)} Tele, kein Crossing): "
@@ -226,7 +226,7 @@ def test_perf_check_teleport_crossing(bot):
 
 def test_perf_compute_ricochet_aim(bot):
     wm = _perf_world()
-    bot.pos = [-150.0, -150.0, 0.0]
+    bot.pos_x = -150.0; bot.pos_y = -150.0; bot.pos_z = 0.0
     bot.azimuth = 0.0
     bot.own_flag = ""
     bot.world_half = wm.world_half

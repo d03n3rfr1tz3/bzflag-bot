@@ -174,8 +174,11 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         """Eigener Tank-Zustand + Shot-Slots."""
         # Eigener Zustand
         self.player_id = None
-        self.pos       = [0.0, 0.0, 0.0]
-        self.vel       = [0.0, 0.0, 0.0]
+        # Track 5 (mypyc): skalare float-Attribute statt Listen — nativer Unboxing-Slot im
+        # 60-Hz-Physik-/Hit-Detection-Pfad (nur der EIGENE Tank; PlayerInfo/Shot.pos/vel bleiben
+        # Listen, s. DEVELOPER.md).
+        self.pos_x = 0.0; self.pos_y = 0.0; self.pos_z = 0.0
+        self.vel_x = 0.0; self.vel_y = 0.0; self.vel_z = 0.0
         self.azimuth   = 0.0
         self.ang_vel   = 0.0
         self.alive     = False
@@ -297,6 +300,10 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._nav_goal = None          # Optional[Tuple[float, float]] — aktuelles Ziel
         self._nav_jump_return_state = None   # AIState nach NAV_JUMP-Landung
         self._nav_jump_target_z = 0.0  # Erwartet-Landeebene für NAV_JUMP-Fehlschlagerkennung
+        self._nav_goal_z = 0.0                # Ziel-Höhe für COMBAT-Direktanflug (Z-Attack)
+        self._nav_jump_align_wp = None        # WP, auf das NAV_JUMP_ALIGN ausrichtet
+        self._nav_jump_align_start = 0.0      # Engage-Zeit (monotonic) für Ausricht-Timeout
+        self._nav_jump_align_return_state = None  # AIState nach Ausrichtung
         self._nav_jump_cooldowns = {}  # (round_x, round_y, z) → expiry_time (NAV-14)
         # NAV_TELE: direkter Endanflug in die Teleporter-Mitte (P3-NAV-02)
         self._nav_tele_cooldowns = {}  # (round_cx, round_cy) → expiry_time
@@ -369,6 +376,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._debug_log_dodge = debug_log_dodge
         self._debug_log_flag  = debug_log_flag
         self._debug_log_tele  = debug_log_tele
+        self._debug_wp_near_t = 0.0        # Drossel für WP-Näherungs-Log
+        self._debug_obstacle_logged = 0.0  # Drossel für Obstacle-Inside-Log
+        self._debug_nav_tele_t = 0.0       # Drossel für NAV_TELE-Log
 
     def _init_flags(self, good_flags, bad_flags, limited_flags, debug_target_flag):
         """Flag-Strategie + Flag-Tracking."""
@@ -644,23 +654,23 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         if self.player_id is None:
             return
         # PS_FALLING = echter Luftzustand: Sprung, Abstieg, freier Fall (über Boden) und Explosions-Bogen
-        falling = self._jumping or self.pos[2] > self._get_floor_z() + 1e-6
+        falling = self._jumping or self.pos_z > self._get_floor_z() + 1e-6
         if time.monotonic() < self._exploding_until:
             status = PS_EXPLODING | (PS_FALLING if falling else 0)
-            vel, ang_vel = tuple(self.vel), 0.0
+            vel, ang_vel = (self.vel_x, self.vel_y, self.vel_z), 0.0
         elif self.alive:
             status = PS_ALIVE | (PS_FALLING if falling else 0) | (PS_FLAG_ACTIVE if self.own_flag else 0)
             if time.monotonic() < self._teleporting_until:
                 status |= PS_TELEPORTING   # P3-NAV-02: laufender Teleport
             if self._crossing_wall():
                 status |= PS_CROSSING   # OO durch Wand / Teleporter-Straddle → Client-Phasing-Effekt
-            vel, ang_vel = tuple(self.vel), self.ang_vel
+            vel, ang_vel = (self.vel_x, self.vel_y, self.vel_z), self.ang_vel
         else:
             return   # tot und keine laufende Explosion → kein Update (wie der echte Client)
         self._order += 1
         payload = build_player_update(
             player_id=self.player_id, order=self._order, status=status,
-            pos=tuple(self.pos), vel=vel,
+            pos=(self.pos_x, self.pos_y, self.pos_z), vel=vel,
             azimuth=self.azimuth, ang_vel=ang_vel,
             timestamp=time.monotonic() + self._server_time_offset)
         self.client.send(MsgPlayerUpdate, payload)
@@ -673,8 +683,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         if g < 0:
             vz = min(-0.5 * g * EXPLODE_TIME, math.sqrt(-2.0 * 49.0 * g))
         else:
-            vz = self.vel[2]
-        self.vel = [self.vel[0], self.vel[1], vz]
+            vz = self.vel_z
+        self.vel_z = vz
         self._exploding_until = now + EXPLODE_TIME
 
     def _send_teleport(self, source: int, target: int) -> None:
@@ -704,7 +714,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         """Reicht die globalen Server-Variablen _jumpVelocity/_gravity in den (ggf. schon gebauten)
         NavGraph durch — für MsgSetVar, die erst nach dem Weltladen eintreffen. No-Op wenn noch kein
         Graph existiert (dann greift der Build-Aufruf) oder Werte unverändert."""
-        nav = getattr(self, "_nav_graph", None)
+        nav = self._nav_graph
         if nav is not None:
             nav.set_physics(self._jump_velocity, abs(self._gravity))
 
@@ -759,8 +769,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         if self.player_id is None or not self.own_flag: return
         self._last_drop_attempt = time.monotonic()
         self._last_grab_attempt = time.monotonic()  # 0.5s Grab-Cooldown nach Drop
-        self.client.send(MsgDropFlag, struct.pack(">fff", *self.pos))
-        if getattr(self, '_debug_log_flag', False):
+        self.client.send(MsgDropFlag, struct.pack(">fff", self.pos_x, self.pos_y, self.pos_z))
+        if self._debug_log_flag:
             logger.debug("[%s] Flagge: MsgDropFlag gesendet (Flag=%r)", self.callsign, self.own_flag)
 
     def _send_gm_update(self, now: float) -> None:

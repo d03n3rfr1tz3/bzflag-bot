@@ -67,14 +67,14 @@ class CapabilityMixin(BZBotBase):
 
     def _can_shoot(self) -> bool:
         """Basis-Voraussetzungen für Schuss: Netzwerk aktiv, eingeloggt, Debug-Flag."""
-        if getattr(self, '_debug_no_shoot', False): return False
+        if self._debug_no_shoot: return False
         if not self.client.udp_active:              return False
         if self.player_id is None:                  return False
         return True
 
     def _can_jump(self, now: float) -> bool:
         """Prüft alle Sprung-Voraussetzungen: physikalisch, Flagge, Cooldown, Debug-Flag."""
-        if getattr(self, '_debug_no_jump', False):   return False
+        if self._debug_no_jump:   return False
         if self._dodging:                             return False
         if self._jumping:
             if self.own_flag != "WG":                return False
@@ -137,9 +137,9 @@ class CapabilityMixin(BZBotBase):
         # Velocity instantan (für alle Tanks) und wirft M nach ~shakeTimeout (~1s) wieder ab.
         if self.own_flag == "V":   return self._tank_speed * self._velocity_ad
         if self.own_flag == "TH":  return self._tank_speed * self._thief_vel_ad
-        if self.own_flag == "A" and math.hypot(self.vel[0], self.vel[1]) < 1.0:
+        if self.own_flag == "A" and math.hypot(self.vel_x, self.vel_y) < 1.0:
             return self._tank_speed * self._agility_ad_vel
-        if self.own_flag == "BU" and self.pos[2] < 0.0:  # Malus nur eingegraben (am Boden), nicht auf Dächern
+        if self.own_flag == "BU" and self.pos_z < 0.0:  # Malus nur eingegraben (am Boden), nicht auf Dächern
             return self._tank_speed * self._burrow_speed_ad
         return self._tank_speed
 
@@ -159,7 +159,7 @@ class CapabilityMixin(BZBotBase):
     def _effective_turn_rate(self) -> float:
         # M nicht modelliert — siehe _effective_tank_speed (Inertie, nicht Drehrate; ~1s gehalten).
         if self.own_flag == "QT":  return self._tank_turn_rate * self._angular_ad
-        if self.own_flag == "BU" and self.pos[2] < 0.0:  # Malus nur eingegraben (am Boden)
+        if self.own_flag == "BU" and self.pos_z < 0.0:  # Malus nur eingegraben (am Boden)
             return self._tank_turn_rate * self._burrow_ang_ad
         return self._tank_turn_rate
 
@@ -217,5 +217,5 @@ class CapabilityMixin(BZBotBase):
 
     def _has_teleporters(self) -> bool:
         """True wenn die Karte Teleporter hat (→ indirekte Schüsse auch ohne Ricochet möglich)."""
-        wm = getattr(self, "_world_map", None)
+        wm = self._world_map
         return bool(wm and wm.teleporters)

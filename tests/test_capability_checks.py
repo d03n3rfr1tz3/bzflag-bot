@@ -206,7 +206,7 @@ def test_is_inside_obstacle_outside_building(bot):
     """Bot weit vom Gebäude → nicht in blockierter Zelle."""
     box = _make_box(50.0, 0.0, 8.0, 8.0, 10.0)
     _make_nav(bot, [box])
-    bot.pos      = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.own_flag = ""
     assert bot._is_inside_obstacle() is False
 
@@ -215,7 +215,7 @@ def test_is_inside_obstacle_inside_building(bot):
     """Bot im Gebäude (blockierte Zelle) → True."""
     box = _make_box(0.0, 0.0, 10.0, 10.0, 10.0)
     _make_nav(bot, [box], world_hash="cap_inside")
-    bot.pos      = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.own_flag = ""
     assert bot._is_inside_obstacle() is True
 
@@ -224,7 +224,7 @@ def test_is_inside_obstacle_oo_bypasses(bot):
     """OO-Flagge → _is_inside_obstacle gibt False zurück, auch im Gebäude."""
     box = _make_box(0.0, 0.0, 10.0, 10.0, 10.0)
     _make_nav(bot, [box], world_hash="cap_oo")
-    bot.pos      = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.own_flag = "OO"
     assert bot._is_inside_obstacle() is False
 
@@ -236,7 +236,7 @@ def test_is_inside_obstacle_obb_nose_pokes_in(bot):
     box = _make_box(0.0, 0.0, 2.0, 2.0, 10.0)     # Box-Rand bei x=±2
     _make_nav(bot, [box], world_hash="cap_obb_nose")
     bot.own_flag = ""
-    bot.pos = [4.0, 0.0, 0.0]                       # Zentrum 4u > Rand 2 → Punkt-Test wäre False
+    bot.pos_x = 4.0; bot.pos_y = 0.0; bot.pos_z = 0.0                       # Zentrum 4u > Rand 2 → Punkt-Test wäre False
     bot.azimuth = math.pi                           # Nase in -x → erreicht x=1 (in der Box)
     assert bot._is_inside_obstacle() is True
     bot.azimuth = math.pi / 2                       # Nase quer → nur Halb-Breite 1,4 in x → außen
@@ -250,9 +250,9 @@ def test_is_inside_obstacle_on_top_is_outside(bot):
     box = _make_box(0.0, 0.0, 10.0, 10.0, 10.0)   # bottom_z=0, height=10 → Oberkante z=10
     _make_nav(bot, [box], world_hash="cap_ontop")
     bot.own_flag = ""
-    bot.pos = [0.0, 0.0, 10.0]    # Basis exakt auf der Oberkante → steht darauf
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0    # Basis exakt auf der Oberkante → steht darauf
     assert bot._is_inside_obstacle() is False
-    bot.pos = [0.0, 0.0, 9.7]     # knapp darin → innen
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 9.7     # knapp darin → innen
     assert bot._is_inside_obstacle() is True
 
 
@@ -360,15 +360,15 @@ def test_can_jump_flag_overrides_server_no_jumping(bot, flag):
 
 def test_is_landed_ascending_returns_false(bot):
     """Bot steigt auf (vel[2] > 0.1) → _is_landed False, auch nahe am Boden (NAV-04)."""
-    bot.vel[2] = 5.0
-    bot.pos[2] = 0.1
+    bot.vel_z = 5.0
+    bot.pos_z = 0.1
     assert bot._is_landed() is False
 
 
 def test_is_landed_at_ground(bot):
     """Bot am Boden, keine Aufwärtsbewegung → _is_landed True."""
-    bot.vel[2] = 0.0
-    bot.pos[2] = 0.0
+    bot.vel_z = 0.0
+    bot.pos_z = 0.0
     assert bot._is_landed() is True
 
 
@@ -378,46 +378,46 @@ def test_obstacle_bounds_blocks_perpendicular(bot):
     """Bot fährt gerade auf Wand zu → vx wird auf 0 gesetzt."""
     box = _make_box(5.0, 0.0, 5.0, 5.0, 10.0)
     _make_nav(bot, [box])
-    bot.pos      = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.own_flag = ""
-    bot.vel      = [25.0, 0.0, 0.0]
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot._apply_obstacle_bounds(0.1)
-    assert bot.vel[0] == pytest.approx(0.0, abs=0.1)
-    assert bot.vel[1] == pytest.approx(0.0, abs=0.1)
+    assert bot.vel_x == pytest.approx(0.0, abs=0.1)
+    assert bot.vel_y == pytest.approx(0.0, abs=0.1)
 
 
 def test_obstacle_bounds_slides_parallel(bot):
     """Bot fährt parallel zur Wand → Geschwindigkeit bleibt unverändert."""
     box = _make_box(0.0, 15.0, 5.0, 5.0, 10.0)
     _make_nav(bot, [box])
-    bot.pos      = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.own_flag = ""
-    bot.vel      = [25.0, 0.0, 0.0]
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot._apply_obstacle_bounds(0.1)
-    assert bot.vel[0] == pytest.approx(25.0, abs=0.1)
-    assert bot.vel[1] == pytest.approx(0.0, abs=0.1)
+    assert bot.vel_x == pytest.approx(25.0, abs=0.1)
+    assert bot.vel_y == pytest.approx(0.0, abs=0.1)
 
 
 def test_obstacle_bounds_oo_bypasses(bot):
     """OO-Flagge: Kollisionskorrektur wird übersprungen."""
     box = _make_box(5.0, 0.0, 5.0, 5.0, 10.0)
     _make_nav(bot, [box])
-    bot.pos      = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.own_flag = "OO"
-    bot.vel      = [25.0, 0.0, 0.0]
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot._apply_obstacle_bounds(0.1)
-    assert bot.vel[0] == pytest.approx(25.0, abs=0.1)
+    assert bot.vel_x == pytest.approx(25.0, abs=0.1)
 
 
 def test_obstacle_bounds_roof_not_blocked(bot):
     """Bot steht auf dem Dach (pz = Gebäudehöhe) → wird nicht blockiert."""
     box = _make_box(0.0, 0.0, 5.0, 5.0, 10.0)
     _make_nav(bot, [box])
-    bot.pos      = [0.0, 0.0, 10.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0
     bot.own_flag = ""
-    bot.vel      = [25.0, 0.0, 0.0]
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot._apply_obstacle_bounds(0.1)
-    assert bot.vel[0] == pytest.approx(25.0, abs=0.1)
+    assert bot.vel_x == pytest.approx(25.0, abs=0.1)
 
 
 # ── Burrow-Boden-Gate & OO-Landung (z-abhängig) ───────────────────────────────
@@ -428,19 +428,19 @@ def test_burrow_floor_on_building(bot):
     box = _make_box(0.0, 0.0, 5.0, 5.0, 10.0)
     _make_nav(bot, [box])
     bot.own_flag = "BU"
-    bot.pos = [0.0, 0.0, 10.0]               # auf dem Dach
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0               # auf dem Dach
     assert bot._get_floor_z() == pytest.approx(10.0)
-    bot.pos = [50.0, 50.0, 0.0]              # am Boden, abseits des Gebäudes
+    bot.pos_x = 50.0; bot.pos_y = 50.0; bot.pos_z = 0.0              # am Boden, abseits des Gebäudes
     assert bot._get_floor_z() == pytest.approx(bot._burrow_depth)
 
 
 def test_burrow_speed_turn_only_below_ground(bot):
     """BU-Malus auf Speed/Turn nur eingegraben (z<0), nicht auf einem Dach (z>0)."""
     bot.own_flag = "BU"
-    bot.pos = [0.0, 0.0, -1.32]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = -1.32
     assert bot._effective_tank_speed() == pytest.approx(bot._tank_speed * bot._burrow_speed_ad)
     assert bot._effective_turn_rate() == pytest.approx(bot._tank_turn_rate * bot._burrow_ang_ad)
-    bot.pos = [0.0, 0.0, 5.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 5.0
     assert bot._effective_tank_speed() == pytest.approx(bot._tank_speed)
     assert bot._effective_turn_rate() == pytest.approx(bot._tank_turn_rate)
 
@@ -450,7 +450,7 @@ def test_oo_floor_is_ground(bot):
     box = _make_box(0.0, 0.0, 5.0, 5.0, 10.0)
     _make_nav(bot, [box])
     bot.own_flag = "OO"
-    bot.pos = [0.0, 0.0, 10.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0
     assert bot._get_floor_z() == pytest.approx(0.0)
 
 
@@ -459,7 +459,7 @@ def test_oo_no_rooftop_navjump(bot):
     der Bot fährt den WP am Boden phasend an."""
     from bot.models import AIState
     bot.own_flag = "OO"
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot._ai_state = AIState.SEEKING
     bot._nav_path = [(0.0, 0.0, 0.0), (10.0, 0.0, 10.0)]   # 2. WP = Dach (z=10)
     bot._advance_path()
@@ -492,7 +492,7 @@ def test_effective_fov_wide_angle_server_var(bot):
 def test_is_ahead_geometry(bot):
     """_is_ahead = ±90°-„liegt vor mir" (kein Sicht-FoV): 60° seitlich vor, 180° hinter."""
     import math
-    bot.pos = [0.0, 0.0, 0.0]
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
     bot.azimuth = 0.0
     assert bot._is_ahead(math.cos(math.radians(60)) * 50, math.sin(math.radians(60)) * 50) is True
     assert bot._is_ahead(-50.0, 0.0) is False   # direkt hinter dem Bot
