@@ -967,6 +967,15 @@ die tatsächliche Tank-Form besser ab: lang (3.5u), schmal (1.0u), normalhohe (1
   Flagge, sendet er `MsgTransferFlag(player_id, shooter)` und verliert sie; ohne Flagge passiert
   nichts. `is_thief`-Schüsse werden in `_resolve_incoming_shots` ohne Kill verworfen.
 
+**PhantomZone (PZ) — Phantom-Schüsse:**
+- Wire-Flag „PZ" = der Schütze war beim Feuern **gezoned** (sein Client nullt das Flag sonst,
+  `ShotPath.cxx:46`). Phantom-Schüsse phasen durch Wände, treffen aber **nur ebenfalls gezonede
+  Ziele** (`LocalPlayer::checkHit`: „zoned shots only kill zoned tanks").
+- Der Bot zoned sich nie selbst (P4-FLG-03 offen) → `_phantom_shot_harmless()` filtert PZ-Schüsse
+  in `_resolve_incoming_shots` und `_find_incoming_shot` (direkt + Phase-Pfad-Cache): kein Treffer,
+  kein Ausweichen. Der Schuss bleibt bis zum Ablauf in `_shots` (MsgShotEnd-Buchhaltung). Bei einer
+  FLG-03-Umsetzung (Selbst-Zoning) muss der Filter den eigenen Zoned-Status prüfen.
+
 **Steamroller (SR) — `_check_steamroller()`:**
 - Proximity-Check, kein Segment; 3D-Abstand mit doppelter Z-Gewichtung:
   `sqrt(hypot(dx,dy)² + (2·dz)²) < TANK_RADIUS × (1 + SR_RADIUS_MULT)` (= 3× ≈ 12,96u)
@@ -1422,8 +1431,13 @@ C-Code von `sendto` (für cProfile unsichtbar; im Container mit Docker-DNS ~1,3m
 statt ~0,1ms). Bewusst kein `udp.connect()` — das würde Empfangsfilterung und
 ICMP-Fehlersemantik ändern. Tests: `test_client_udp_addr.py`.
 
-Eine vollständige bidirektionale UDP-Implementierung wäre komplizierter ohne signifikant
-bessere Spielbarkeit — als P4-PRO-01 auf der Roadmap (FSD).
+**Bidirektionales UDP: evaluiert und bewusst verworfen** (ehem. P4-PRO-01). Der Server sendet
+Broadcasts erst dann per UDP, wenn der Client `MsgUDPLinkEstablished` über UDP schickt
+(`NetHandler.cxx`: erst das setzt `udpout`; die `pwrite`-Whitelist umfasst u. a.
+PlayerUpdate/ShotBegin/ShotEnd/GMUpdate). Der Bot unterlässt das absichtlich
+(`_h_udp_link_request` antwortet nicht): die client-seitige Hit-Detection braucht zuverlässige
+`MsgShotBegin` — ein verlorenes Paket hieße weder ausweichen noch sterben (Cheater-Wirkung) —
+bei ~0 Latenzgewinn im Docker-Netz. FSD: PRO-03 ist eine dauerhafte Design-Entscheidung.
 
 ### Welt-Download-Flow
 
@@ -1476,14 +1490,14 @@ ignoriert Server-Konfiguration — das ist ein Bug.
 **MsgSetVar vs. MsgGameSettings:**
 - `MsgGameSettings` kommt einmalig beim Connect: enthält `shakeTimeout`,
   `linearAcceleration`, `angularAcceleration` (letztere noch nicht in
-  Bewegungssimulation aktiv, → P4-MOV-02)
+  Bewegungssimulation aktiv, → P4-MOV-02a; Analyse-Notizen in Sektion 13)
 - `MsgSetVar` kommt nach Welt-Download und kann wiederholt kommen
   (Server-Admin ändert Werte live)
 - Einzige MsgSetVar-Variable mit Seiteneffekt auf den NavGraph: `_worldSize`
   (→ `_worldSize`-Timing-Problem oben)
 - `MsgGameSettings`-Felder: `worldSize` (Offset 0), `gameOptions` (Offset 6 — Bit `0x0020` =
   RicochetGameStyle → `self._server_ricochet`), `maxShots` (Offset 10),
-  `linear/angularAcceleration` (14/18, noch ungenutzt → P4-MOV-02), `shakeTimeout` (Offset 22,
+  `linear/angularAcceleration` (14/18, noch ungenutzt → P4-MOV-02a), `shakeTimeout` (Offset 22,
   1/10 s → `_drop_bad_flag_delay`).
 
 ### Rundenende und Reconnect
@@ -1541,7 +1555,7 @@ Verbindung und Server-Kommunikation passieren in Tests nie.
 | `test_geometry.py` | `_angle_diff`, `_wrap`, `position_at`, `closest_approach_dist` |
 | `test_kill_payloads.py` | `MsgKilled`-Payload-Aufbau für alle Waffentypen |
 | `test_shot_parsing.py` | `MsgShotBegin`-Parsing, SW/Laser/Thief Sofort-Check bei Spawn |
-| `test_hit_detection.py` | `_resolve_incoming_shots` für SW, GM, Laser, SR, Obesity, Narrow-OBB |
+| `test_hit_detection.py` | `_resolve_incoming_shots` für SW, GM, Laser, SR, Obesity, Narrow-OBB, PZ-Phantom |
 | `test_sb_hit.py` | SB-Treffer: Wand-Phasing (phase_walls), Längskapsel, Hit-Fenster |
 | `test_targeting.py` | `_find_target_player` mit Radar/FOV, Stealth, Cloaking, Team; P7-LoS-Cache |
 | `test_movement.py` | Waypoint-Navigation, Schwerkraft, BY-Flag, `_is_landed` |
@@ -1654,3 +1668,84 @@ class TestNavMeinekarte:
 ```
 
 Das Fixture `load_map_fixture(name)` ist in `tests/conftest.py` definiert.
+
+---
+
+## 12. mypyc-Kompilierung (Track 5)
+
+Der Bot läuft produktiv **mypyc-kompiliert** (AOT, PR #14); unkompiliert bleibt er voll
+lauffähig (Entwicklung/Tests). Build-Kommandos: README, Abschnitt „Kompilieren mit mypyc".
+Das Deployment (Docker-Builder-Stage) liegt außerhalb dieses Repos.
+
+**Harte Laufzeit-Abhängigkeit `mypy-extensions`:** `from mypy_extensions import trait` läuft
+beim Import in `bot/_bot_base.py` und allen Mixins — **auch unkompiliert**. (`pip install mypy`
+zieht es als Dependency mit; in schlanken Runtime-Umgebungen muss es explizit installiert
+werden, sonst ImportError beim Start.)
+
+**Muster, die mypyc erzwingt (bei Code-Änderungen einhalten):**
+
+1. **`@trait`-Mixins:** mypyc erlaubt Mehrfachvererbung nur, wenn alle Basisklassen Traits
+   sind. Jedes Mixin (`bot/ai/*.py`, `bot/hit_detection.py`, …) trägt `@trait` und erbt von
+   `BZBotBase`.
+2. **`bot/_bot_base.py`:** deklariert alle über die Mixins geteilten Attribute (bewusst `Any`,
+   keine Zuweisungskonflikte) und Methoden (Stubs mit Signaturen exakt aus der Quelle →
+   Liskov-kompatibel) genau einmal, damit mypy/mypyc cross-mixin-Zugriffe auflösen kann.
+   **Pflegeregel: neue oder geänderte geteilte Attribute/Methoden müssen dort manuell
+   nachgezogen werden** (der ursprüngliche Generator existiert nicht mehr — Pflege von Hand,
+   alphabetisch einsortieren).
+3. **Explizite Importe:** kein `from bot.constants import *` — mypyc löst Wildcard-Importe
+   nicht auf; Import-Listen explizit pflegen.
+4. **Statisches `__all__` in `bot/constants.py`:** die Liste ist handgepflegt (kein
+   berechnetes `__all__`); neue UPPERCASE-Konstanten dort eintragen.
+
+---
+
+## 13. Roadmap-Notizen (FSD Phase 4)
+
+Analyse-Ergebnisse der FSD-Bereinigung (2026-07-10), damit die Umsetzungs-Sessions direkt
+aufsetzen können.
+
+**P4-MOV-01 — Glatte Wegpunkt-Übergänge: Ansatz „Early Advance mit Korridor-Check".**
+Nicht das Aim verbiegen (ein früherer Aim-Blending-/„Scandinavian-Flick"-Versuch erzeugte
+Regressionen beim WP-Abfahren), sondern den aktuellen WP früher weiterschalten, wenn:
+Folge-WP auf gleicher Ebene; weder aktueller noch nächster WP ein
+Sprung-Anlauf-/Teleporter-/z-Wechsel-WP; direkter Korridor Bot→nächster WP frei
+(`query_segment`); kein Rückwärtsmodus. Die Steering-Formel bleibt unverändert — die
+vorhandene Kurvendrosselung rundet die Übergänge dann natürlich. Pure-Pursuit
+(Lookahead-Punkt auf dem Pfad-Polygon) wäre eine optionale zweite Stufe. Beim Umsetzen
+ersetzen: die zwei geskippten Vertrags-Tests (`tests/test_movement.py`,
+`TestLookaheadSmoothing`) und der veraltete „Lookahead"-Docstring in
+`bot/ai/navigation.py::_navigate_wp`.
+
+**P4-MOV-02a–c — Trägheitsmodell: verifizierte Fakten.** Der Zielserver setzt `-a 50 38`
+(→ MsgGameSettings `linear/angularAcceleration`). Der echte Client klemmt in
+`LocalPlayer::doMomentum` linear auf **20 × linearAcceleration** (= 1000 u/s² → 0→25 u/s in
+~25 ms ≈ 1,5 Physik-Ticks) und angular direkt auf den Wert (38 rad/s² → volle Drehrate in
+~21 ms, Umkehr ~41 ms). Die reale Rampe beträgt also nur ~1–3 Ticks — kleiner sichtbarer
+Effekt, im Gegenzug begrenztes Risiko für die Vorberechnungen (t_fire, turn_time,
+needed_hspeed). bzfs überspringt bei aktivem `-a` seinen Highspeed-Cheat-Check
+(`bzfs.cxx:5396`). Ein `doMomentum`-Äquivalent macht das M-Flag (bisher bewusst nicht
+modelliert) fast gratis (`_momentumLinAcc/_momentumAngAcc`, gleiche Klemme). Hinweis:
+`_inertiaLinear/_inertiaAngular` sind 3.0-BZDB-Variablen und existieren in 2.4 nicht —
+2.4 nutzt ausschließlich die `-a`-Option.
+
+**P4-FLG-04/05 — Best-Flags-Wissen: Wahrnehmungs-Gate.** Protokoll-seitig wäre der Bot
+allwissend: die `flag_id` ist über Drops stabil, `MsgFlagUpdate` liefert die exakte
+Bodenposition, und getragene Flaggen kommen mit echtem Kürzel durch (nur liegende sind
+„PZ"-Platzhalter → `""`). Damit er menschlich bleibt: Typ-Wissen `flag_id → abbr` nur
+übernehmen, wenn Träger/Drop wahrnehmbar war — Sicht (`_enemy_visible_window`) unverändert,
+der Radar-Pfad (`_enemy_visible_radar`) **zusätzlich distanz-begrenzt** (Radar-Reichweite =
+halbe Weltgröße wäre zu großzügig; Wert beim Umsetzen festlegen) — oder per ID-Flag
+(`MsgNearFlag`) bzw. eigenem Grab/Drop. Einmal Gewusstes bleibt gemerkt; Invalidierung bei
+Flag-Reset (Status 0; via `_maxFlagGrabs` kann die Flagge Ort und Typ wechseln).
+
+**P4-TAC-05 → P4-TAC-02 — Schuss-Slots & Deckung.** Slot eines Fremdschusses =
+`shot_id & 0xFF`; `maxShots`/`_reloadTime` sind serverweit bekannt, `MsgShotBegin` kommt
+zuverlässig per TCP → per-Gegner-Slot-Cooldowns als neues Feld an `PlayerInfo`, befüllt in
+`_on_shot_begin` (Flag-Modifikatoren des Gegners analog `_effective_reload_time`). Der Wert
+liegt im Peek-Timing für die Deckung (TAC-02): „beide Slots gerade leergeschossen → ~3 s
+Fenster zum Rauskommen". Für TAC-02 existieren die Geometrie-Primitive bereits
+(`_segment_clear`, LoS-Ray-Grid `query_ray`, `query_segment`, Punkt-Sampler in
+`bot/ai/combat.py`); offene Verhaltensfragen: Hysterese gegen Deckung↔Angriff-Oszillation,
+Scope auf die stärkste Bedrohung, Ausnahmen SB (durchschlägt Wände) / SW (radial) / GM
+(Deckung bricht den Lock).

@@ -111,7 +111,7 @@ Dokumentierte Abweichungen vom BZFlag-2.4-Protokoll und ihr Stand (✅ behoben/u
 |---|---|---|---|
 | PRO-01 | Physikalische Konstanten (Schuss-/Tank-/Sprung-Geschwindigkeit, Schwerkraft, Drehrate, Schussreichweite) werden aus den Server-Variablen gelesen statt fest verdrahtet | Hoch | ✅ |
 | PRO-02 | Positions-Update-Zeitstempel werden mit der Server-Zeit synchronisiert (statt lokaler Uhr) | Mittel | ✅ |
-| PRO-03 | UDP-Asymmetrie: eigene Positions-Updates werden per UDP gesendet, Server-Broadcasts aber per TCP empfangen (zuverlässiger; bewusster Kompromiss, bidirektionales UDP ist Roadmap) | Mittel | 📋 |
+| PRO-03 | UDP-Asymmetrie: eigene Positions-Updates werden per UDP gesendet, Server-Broadcasts per TCP empfangen — dauerhafte Design-Entscheidung: der zuverlässige TCP-Empfang sichert die client-seitige Hit-Detection (ein verlorenes MsgShotBegin ließe den Bot weder ausweichen noch sterben — Cheater-Wirkung) | Mittel | ✅ |
 | PRO-04 | Flag-Liste im Handshake vollständig gegen BZFlag 2.4 abgeglichen | Mittel | ✅ |
 | PRO-05 | Flag-Aktiv-Statusbit in den Positions-Updates beim Flag-Tragen gesetzt | Niedrig | ✅ |
 | PRO-06 | Veraltete Positions-Pakete (niedrigere Order-Nummer) werden erkannt und verworfen | Niedrig | ✅ |
@@ -360,43 +360,37 @@ Kritische Fähigkeiten für den produktiven Server-Betrieb.
 
 Taktische und infrastrukturelle Verbesserungen ohne harte Produktionsrelevanz.
 
-**Protokoll (P4-PRO)**
-
-| ID | Feature | Status | Abhängigkeiten |
-|---|---|---|---|
-| P4-PRO-01 | Bidirektionales UDP evaluieren (aktuell nur Senden via UDP) | 📋 | — |
-
 **Bewegung (P4-MOV)**
 
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
-| P4-MOV-01 | Glatte Wegpunkt-Übergänge (Lookahead-Blending) | 📋 | P2-PTH-01…03 |
-| P4-MOV-02 | Trägheitsmodell (lineare/angulare Beschleunigung) in der Bewegungssimulation nutzen | 📋 | — |
+| P4-MOV-01 | Glatte Wegpunkt-Übergänge (kein hartes Zick-Zack an Pfad-Ecken) | 📋 | P2-PTH-01…03 |
+| P4-MOV-02a | Trägheitsmodell: lineare/angulare Beschleunigungsgrenzen (Server-Vorgabe) im normalen Bodenfahren, inkl. nachgeführter Stuck-/Timeout-Erkennung | 📋 | — |
+| P4-MOV-02b | Trägheitsmodell: committed Zustände und Vorberechnungen (Sprünge, Z-Angriff, Landing-Shot) einzeln bewerten und ggf. nachführen | 📋 | P4-MOV-02a |
+| P4-MOV-02c | Trägheitsmodell: Sprungkanten-Planung im Navigationsgraphen an die effektive Beschleunigung angleichen | 📋 | P4-MOV-02b |
 
 **Flaggen (P4-FLG)**
 
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
 | P4-FLG-03 | PhantomZone regelkonform nutzen | 📋 | P3-NAV-02 |
-| P4-FLG-04 | Vom Gegner fallengelassene gute Flaggen aufsammeln | 📋 | — |
+| P4-FLG-04 | Best-Flags-Wissen aus Beobachtung: Typ und Ablageort begehrter Flaggen (z. B. GM/L/SW) merken — nur bei wahrnehmbarem Träger/Drop (Sicht; Radar zusätzlich distanz-begrenzt) oder ID-Identifikation; Vergessen bei Flag-Reset | 📋 | — |
+| P4-FLG-05 | Bekannte gute Flaggen (insbes. vom Gegner fallengelassene) gezielt bevorzugt ansteuern und aufsammeln (statt nur opportunistisch) | 📋 | P4-FLG-04 |
 
 **Taktik (P4-TAC)**
 
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
-| P4-TAC-01 | Flankieren statt frontal | 📋 | — |
-| P4-TAC-02 | Deckung hinter Gebäuden | 📋 | — |
-| P4-TAC-04 | Gegner-Bewegungsmuster lernen | 📋 | — |
+| P4-TAC-02 | Deckung hinter Gebäuden | 📋 | P4-TAC-05 |
 | P4-TAC-05 | Gegner-Schuss-Slots tracken und passend aus der Deckung kommen | 📋 | — |
 | P4-TAC-06 | Landing-Shot nicht ausführen, wenn Landung > eigener Z | ✅ | — |
 | P4-TAC-07 | Landing-Shot eher ausführen, wenn Landung < eigener Z | ✅ | — |
 
-**Performance / Infrastruktur (P4P4-INF)**
+**Performance / Infrastruktur (P4-INF)**
 
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
 | P4-INF-01 | Asynchrones Pathfinding (A* nebenläufig; Bot nutzt den letzten validen Pfad oder Direktweg weiter) | ✅ | — |
-| P4-INF-02 | Asynchroner KI-Tick: zeitkritische Physik (60 Hz) von der KI-Logik (10 Hz) entkoppeln | 📋 | P4-INF-01 |
 
 ---
 
@@ -468,7 +462,7 @@ als Gegner-Effekt auf den Bot. Server-Variablen können die Werte überschreiben
 
 | Abbr | Klasse | Bot-Verhalten |
 |---|---|---|
-| PZ | neutral | Vom Bot nicht genutzt (Roadmap). *Als Gegner-Effekt:* nur SW/SB treffen/zielen |
+| PZ | neutral | Vom Bot nicht genutzt (Roadmap). *Als Gegner-Effekt:* gezonede Gegner sind nur mit SW/SB zu treffen/zielen; Phantom-Schüsse gezoneder Gegner treffen nur gezonede Ziele → für den (nie gezoneden) Bot harmlos, kein Ausweichen |
 | LG | neutral | v2.1+/v3.0-Flagge, im v2.4-Zielserver nicht vorhanden; Schwerkraft-Handling vorhanden aber dormant |
 | US | neutral | Nutzlos |
 
