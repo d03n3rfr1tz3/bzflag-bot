@@ -122,6 +122,9 @@ class HitDetectionMixin(BZBotBase):
                 own_dx = own_dy = own_dz = 0.0
         self._last_hit_check_t   = now
         self._last_hit_check_pos = (self.pos[0], self.pos[1], self.pos[2])
+        # Einmal pro Tick statt pro Schuss: die eigene Flagge (und damit die Hitbox-Masse)
+        # ändert sich nicht innerhalb eines Ticks.
+        _half_len, _half_w, _half_h = self._hitbox_half_dims()
         with self._shots_lock:
             to_remove = []; hit_shot = None
             for key, shot in self._shots.items():
@@ -193,7 +196,6 @@ class HitDetectionMixin(BZBotBase):
                                                        tank_cx, tank_cy, tank_cz))
                     else:
                         prev_t = max(shot.fire_time, win_start)
-                        _half_len, _half_w, _half_h = self._hitbox_half_dims()
                         # Teil B: SB-Längskapsel — Segment beidseitig um _shotRadius
                         # verlängern (Längsreichweite 2×, seitlich unverändert).
                         _sb_extra = (self._shot_radius
