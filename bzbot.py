@@ -132,18 +132,23 @@ def main():
             debug_log_flag=args.debug_log_flag,
             debug_log_tele=args.debug_log_tele,
         )
+        # BZBot ist eine mypyc-kompilierte native Klasse (Track 5) — Methoden sind dort
+        # nicht per Instanz-Zuweisung überschreibbar. Statt _on_world_ready zu patchen,
+        # hängen wir uns über on_world_ready_extra an (von _on_world_ready an jedem
+        # Austrittspunkt aufgerufen). b.client.on_world_ready bleibt wie in
+        # _init_network gesetzt.
         if dump_path:
-            _orig_ready = b._on_world_ready
-            def _dump_and_ready(wm):
-                _orig_ready(wm)
+            def _dump_extra(wm):
                 if wm is not None:
                     _dump_world_map(wm, dump_path, nav=getattr(b, '_nav_graph', None))
-            b._on_world_ready = _dump_and_ready
-            b.client.on_world_ready = b._on_world_ready
+            b.on_world_ready_extra = _dump_extra
         if raw_dump_prefix:
-            _orig_ready2 = b._on_world_ready
-            def _raw_dump_and_ready(wm):
-                _orig_ready2(wm)
+            # Komposition: falls dump_path bereits einen Callback gesetzt hat, ruft
+            # der neue ihn mit auf — beide Dumps laufen dann wie bisher verkettet.
+            _prev_extra = b.on_world_ready_extra
+            def _raw_dump_extra(wm):
+                if _prev_extra is not None:
+                    _prev_extra(wm)
                 try:
                     from pathlib import Path as _Path
                     raw = bytes(b.client._world_buf)
@@ -154,8 +159,7 @@ def main():
                     logger.info("[PTH] Raw-Dump: %s.bin (%d B)", raw_dump_prefix, len(raw))
                 except Exception as exc:
                     logger.warning("[PTH] Raw-Dump fehlgeschlagen: %s", exc)
-            b._on_world_ready = _raw_dump_and_ready
-            b.client.on_world_ready = b._on_world_ready
+            b.on_world_ready_extra = _raw_dump_extra
         return b
 
     # Managed-Modus: EIN prozesslanger stdin-Reader, der Kommandos an den jeweils

@@ -77,7 +77,23 @@ class HandlersMixin(BZBotBase):
                 logger.info("[%s] shakeTimeout=%.1fs", self.callsign, self._drop_bad_flag_delay)
 
     def _on_world_ready(self, world_map) -> None:
-        """Callback nach Welt-Download: speichert WorldMap und baut NavGraph."""
+        """Callback nach Welt-Download: speichert WorldMap und baut NavGraph.
+
+        try/finally statt frühem return, damit on_world_ready_extra (Karten-Dump
+        aus bzbot.py) an JEDEM Austrittspunkt aufgerufen wird — auch bei
+        world_map=None (Parse-Fehler)."""
+        try:
+            self._on_world_ready_core(world_map)
+        finally:
+            cb = self.on_world_ready_extra
+            if cb is not None:
+                try:
+                    cb(world_map)
+                except Exception:
+                    logger.exception("[%s] on_world_ready_extra-Callback Fehler", self.callsign)
+
+    def _on_world_ready_core(self, world_map) -> None:
+        """Kern von _on_world_ready (siehe dort) — speichert WorldMap und baut NavGraph."""
         self._world_map = world_map
         self._shot_grid = None   # nie stale zur alten Welt (Rebuild unten)
         if world_map is None:
