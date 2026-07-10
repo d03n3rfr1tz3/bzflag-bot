@@ -21,21 +21,27 @@ class BZBotBase:
     """Deklariert die geteilten Member. Keine eigene Logik/Instanziierung."""
 
     # ── Geteilte Daten-Attribute (typisiert wo eindeutig, sonst Any) ─────
+    # WICHTIG: KEINE float-Annotationen in dieser @trait-Klasse — mypyc (Stand 2.2.0)
+    # crasht im Codegen ("ValueError: value is not in list", emitfunc.get_attr_expr),
+    # sobald ein unboxed float-Trait-Attribut aus einer Trait-Methode geschrieben wird
+    # (Bitmap-Tracking für Definedness wird für Traits nicht unterstützt; bool/int/str/
+    # Container haben Sentinel-Werte und sind nicht betroffen). Float-Attribute daher
+    # bewusst Any; siehe DEVELOPER.md §12 (Track 5).
     _active_gm: Any
-    _agility_ad_vel: float
+    _agility_ad_vel: Any
     _ai_state: Any
-    _angular_acceleration: float
-    _angular_ad: float
+    _angular_acceleration: Any
+    _angular_ad: Any
     _async_cancel: Any
     _async_plan_goal: Any
     _async_plan_lock: Any
     _async_plan_result: Any
     _async_plan_thread: Any
-    _bounce_next: float
+    _bounce_next: Any
     _bounce_replan: bool
-    _burrow_ang_ad: float
-    _burrow_depth: float
-    _burrow_speed_ad: float
+    _burrow_ang_ad: Any
+    _burrow_depth: Any
+    _burrow_speed_ad: Any
     _combat_avoid: dict
     _connection_lost: bool
     _debug_log_dodge: bool
@@ -48,64 +54,64 @@ class BZBotBase:
     _debug_no_shoot: bool
     _debug_obstacle_logged: Any
     _debug_wp_near_t: Any
-    _dodge_dir: float
+    _dodge_dir: Any
     _dodge_forward: bool
     _dodge_reverse: bool
-    _dodge_until: float
+    _dodge_until: Any
     _dodging: bool
-    _drop_bad_flag_delay: float
+    _drop_bad_flag_delay: Any
     _dropped_neutrals: Any
     _escape_jump_ang_vel: Any
     _evade_cleared_shots: dict
-    _exploding_until: float
-    _flag_radius: float
+    _exploding_until: Any
+    _flag_radius: Any
     _game_over: bool
-    _gm_activation_time: float
-    _gm_ad_life: float
-    _gm_min_range: float
+    _gm_activation_time: Any
+    _gm_ad_life: Any
+    _gm_min_range: Any
     _gm_need_update: bool
     _gm_resend_at: Any
     _gm_send_at: Any
-    _gm_turn_angle: float
-    _gravity: float
+    _gm_turn_angle: Any
+    _gravity: Any
     _has_spawned: bool
-    _identify_range: float
+    _identify_range: Any
     _indirect_hold_until: Any
     _join_rejected: bool
-    _jump_ang_vel: float
+    _jump_ang_vel: Any
     _jump_pending: bool
-    _jump_velocity: float
+    _jump_velocity: Any
     _jumping: bool
     _landing_aim_pos: Any
-    _landing_hit_z: float
+    _landing_hit_z: Any
     _landing_second_shot_at: Any
-    _landing_shot_until: float
-    _laser_ad_life: float
-    _laser_ad_rate: float
-    _laser_ad_vel: float
-    _last_drop_attempt: float
-    _last_grab_attempt: float
+    _landing_shot_until: Any
+    _laser_ad_life: Any
+    _laser_ad_rate: Any
+    _laser_ad_vel: Any
+    _last_drop_attempt: Any
+    _last_grab_attempt: Any
     _last_hit_check_pos: Any
-    _last_hit_check_t: float
-    _last_jump_at: float
+    _last_hit_check_t: Any
+    _last_jump_at: Any
     _last_notschuss_threat: Any
     _last_pos_check: Any
     _last_pos_check_time: Any
-    _last_status_emit: float
+    _last_status_emit: Any
     _last_threat_id: Any
-    _lg_gravity: float
+    _lg_gravity: Any
     _limited_flags: set
-    _linear_acceleration: float
+    _linear_acceleration: Any
     _link_map: Any
-    _lock_on_angle: float
+    _lock_on_angle: Any
     _max_shots: int
-    _mgun_ad_life: float
-    _mgun_ad_rate: float
-    _mgun_ad_vel: float
+    _mgun_ad_life: Any
+    _mgun_ad_rate: Any
+    _mgun_ad_vel: Any
     _move_reverse: bool
-    _muzzle_front: float
-    _muzzle_height: float
-    _narrow_hw: float
+    _muzzle_front: Any
+    _muzzle_height: Any
+    _narrow_hw: Any
     _nav_goal: Any
     _nav_goal_z: Any
     _nav_graph: Any
@@ -114,26 +120,26 @@ class BZBotBase:
     _nav_jump_align_wp: Any
     _nav_jump_cooldowns: dict
     _nav_jump_return_state: Any
-    _nav_jump_target_z: float
+    _nav_jump_target_z: Any
     _nav_path: list
     _nav_tele_center: Any
     _nav_tele_cooldowns: dict
     _nav_tele_return_state: Any
-    _nav_tele_start: float
-    _next_server_update: float
-    _next_shoot: float
-    _obese_factor: float
+    _nav_tele_start: Any
+    _next_server_update: Any
+    _next_shoot: Any
+    _obese_factor: Any
     _order: int
-    _own_flag_since: float
+    _own_flag_since: Any
     _plan_gen: Any
     _pre_fall_state: Any
     _presence: bool
     _recent_flag_targets: Any
     _reconnect_needed: bool
-    _reload_time: float
-    _rfire_ad_life: float
-    _rfire_ad_rate: float
-    _rfire_ad_vel: float
+    _reload_time: Any
+    _rfire_ad_life: Any
+    _rfire_ad_rate: Any
+    _rfire_ad_vel: Any
     _rico_aim_cache: Any
     _ricochet_paths: dict
     _round_over: bool
@@ -141,60 +147,60 @@ class BZBotBase:
     _running: bool
     _server_jumping: bool
     _server_ricochet: bool
-    _server_time_offset: float
-    _server_update_interval: float
-    _shield_flight: float
-    _shock_ad_life: float
-    _shock_in_radius: float
-    _shock_out_radius: float
+    _server_time_offset: Any
+    _server_update_interval: Any
+    _shield_flight: Any
+    _shock_ad_life: Any
+    _shock_in_radius: Any
+    _shock_out_radius: Any
     _shot_gen: int
     _shot_grid: Any
-    _shot_lifetime: float
-    _shot_radius: float
-    _shot_range: float
+    _shot_lifetime: Any
+    _shot_radius: Any
+    _shot_range: Any
     _shot_slot: int
-    _shot_speed: float
+    _shot_speed: Any
     _shots: Dict[Tuple[int, int], Shot]
     _shots_lock: Any
     _shots_remaining: int
     _slot_reload_at: Any
     _spawn_sent_at: Any
-    _sr_radius_mult: float
+    _sr_radius_mult: Any
     _stall_anchor: Any
     _stall_check_at: Any
     _stall_mode: Any
-    _stall_rev_dist: float
+    _stall_rev_dist: Any
     _stall_rev_start: Any
-    _stall_until: float
+    _stall_until: Any
     _steep_wall_cache: Any
     _stop_event: Any
-    _sw_expand_speed: float
-    _tact_jump_retry_after: float
-    _tactical_jump_until: float
-    _tank_height: float
-    _tank_length: float
-    _tank_speed: float
-    _tank_turn_rate: float
-    _tank_width: float
+    _sw_expand_speed: Any
+    _tact_jump_retry_after: Any
+    _tactical_jump_until: Any
+    _tank_height: Any
+    _tank_length: Any
+    _tank_speed: Any
+    _tank_turn_rate: Any
+    _tank_width: Any
     _target_paused_since: Any
     _tele_solid_boxes: Any
-    _teleporting_until: float
-    _thief_ad_life: float
-    _thief_ad_shot_vel: float
-    _thief_tiny_factor: float
-    _thief_vel_ad: float
-    _threat_detected_at: float
+    _teleporting_until: Any
+    _thief_ad_life: Any
+    _thief_ad_shot_vel: Any
+    _thief_tiny_factor: Any
+    _thief_vel_ad: Any
+    _threat_detected_at: Any
     _tick_count: int
     _tick_memo: dict
-    _tiny_factor: float
+    _tiny_factor: Any
     _tlog: Any
     _unreach_phase: int
-    _unreach_replan_at: float
+    _unreach_replan_at: Any
     _unreach_target: Any
-    _unreach_until: float
-    _velocity_ad: float
-    _wall_height: float
-    _wide_angle_ang: float
+    _unreach_until: Any
+    _velocity_ad: Any
+    _wall_height: Any
+    _wide_angle_ang: Any
     _wings_gravity: Any
     _wings_jump_count: int
     _wings_jump_velocity: Any
@@ -202,13 +208,13 @@ class BZBotBase:
     _world_map: Any
     _wp_fail_count: int
     _wp_start_time: Any
-    _wp_timeout: float
-    _z_attack_fire_z: float
+    _wp_timeout: Any
+    _z_attack_fire_z: Any
     _z_attack_mode: bool
-    _z_attack_retry_after: float
+    _z_attack_retry_after: Any
     alive: bool
-    ang_vel: float
-    azimuth: float
+    ang_vel: Any
+    azimuth: Any
     bad_flags: set
     bot_callsigns: set
     bot_name_prefix: Any
@@ -231,17 +237,17 @@ class BZBotBase:
     # Track 5 (mypyc): eigener Tank-Zustand als skalare float-Attribute statt Listen-`pos`/`vel`
     # (native Unboxing-Slots im 60-Hz-Physik-/Hit-Detection-Pfad). PlayerInfo.pos/vel und
     # Shot.pos/vel (andere Spieler/Schüsse, bot/models.py) bleiben unverändert Listen.
-    pos_x: float
-    pos_y: float
-    pos_z: float
+    pos_x: Any
+    pos_y: Any
+    pos_z: Any
     target_player: Any
     target_pos: Any
     team: Any
     token: Any
-    vel_x: float
-    vel_y: float
-    vel_z: float
-    world_half: float
+    vel_x: Any
+    vel_y: Any
+    vel_z: Any
+    world_half: Any
 
     # ── Geteilte Methoden (Stubs; reale Impl. in den Mixins) ─────────────
     def _advance_path(self, *, timed_out: bool=False) -> None:
