@@ -559,7 +559,7 @@ class BZFlagClient:
         """Parst _world_buf → WorldMap und ruft on_world_ready auf."""
         if self.on_world_ready is None:
             return
-        world_half = getattr(self, "_world_half_cache", 200.0)
+        world_half = self._world_half_cache
         wm = parse_world(
             bytes(self._world_buf),
             world_half=world_half,

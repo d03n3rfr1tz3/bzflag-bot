@@ -1006,8 +1006,7 @@ class NavGraph:
         bot/ai/physics._apply_obstacle_bounds (rotierte Box + halbe Tankbreite)."""
         v0, g, z0 = self._v0, self._g, src_layer.z
         apex = v0 * v0 / (2.0 * g)                                   # max. Steighöhe ≈ 18.4u
-        skip = {id(getattr(src_layer, "source_obstacle", None)),
-                id(getattr(dst, "source_obstacle", None))}
+        skip = {id(src_layer.source_obstacle), id(dst.source_obstacle)}
         for bz, group in self._undersides.items():
             # Nur Unterkanten, die der Kopf in der Steigphase überhaupt erreicht.
             if bz <= z0 + TANK_HEIGHT + 0.1 or bz > z0 + apex + TANK_HEIGHT:

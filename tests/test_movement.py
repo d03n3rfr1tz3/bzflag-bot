@@ -892,6 +892,34 @@ class TestNavJumpLandSpin:
         bot._tick_nav_jump(dt, time.monotonic())
         assert bot.azimuth == pytest.approx(0.3 * dt, abs=1e-6)
 
+    def test_tick_nav_jump_uses_wings_gravity_override(self, bot):
+        """R2: _tick_nav_jump integriert bei WG + Server-_wingsGravity mit dieser Override,
+        nicht mit der rohen _gravity (_effective_gravity())."""
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 5.0   # steigend → nicht gelandet
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 0.0
+        bot._jumping = True
+        bot._nav_jump_target_z = 30.0
+        bot.own_flag = "WG"
+        bot._wings_gravity = -4.0
+        dt = 0.05
+        bot._tick_nav_jump(dt, time.monotonic())
+        assert bot.vel_z == pytest.approx(5.0 + bot._wings_gravity * dt)
+
+    def test_tick_nav_jump_without_wg_uses_raw_gravity(self, bot):
+        """Gegenprobe: ohne WG-Flagge bleibt weiterhin die rohe _gravity massgeblich."""
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 5.0
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 0.0
+        bot._jumping = True
+        bot._nav_jump_target_z = 30.0
+        bot.own_flag = ""
+        dt = 0.05
+        bot._tick_nav_jump(dt, time.monotonic())
+        assert bot.vel_z == pytest.approx(5.0 + bot._gravity * dt)
+
 
 class TestWpTimeoutScaling:
     """_wp_timeout wird nach Distanz berechnet: WP_TIMEOUT_BASE + dist * WP_TIMEOUT_SCALE."""
@@ -2114,6 +2142,32 @@ class TestJumpLaunchVz:
         # gravity-Schritt (-10 - 9.8·0.01) + Flap (19 + …) ≈ 8.9 — NICHT 19.
         assert bot.vel_z == pytest.approx(19.0 + (-10.0 - 9.8 * 0.01))
         assert bot._wings_jumps_used == 1
+
+    def test_tick_jumping_uses_wings_gravity_override(self, bot):
+        """R2: _tick_jumping integriert bei WG + Server-_wingsGravity mit dieser Override,
+        nicht mit der rohen _gravity (_effective_gravity())."""
+        bot.own_flag = "WG"
+        bot._wings_gravity = -4.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 50.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 5.0   # steigend → kein WG-Luftsprung-Zweig
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 0.0
+        bot._jumping = True
+        dt = 0.01
+        bot._tick_jumping(dt, now=1000.0)
+        assert bot.vel_z == pytest.approx(5.0 + bot._wings_gravity * dt)
+
+    def test_tick_jumping_without_wg_uses_raw_gravity(self, bot):
+        """Gegenprobe: ohne WG-Flagge bleibt weiterhin die rohe _gravity massgeblich."""
+        bot.own_flag = ""
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 50.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 5.0
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 0.0
+        bot._jumping = True
+        dt = 0.01
+        bot._tick_jumping(dt, now=1000.0)
+        assert bot.vel_z == pytest.approx(5.0 + bot._gravity * dt)
 
 
 # ── _steep_wall_ahead (proaktive Wand-Vorausschau) ───────────────────────────
