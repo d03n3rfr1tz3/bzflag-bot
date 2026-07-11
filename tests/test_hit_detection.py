@@ -161,6 +161,48 @@ class TestPhantomShotHarmless:
         _resolve_incoming_shots(bot)
         assert (s.shooter_id, s.shot_id) in bot._shots
 
+    def test_rico_threat_survives_trailing_pz_shot_in_first_loop(self, bot):
+        """Regressionstest (R1): _find_incoming_shot muss im Rico-Zweig den zugehörigen
+        `rico_shot` auf PZ prüfen, nicht die stehengebliebene `shot`-Variable der ersten
+        Schleife. Ist der ZULETZT in _shots eingefügte Eintrag ein PZ-Direktschuss, darf
+        das einen echten (Nicht-PZ) Rico-Treffer nicht mehr als harmlos maskieren."""
+        from bzflag.shot_physics import Segment
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        now = time.monotonic()
+        # 1) echter Rico-Schuss mit Segment-Cache: direkte Bedrohung
+        rico = make_shot(bot, shooter_id=3, shot_id=1, pos=(50.0, 0.0, 1.025),
+                          vel=(-100.0, 0.0, 0.0), fire_time=now)
+        bot._ricochet_paths[(rico.shooter_id, rico.shot_id)] = [Segment(
+            50.0, 0.0, 1.025, -300.0, 0.0, 1.025, now, now + 3.5)]
+        # 2) danach ein PZ-Direktschuss (kein Rico-Pfad) -> letzter Eintrag der ersten
+        # Schleife, also der Wert, den `shot` beim Verlassen der Schleife noch trägt
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(2.0, 0.0, 1.025),
+                  vel=(-100.0, 0.0, 0.0), flag_abbr=b"PZ", fire_time=now)
+        shot, t = bot._find_incoming_shot(now)
+        assert shot is rico
+        assert t < float("inf")
+
+    def test_any_incoming_threat_ignores_pz_shots(self, bot):
+        """_any_incoming_threat muss PZ-Schüsse ebenso ignorieren wie _find_incoming_shot
+        — sowohl im Direkt- als auch im Rico-Pfad-Zweig (Gegenprobe: ohne PZ-Flag ist
+        dieselbe Konstellation eine Bedrohung)."""
+        from bzflag.shot_physics import Segment
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        now = time.monotonic()
+        vels = ((0.0, 0.0),)
+        direct = make_shot(bot, shooter_id=2, shot_id=1, pos=(2.0, 0.0, 1.025),
+                            vel=(-100.0, 0.0, 0.0), flag_abbr=b"PZ", fire_time=now)
+        rico = make_shot(bot, shooter_id=3, shot_id=1, pos=(50.0, 0.0, 1.025),
+                          vel=(-100.0, 0.0, 0.0), flag_abbr=b"PZ", fire_time=now)
+        bot._ricochet_paths[(rico.shooter_id, rico.shot_id)] = [Segment(
+            50.0, 0.0, 1.025, -300.0, 0.0, 1.025, now, now + 3.5)]
+        assert bot._any_incoming_threat(now, vels) is False
+        # Gegenprobe: ohne PZ-Flag ist dieselbe Konstellation eine Bedrohung
+        direct.flag_abbr = b"\x00\x00"
+        rico.flag_abbr = b"\x00\x00"
+        assert bot._any_incoming_threat(now, vels) is True
+
 
 def test_normalshot_expired_no_hit(bot):
     bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
