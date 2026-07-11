@@ -145,6 +145,103 @@ class TestRotateExpiredBots:
         assert fresh in mgr.bots
 
 
+class TestRotateExpiredBotsLockNotHeldDuringStop:
+    """R3: _rotate_expired_bots darf self._lock nicht über den blockierenden
+    bot.stop()-Aufruf halten, sonst blockieren Status-/Exit-Callbacks anderer Bots
+    (_on_bot_status/_on_bot_exit, nehmen dasselbe Lock) für die Rotationsdauer."""
+
+    def test_lock_free_during_blocking_stop(self):
+        import threading
+        from bot_manager import BotManager, Config, BotProcess
+
+        cfg = Config()
+        cfg.bot_callsigns = ["Alpha", "Beta"]
+        cfg.bot_lifetime_min = 60.0
+        cfg.bot_lifetime_max = 120.0
+        mgr = BotManager(cfg)
+
+        expired = MagicMock(spec=BotProcess)
+        expired.is_alive = True
+        expired.start_time = time.monotonic() - 200.0  # 200s alt
+        expired.lifetime = 60.0                         # Lifetime 60s → abgelaufen
+        expired.callsign = "Alpha"
+        mgr.bots = [expired]
+
+        started_stop = threading.Event()
+        release_stop = threading.Event()
+
+        def _blocking_stop(*args, **kwargs):
+            started_stop.set()
+            release_stop.wait(timeout=5.0)
+
+        expired.stop.side_effect = _blocking_stop
+
+        with patch.object(mgr, "_start_bot"):
+            t = threading.Thread(target=mgr._rotate_expired_bots)
+            t.start()
+            try:
+                assert started_stop.wait(timeout=2.0), "bot.stop() wurde nicht aufgerufen"
+                # Während stop() blockiert, darf self._lock NICHT gehalten sein
+                acquired = mgr._lock.acquire(timeout=0.5)
+                assert acquired, "self._lock war während des blockierenden bot.stop() gehalten"
+                mgr._lock.release()
+            finally:
+                release_stop.set()
+                t.join(timeout=5.0)
+            assert not t.is_alive()
+
+    def test_rebalance_serialized_against_rotation(self):
+        """R3-Gegenprobe: _rebalance_lock serialisiert Management-Operationen. Läuft
+        eine Rotation (blockiert in stop()), darf ein paralleles _rebalance (z. B. vom
+        Log-Thread via _on_bot_status) NICHT gleichzeitig das Defizit sehen und selbst
+        starten — sonst Bot-Überschuss und Join/Leave-Churn auf dem Server."""
+        import threading
+        from bot_manager import BotManager, Config, BotProcess
+
+        cfg = Config()
+        cfg.bot_callsigns = ["Alpha", "Beta"]
+        mgr = BotManager(cfg)
+
+        expired = MagicMock(spec=BotProcess)
+        expired.is_alive = True
+        expired.start_time = time.monotonic() - 200.0
+        expired.lifetime = 60.0
+        expired.callsign = "Alpha"
+        mgr.bots = [expired]
+
+        started_stop = threading.Event()
+        release_stop = threading.Event()
+
+        def _blocking_stop(*args, **kwargs):
+            started_stop.set()
+            release_stop.wait(timeout=5.0)
+
+        expired.stop.side_effect = _blocking_stop
+
+        with patch.object(mgr, "_start_bot") as start_bot, \
+             patch.object(mgr, "_desired_bot_count", return_value=1):
+            rot = threading.Thread(target=mgr._rotate_expired_bots)
+            rot.start()
+            try:
+                assert started_stop.wait(timeout=2.0)
+                # Paralleles _rebalance sieht active=0 (Bot bereits aus self.bots
+                # entfernt) und würde ohne Serialisierung sofort starten.
+                reb = threading.Thread(target=mgr._rebalance)
+                reb.start()
+                time.sleep(0.3)
+                assert start_bot.call_count == 0, \
+                    "_rebalance hat während laufender Rotation gestartet (Überschuss)"
+            finally:
+                release_stop.set()
+                rot.join(timeout=5.0)
+            reb.join(timeout=5.0)
+            assert not rot.is_alive() and not reb.is_alive()
+            # Nach der Serialisierung starten beide: Rotation ersetzt den rotierten
+            # Bot, das nachfolgende _rebalance füllt auf desired=1 auf (start_bot ist
+            # gemockt → self.bots bleibt leer → auch _rebalance sieht ein Defizit).
+            assert start_bot.call_count == 2
+
+
 # ---------------------------------------------------------------------------
 # BotProcess._log_output: MsgReject-Grund auf WARNING heben
 # ---------------------------------------------------------------------------
@@ -562,21 +659,23 @@ class TestConfigObserverAndNames:
 
 class TestStopAndCrashClassification:
 
-    def test_stop_one_bot_removes_from_list(self):
-        """Bewusst gestoppter Bot wird sofort aus self.bots entfernt, damit er nicht
-        später als „Absturz" auftaucht."""
+    def test_select_bot_to_stop_removes_from_list(self):
+        """Zum Stoppen ausgewählter Bot wird sofort aus self.bots entfernt, damit er
+        nicht später als „Absturz" auftaucht (R3: das eigentliche bot.stop() liegt
+        beim Aufrufer, AUSSERHALB des Locks — siehe _rebalance)."""
         from bot_manager import BotManager, Config, BotProcess
         mgr = BotManager(Config())
         bot = MagicMock(spec=BotProcess)
         bot.is_alive = True
         bot.callsign = "X"
         mgr.bots = [bot]
-        mgr._stop_one_bot()
-        bot.stop.assert_called_once()
+        selected = mgr._select_bot_to_stop()
+        assert selected is bot
+        bot.stop.assert_not_called()
         assert mgr.bots == []
 
     def test_stopped_bot_not_logged_as_crash(self, caplog):
-        """Nach _stop_one_bot meldet _restart_crashed_bots keinen Absturz (Bot ist weg)."""
+        """Nach _select_bot_to_stop meldet _restart_crashed_bots keinen Absturz (Bot ist weg)."""
         import logging
         from bot_manager import BotManager, Config, BotProcess
         mgr = BotManager(Config())
@@ -586,7 +685,7 @@ class TestStopAndCrashClassification:
         bot.is_alive = True
         bot.callsign = "X"
         mgr.bots = [bot]
-        mgr._stop_one_bot()
+        mgr._select_bot_to_stop()
         with caplog.at_level(logging.DEBUG, logger="bot_manager"):
             mgr._restart_crashed_bots()
         assert not any("abgestürzt" in r.getMessage() for r in caplog.records)
@@ -812,7 +911,7 @@ class TestRoundRestart:
         mgr = BotManager(Config())
         mgr._round_restart_active = True
         with patch.object(mgr, "_start_bot") as start, \
-             patch.object(mgr, "_stop_one_bot") as stop:
+             patch.object(mgr, "_select_bot_to_stop") as stop:
             mgr._rebalance()
             mgr._restart_crashed_bots()
             mgr._rotate_expired_bots()

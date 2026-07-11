@@ -485,6 +485,12 @@ class BotManager:
         self.config   = config
         self.bots:    List[BotProcess] = []
         self._lock    = threading.Lock()
+        # R3: serialisiert die Management-Operationen (_rebalance/_rotate_expired_bots)
+        # UNTEREINANDER inkl. ihrer blockierenden stop()/_start_bot()-Phasen — _rebalance
+        # läuft auch auf Log-Threads (_on_bot_status) und würde sonst parallel zum
+        # Manager-Thread doppelt starten/stoppen. self._lock schützt weiterhin nur die
+        # Daten und wird NIE über blockierende Aufrufe gehalten.
+        self._rebalance_lock = threading.Lock()
         self._running = False
         self._observer: Optional[ServerObserver] = None
         self._human_count = 0       # aktive Spieler (Team ≠ Observer)
@@ -761,20 +767,36 @@ class BotManager:
             return max(self.config.min_bots, active)
 
     def _rebalance(self):
-        """Passt die Bot-Anzahl an die aktuelle Präsenz an (siehe _desired_bot_count)."""
+        """Passt die Bot-Anzahl an die aktuelle Präsenz an (siehe _desired_bot_count).
+
+        R3: Unter self._lock wird nur entschieden/self.bots mutiert (Auswahl der zu
+        stoppenden Bots via _select_bot_to_stop). Die blockierenden bot.stop()- und
+        _start_bot()-Aufrufe laufen danach AUSSERHALB des Locks, damit Status-/Exit-
+        Callbacks anderer Bots (_on_bot_status/_on_bot_exit, nehmen dasselbe Lock)
+        währenddessen nicht blockieren. _rebalance_lock serialisiert die gesamte
+        Operation gegen parallele _rebalance-/Rotations-Läufe (z. B. Manager-Thread
+        vs. Log-Thread) — sonst berechnen beide dasselbe Defizit und starten doppelt."""
         if self._round_restart_active:
             return  # koordinierter Neustart läuft – nicht dazwischenfunken
-        desired = self._desired_bot_count(time.monotonic())
-        with self._lock:
-            active_bots = [b for b in self.bots if b.is_alive]
-            diff = desired - len(active_bots)
+        with self._rebalance_lock:
+            desired = self._desired_bot_count(time.monotonic())
+            to_stop: List[BotProcess] = []
+            with self._lock:
+                active_bots = [b for b in self.bots if b.is_alive]
+                diff = desired - len(active_bots)
+
+                if diff < 0:
+                    for _ in range(-diff):
+                        bot = self._select_bot_to_stop()
+                        if bot is None:
+                            break
+                        to_stop.append(bot)
 
             if diff > 0:
                 for _ in range(diff):
                     self._start_bot()
-            elif diff < 0:
-                for _ in range(-diff):
-                    self._stop_one_bot()
+            for bot in to_stop:
+                bot.stop()
 
     def _start_bot(self, exclude_name: Optional[str] = None):
         """Startet einen neuen Bot-Prozess.
@@ -825,33 +847,46 @@ class BotManager:
             self._broadcast_bot_list()
         time.sleep(1.0)  # Kurze Pause, damit Server nicht überflutet wird
 
-    def _stop_one_bot(self):
-        """Beendet den zuletzt gestarteten Bot."""
-        # Bots in umgekehrter Reihenfolge stoppen (neuester zuerst)
+    def _select_bot_to_stop(self) -> Optional["BotProcess"]:
+        """Wählt den zuletzt gestarteten lebenden Bot zum Stoppen aus und entfernt ihn
+        sofort aus self.bots (unter self._lock aufzurufen) — bewusst gestoppt, damit
+        _restart_crashed_bots den Eintrag nicht fälschlich als „Absturz" meldet. Das
+        eigentliche (blockierende) bot.stop() liegt beim Aufrufer, AUSSERHALB des Locks
+        (R3, siehe _rebalance)."""
+        # Bots in umgekehrter Reihenfolge wählen (neuester zuerst)
         for bot in reversed(self.bots):
             if bot.is_alive:
-                bot.stop()
-                # Bewusst gestoppt → aus der Liste nehmen, damit _restart_crashed_bots den
-                # toten Eintrag nicht fälschlich als „Absturz" meldet.
                 self.bots.remove(bot)
-                return
+                return bot
+        return None
 
     def _rotate_expired_bots(self):
-        """Ersetzt Bots, deren Lebensdauer abgelaufen ist, durch neue mit anderem Namen."""
+        """Ersetzt Bots, deren Lebensdauer abgelaufen ist, durch neue mit anderem Namen.
+
+        R3: Unter self._lock wird nur entschieden, welche Bots rotieren, und self.bots
+        mutiert (Snapshot der abgelaufenen Bots). Die blockierenden bot.stop()- und
+        _start_bot()-Aufrufe laufen danach AUSSERHALB des Locks; _rebalance_lock
+        serialisiert die gesamte Rotation gegen parallele _rebalance-Läufe
+        (Begründung siehe _rebalance)."""
         if self._round_restart_active:
             return  # koordinierter Neustart läuft – nicht dazwischenfunken
-        with self._lock:
+        with self._rebalance_lock:
             now = time.monotonic()
-            for bot in list(self.bots):
-                if not bot.is_alive: continue
-                if bot.start_time is None: continue
-                if bot.lifetime <= 0.0: continue
-                if now - bot.start_time < bot.lifetime: continue
-                logger.info("Bot '%s' Lebensdauer abgelaufen (%.0fmin) – rotiere",
-                            bot.callsign, bot.lifetime / 60)
+            expired: List[BotProcess] = []
+            with self._lock:
+                for bot in list(self.bots):
+                    if not bot.is_alive: continue
+                    if bot.start_time is None: continue
+                    if bot.lifetime <= 0.0: continue
+                    if now - bot.start_time < bot.lifetime: continue
+                    logger.info("Bot '%s' Lebensdauer abgelaufen (%.0fmin) – rotiere",
+                                bot.callsign, bot.lifetime / 60)
+                    self.bots.remove(bot)
+                    expired.append(bot)
+
+            for bot in expired:
                 old_name = bot.callsign
                 bot.stop()
-                self.bots.remove(bot)
                 self._start_bot(exclude_name=old_name)
 
     def _restart_crashed_bots(self):
