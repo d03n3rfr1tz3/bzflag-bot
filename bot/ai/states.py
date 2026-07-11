@@ -184,7 +184,7 @@ class StateMachineMixin(BZBotBase):
 
     def _tick_jumping(self, dt: float, now: float) -> None:
         """Sprungphysik (BZFlag: in der Luft keine Steuerung). LocalPlayer.cxx Z. 364-368."""
-        self.vel_z += self._gravity * dt
+        self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
         self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
@@ -234,7 +234,7 @@ class StateMachineMixin(BZBotBase):
 
     def _tick_nav_jump(self, dt: float, now: float) -> None:
         """Navigationssprung-Physik. Landet auf Ziel-Etage → return_state."""
-        self.vel_z += self._gravity * dt
+        self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
         self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)   # Lande-Drehung (am Absprung fixiert)
         if not self._can_drive_through_obstacles():
@@ -342,7 +342,7 @@ class StateMachineMixin(BZBotBase):
 
     def _tick_z_attack(self, dt: float, now: float) -> None:
         """ZJ1-Sprungphysik. Nur aus COMBAT erreichbar; Landung → immer COMBAT."""
-        self.vel_z += self._gravity * dt
+        self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
         self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
@@ -383,7 +383,7 @@ class StateMachineMixin(BZBotBase):
         """Fall-Physik für unkontrollierten Fall vom Dach (analog _tick_jumping).
         Kein Lenken: vel[0]/vel[1] und azimuth bleiben committed.
         _jump_ang_vel wird nicht zurückgesetzt — bestehende Drehbewegung bleibt."""
-        self.vel_z += self._gravity * dt
+        self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
         self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
