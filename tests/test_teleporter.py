@@ -6,6 +6,7 @@ teleporterbewusste simulate_shot_path() und den MsgTeleport-Handler ab.
 """
 import math
 import struct
+import time
 import pytest
 
 from bzflag.world_map import (TeleporterObstacle, BoxObstacle, WorldMap,
@@ -811,7 +812,10 @@ def test_nav_tele_drives_through_corner_gate(bot):
     bot.pos_x = t.cx - 5.0 * c; bot.pos_y = t.cy - 5.0 * s; bot.pos_z = 0.0
     bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot.azimuth = math.atan2(s, c)
-    now = 100.0
+    # _try_engage_nav_tele() setzt _nav_tele_start intern über time.monotonic() (wie im echten
+    # Loop, bot/core.py) — now muss also auf demselben Realzeit-Takt laufen, sonst driftet der
+    # NAV_TELE_TIMEOUT-Vergleich in _tick_nav_tele je nach Laufzeit-Uptime (P3-NAV-02-Regression).
+    now = time.monotonic()
     assert bot._try_engage_nav_tele((t.cx, t.cy)) is True
     assert bot._ai_state == AIState.NAV_TELE
     dt = 1.0 / 60.0
