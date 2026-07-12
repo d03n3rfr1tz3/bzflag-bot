@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.x'
       - name: Install dependencies
-        run: pip install mypy mypy-extensions pyyaml
+        run: pip install mypy mypy-extensions pyyaml setuptools
       - name: mypy type check
         run: mypy --check-untyped-defs --namespace-packages bot bzflag
       - name: mypyc compilation check
