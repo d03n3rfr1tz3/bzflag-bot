@@ -362,6 +362,80 @@ def test_gm_rate_limited_turn_no_false_hit(bot):
     assert not _was_killed(bot)
 
 
+def _make_nav(bot, boxes, world_hash="gm_wall_test"):
+    """Baut ein WorldMap+NavGraph mit den gegebenen soliden Boxen und hängt es an
+    den Bot — Basis für _segment_clear (nav._los_grid/_los_obs)."""
+    from bzflag.world_map import WorldMap
+    from bzflag.nav_graph import NavGraph
+    wm = WorldMap(boxes=boxes, teleporters=[], links=[],
+                  world_half=200.0, world_hash=world_hash)
+    bot._nav_graph = NavGraph(wm)
+    bot._world_map = wm
+
+
+def _wall_box(cx, cy=0.0, half_w=0.3, half_d=10.0, height=10.0):
+    from bzflag.world_map import BoxObstacle
+    return BoxObstacle(cx=cx, cy=cy, bottom_z=0.0, angle=0.0,
+                       half_w=half_w, half_d=half_d, height=height)
+
+
+def test_gm_wall_hit_terminates_missile(bot):
+    """GM fliegt gegen eine solide Wand, die zwischen ihrem Ausgangs- und Zielpunkt
+    liegt — sie muss dort (wie im echten Client: checkBuildings/setExpiring)
+    sterben statt den Tank direkt dahinter zu treffen."""
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    _make_nav(bot, [_wall_box(cx=1.0)])
+    # Ohne Wand würde diese Rakete den Tank in diesem Tick treffen (2.0 -2.0 = 0.0).
+    make_shot(bot, pos=(2.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+              is_gm=True, flag_abbr=b"GM", gm_target_pid=1)
+    _resolve_incoming_shots(bot)
+    assert not _was_killed(bot)
+    assert (2, 1) not in bot._shots
+
+
+def test_gm_wall_hit_stays_dead_even_with_later_los(bot):
+    """Regressionstest fürs eigentliche Bug-Symptom: die Rakete bleibt tot, auch
+    wenn ein späterer Tick (Bot bewegt sich) wieder freie Sicht hätte."""
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    _make_nav(bot, [_wall_box(cx=1.0)])
+    make_shot(bot, pos=(2.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+              is_gm=True, flag_abbr=b"GM", gm_target_pid=1)
+    _resolve_incoming_shots(bot)
+    assert not _was_killed(bot)
+    # Bot "bewegt" sich seitlich weg von der Wand — vorher hätte die (weiterhin
+    # simulierte) Rakete hier wieder freie Sicht/Homing-Kurs bekommen können.
+    bot.pos_x = 10.0; bot.pos_y = 10.0
+    _resolve_incoming_shots(bot)
+    assert not _was_killed(bot)
+
+
+def test_gm_thin_wall_not_skipped_in_one_tick(bot):
+    """Ein dünnes Hindernis, das komplett zwischen Start- und Endpunkt eines
+    einzelnen Ticks liegt (keiner der beiden Endpunkte steckt in der Box), darf
+    nicht übersprungen werden — der Segment-Test muss das ganze Tick-Segment
+    prüfen, nicht nur die neue Position."""
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    _make_nav(bot, [_wall_box(cx=25.0, half_w=0.1)])
+    # Großer dt-Sprung: Rakete fliegt von x=50 nach x=0 (durch die dünne Wand bei
+    # x=25) in einem einzigen Tick.
+    shot = make_shot(bot, pos=(50.0, 0.0, TANK_CZ), vel=(-2500.0, 0.0, 0.0),
+                     is_gm=True, flag_abbr=b"GM", gm_target_pid=1)
+    bot._resolve_incoming_shots(time.monotonic(), 0.02)
+    assert not _was_killed(bot)
+    assert (shot.shooter_id, shot.shot_id) not in bot._shots
+
+
+def test_gm_no_wall_between_still_hits(bot):
+    """Bestandsverhalten: ohne Hindernis auf der Flugbahn trifft die Rakete wie
+    zuvor (Regressionsschutz gegen zu aggressive Wand-Terminierung)."""
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    _make_nav(bot, [_wall_box(cx=100.0)])  # Wand weit abseits der Flugbahn
+    make_shot(bot, pos=(1.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+              is_gm=True, flag_abbr=b"GM", gm_target_pid=1)
+    _resolve_incoming_shots(bot)
+    assert _was_killed(bot)
+
+
 # ── Steamroller ───────────────────────────────────────────────────────────────
 
 def test_sr_kills_when_close(bot):

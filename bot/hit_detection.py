@@ -202,6 +202,17 @@ class HitDetectionMixin(BZBotBase):
                         shot.pos[0] += shot.vel[0] * dt
                         shot.pos[1] += shot.vel[1] * dt
                         shot.pos[2] += shot.vel[2] * dt
+                        # Wand-Terminierung: das echte Spiel prüft jeden Tick, ob die Rakete seit
+                        # dem letzten Update eine solide Wand durchquert hat (checkBuildings,
+                        # GuidedMissleStrategy.cxx) und lässt sie dort explodieren — sie kann
+                        # danach niemanden mehr treffen. Ohne diesen Check flog die Bot-Simulation
+                        # unbeirrt weiter/lenkte weiter, während die Rakete im echten Client längst
+                        # an der Wand hängengeblieben war → verspäteter Phantom-Treffer, sobald der
+                        # (weiterhin simulierte) Flugpfad wieder freie Sicht zum Tank bekam.
+                        if not self._segment_clear(prev_x, prev_y, prev_z,
+                                                   shot.pos[0], shot.pos[1], shot.pos[2]):
+                            to_remove.append(key)
+                            continue
                         # Wand-Occlusion (Sicherheitsnetz): die lokale GM-Integration kennt keine
                         # Wände. Steckt eine solide Wand zwischen Rakete und Tank, zählt kein
                         # Treffer (rundet die Rakete die Wand später, greift er dann). Ohne NavGraph
