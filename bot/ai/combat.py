@@ -29,6 +29,11 @@ from bot.constants import (
     M_REACT_MULTIPLIER,
     CS_REACT_MULTIPLIER,
     PAUSE_WAIT_S,
+    COVER_HOLD_MAX_S,
+    COVER_HOLD_COOLDOWN_S,
+    COVER_PEEK_CHANCE,
+    COVER_PEEK_OUT_S,
+    COVER_MAX_RANGE_FACTOR,
 )
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
@@ -71,6 +76,12 @@ class CombatMixin(BZBotBase):
             self._move_reverse = False
             if self.target_pos is None:
                 self._new_target()
+            return
+        # P4-TAC-02: an einer Deckungskante kurz halten statt offen anzugreifen (defensiver State).
+        if self._should_hold_in_cover(now):
+            self._cover_hold_until = now + COVER_HOLD_MAX_S
+            self._cover_peek_phase = 0
+            self._transition_to(AIState.COVER_HOLD)
             return
         # Taktischer Übersprung, dann Z-Höhen-Sprung (ZJ1) als Fallback
         if not self._check_tactical_jump(now):
@@ -179,6 +190,66 @@ class CombatMixin(BZBotBase):
         diff = _angle_diff(best_perp, self.azimuth)
         capped = _wrap(self.azimuth + math.copysign(min(abs(diff), math.radians(60)), diff))
         return capped, diff
+
+    def _should_hold_in_cover(self, now: float) -> bool:
+        """Eingangs-Entscheidung für COVER_HOLD (P4-TAC-02): steht der Bot an einer Deckungskante und
+        sollte defensiv halten statt offen anzugreifen? Bewusst eigene Methode — hier stöpselt
+        P4-TAC-05 später die Gegner-Schuss-Slots ein (nicht halten, wenn der Gegner leergeschossen ist)."""
+        if now < self._cover_cooldown_until:
+            return False
+        pid = self.target_player
+        if pid is None:
+            return False
+        info = self.players.get(pid)
+        if info is None or not info.alive:
+            return False
+        # SB durchschlägt Wände, SW wirkt radial → Deckung ist gegen beide wertlos. GM erwünscht
+        # (Deckung bricht den Lock), daher keine Ausnahme.
+        if info.flag in ("SB", "SW"):
+            return False
+        ep = self._get_enemy_pos(pid)
+        if ep is None:
+            return False
+        if math.hypot(ep[0] - self.pos_x, ep[1] - self.pos_y) > self._shot_range * COVER_MAX_RANGE_FACTOR:
+            return False
+        # Nur im Direktmodus greifen (dort leert _execute_combat_move den Pfad) — A*-Navigation nicht
+        # unterbrechen (bewusste Design-Entscheidung: Kämpfe laufen zumeist im Direktmodus).
+        if self._nav_path:
+            return False
+        return self._cover_edge_ahead(pid, now)
+
+    def _cover_hold_exit(self, now: float) -> None:
+        """Verlässt COVER_HOLD zurück in den Boden-State und setzt den Wieder-Eintritts-Cooldown."""
+        self._cover_cooldown_until = now + COVER_HOLD_COOLDOWN_S
+        self._cover_peek_phase = 0
+        self._transition_to(self._ground_state())
+
+    def _tick_cover_hold(self, now: float) -> None:
+        """COVER_HOLD-Entscheidungen (10 Hz): Dodge hat Vorrang, sonst Ausgangsbedingungen prüfen und
+        gelegentlich einen kurzen Peek starten. Die 60-Hz-Ausführung liegt in _dispatch_movement."""
+        # Akuter Schuss gewinnt (Dodge/EVADING/DODGE_JUMP wie in COMBAT).
+        if self._handle_threat(now):
+            return
+        pid = self.target_player
+        info = self.players.get(pid) if pid is not None else None
+        # Ausgang: Timeout (P4-TAC-05 ergänzt später 'Gegner-Slots leer' → früher raus).
+        if now >= self._cover_hold_until:
+            self._cover_hold_exit(now)
+            return
+        # Ausgang: Ziel weg/tot/pausiert, außer Reichweite, Deckung ungültig, oder Gegner jetzt SB/SW.
+        if info is None or not info.alive or info.paused or info.flag in ("SB", "SW"):
+            self._cover_hold_exit(now)
+            return
+        ep = self._get_enemy_pos(pid)
+        if (ep is None
+                or math.hypot(ep[0] - self.pos_x, ep[1] - self.pos_y) > self._shot_range * COVER_MAX_RANGE_FACTOR
+                or not self._covered_from(pid, now)):
+            self._cover_hold_exit(now)
+            return
+        # Gelegentlich kurz herausschauen (nur aus dem Halten heraus, nicht mitten im Peek).
+        if self._cover_peek_phase == 0 and random.random() < COVER_PEEK_CHANCE:
+            self._cover_peek_phase = 1
+            self._cover_peek_until = now + COVER_PEEK_OUT_S
 
     def _execute_combat_move(self, dt: float, half: float, now: float = 0.0) -> None:
         """COMBAT 60Hz: dreht auf vorhergesagte Zielposition, fährt distanzbasiert."""

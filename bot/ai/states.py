@@ -17,6 +17,7 @@ from bot.constants import (
     IB_REACT_MULTIPLIER,
     M_REACT_MULTIPLIER,
     CS_REACT_MULTIPLIER,
+    COVER_PEEK_BACK_S,
 )
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
@@ -90,7 +91,7 @@ class StateMachineMixin(BZBotBase):
         # FALLING-Erkennung: Bodenstates merken nicht dass sie vom Dach gefallen sind.
         # Nur beim Abwärts-Fallen (vel[2] < -0.1) und tatsächlich in der Luft.
         _GROUND_STATES = (AIState.COMBAT, AIState.SEEKING, AIState.IDLE,
-                          AIState.EVADING, AIState.LANDING_SHOT)
+                          AIState.EVADING, AIState.LANDING_SHOT, AIState.COVER_HOLD)
         if (self._ai_state in _GROUND_STATES
                 and not self._jumping
                 and self.vel_z < -0.1
@@ -144,6 +145,35 @@ class StateMachineMixin(BZBotBase):
                     self.ang_vel = 0.0
             return
 
+        if self._ai_state == AIState.COVER_HOLD:
+            # P4-TAC-02: Entscheidungen (Ausgang/Peek-Start) im 10-Hz-Tick, Bewegung jeden Tick.
+            if ai_tick:
+                self._tick_cover_hold(now)
+                if self._ai_state != AIState.COVER_HOLD:
+                    return   # Tick hat den State gewechselt (Ausgang oder Dodge)
+            if not self._jumping:
+                ep = (self._get_enemy_pos(self.target_player)
+                      if self.target_player is not None else None)
+                if ep is not None:   # aufs Ziel drehen (Ausrichtung für Ausbruch/Peek-Schuss)
+                    self._turn_toward(math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x), dt)
+                else:
+                    self.ang_vel = 0.0
+                # Peek-Zyklus: kurz vorfahren (Phase 1) und sofort rückwärts zurück (Phase 2).
+                if self._cover_peek_phase == 1:
+                    speed = self._tank_speed * 0.6
+                    if now >= self._cover_peek_until:
+                        self._cover_peek_phase = 2
+                        self._cover_peek_until = now + COVER_PEEK_BACK_S
+                elif self._cover_peek_phase == 2:
+                    speed = -self._tank_speed * 0.6
+                    if now >= self._cover_peek_until:
+                        self._cover_peek_phase = 0
+                else:
+                    speed = 0.0   # halten
+                self.vel_x = math.cos(self.azimuth) * speed
+                self.vel_y = math.sin(self.azimuth) * speed
+            return
+
         # IDLE / SEEKING / COMBAT (10 Hz KI-Tick)
         if ai_tick:
             # Fertige Async-Vollsuche (P4-INF-01) vor dem State-Tick übernehmen — nur in
@@ -172,7 +202,8 @@ class StateMachineMixin(BZBotBase):
                 self._execute_combat_move(dt, half, now)
             elif self._ai_state not in (AIState.JUMP_WINDUP, AIState.EVADING,
                                         AIState.JUMPING, AIState.DODGE_JUMP,
-                                        AIState.LANDING_SHOT, AIState.NAV_JUMP_ALIGN):
+                                        AIState.LANDING_SHOT, AIState.NAV_JUMP_ALIGN,
+                                        AIState.COVER_HOLD):
                 if self._ai_state == AIState.IDLE and self.target_pos is None:
                     # IDLE geparkt: _move_to_target würde bei target_pos=None früh
                     # zurückkehren und Rest-Geschwindigkeit stehen lassen → explizit stoppen.

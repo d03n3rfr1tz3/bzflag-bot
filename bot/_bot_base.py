@@ -33,6 +33,10 @@ class BZBotBase:
     _active_gm: Any
     _agility_ad_vel: Any
     _ai_state: Any
+    _cover_cooldown_until: float
+    _cover_hold_until: float
+    _cover_peek_phase: int
+    _cover_peek_until: float
     _angular_acceleration: Any
     _angular_ad: Any
     _async_cancel: Any
@@ -290,6 +294,12 @@ class BZBotBase:
         raise NotImplementedError
     def _corridor_no_dropoff(self, ex: float, ey: float, ref_z: float) -> bool:
         raise NotImplementedError
+    def _cover_edge_ahead(self, pid: int, now: float=0.0) -> bool:
+        raise NotImplementedError
+    def _cover_silhouette_blocked(self, ex: float, ey: float, oz: float, cx: float, cy: float, cz: float) -> bool:
+        raise NotImplementedError
+    def _covered_from(self, pid: int, now: float=0.0) -> bool:
+        raise NotImplementedError
     def _cross_floor_indirect(self, info) -> bool:
         raise NotImplementedError
     def _effective_fov(self) -> float:
@@ -408,6 +418,8 @@ class BZBotBase:
         raise NotImplementedError
     def _should_early_advance(self) -> bool:
         raise NotImplementedError
+    def _should_hold_in_cover(self, now: float) -> bool:
+        raise NotImplementedError
     def _should_reverse_to_wp(self) -> bool:
         raise NotImplementedError
     def _should_update_player(self, info, px: float, py: float, pz: float, now: float) -> bool:
@@ -423,6 +435,8 @@ class BZBotBase:
     def _threat_unseen(self, shooter) -> bool:
         raise NotImplementedError
     def _tick_combat(self, now: float) -> None:
+        raise NotImplementedError
+    def _tick_cover_hold(self, now: float) -> None:
         raise NotImplementedError
     def _transition_to(self, state: AIState) -> None:
         raise NotImplementedError

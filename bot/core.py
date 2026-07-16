@@ -364,6 +364,11 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._z_attack_fire_z = 0.0
         self._z_attack_retry_after = 0.0
         self._tact_jump_retry_after = 0.0
+        # P4-TAC-02 Deckung: COVER_HOLD-State (Halten an der Deckungskante + Peek-Zyklus)
+        self._cover_hold_until = 0.0       # Notausgangs-Deadline
+        self._cover_cooldown_until = 0.0   # Sperre gegen sofortigen Wieder-Eintritt (Hysterese)
+        self._cover_peek_phase = 0         # 0 = halten, 1 = vorfahren, 2 = rückwärts
+        self._cover_peek_until = 0.0       # Phasen-Deadline des Peeks
         # P8: Cache für _steep_wall_ahead — (expires_at, az, max_dist, result), 0.1s Gültigkeit.
         self._steep_wall_cache = None
 

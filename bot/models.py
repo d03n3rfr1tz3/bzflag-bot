@@ -102,3 +102,4 @@ class AIState(Enum):
     NAV_JUMP_ALIGN = auto()  # Vor NAV_JUMP: Tank auf Sprungziel-Azimuth ausrichten
     NAV_TELE     = auto()  # Endanflug: direkt in die Teleporter-Mitte fahren, bis Querung/Revert
     FALLING      = auto()  # Unkontrollierter Fall vom Dach (kein Lenken erlaubt)
+    COVER_HOLD   = auto()  # P4-TAC-02: kurz an der Deckungskante halten + peeken statt offen anzugreifen

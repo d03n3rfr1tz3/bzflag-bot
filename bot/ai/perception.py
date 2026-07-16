@@ -18,6 +18,9 @@ from bot.constants import (
     RADAR_COOLDOWN_CL,
     PLAYER_LOS_TTL_S,
     TARGET_FOV,
+    TANK_HALF_DIAG,
+    MUZZLE_HEIGHT,
+    COVER_EDGE_PROBE_DIST,
 )
 from bot.util import _angle_diff
 
@@ -432,8 +435,13 @@ class PerceptionMixin(BZBotBase):
         self._steep_wall_cache = (now + 0.1, az, max_dist, result)
         return result
 
-    def _steep_wall_ahead_raycast(self, az: float, max_dist: float) -> Optional[float]:
-        """Unveränderte Raycast-Logik von _steep_wall_ahead, jetzt hinter dessen 0.1s-Cache."""
+    def _steep_wall_ahead_raycast(self, az: float, max_dist: float,
+                                  min_steep_deg: float = NAV_WALL_STEEP_DEG) -> Optional[float]:
+        """Unveränderte Raycast-Logik von _steep_wall_ahead, jetzt hinter dessen 0.1s-Cache.
+
+        min_steep_deg: Einfallswinkel-Schwelle zur Wandfläche, ab der die Tangente geliefert wird.
+        Default = NAV_WALL_STEEP_DEG (Combat-Wall-Slide). P4-TAC-02 ruft mit 0.0 auf: dort ist JEDE
+        vorausliegende Wand relevant (Kanten-Probe entlang der Schleif-Richtung), nicht nur steile."""
         nav = self._nav_graph
         if nav is None or max_dist <= 0.0:
             return None
@@ -496,7 +504,7 @@ class PerceptionMixin(BZBotBase):
         ndx = ( dx * cos_a + dy * sin_a) / max_dist
         ndy = (-dx * sin_a + dy * cos_a) / max_dist
         normal_comp = abs(ndx) if best_axis == 0 else abs(ndy)
-        if normal_comp <= math.sin(math.radians(NAV_WALL_STEEP_DEG)):
+        if normal_comp <= math.sin(math.radians(min_steep_deg)):
             return None   # flacher Winkel → der Bot gleitet sauber an der Wand entlang
         # Wand-Tangente in Weltkoordinaten (Fläche ⟂ Eintritts-Normale), nach vorn gerichtet.
         if best_axis == 0:      # x-Fläche getroffen → Tangente entlang lokaler y-Achse
@@ -529,6 +537,82 @@ class PerceptionMixin(BZBotBase):
         mx = self.pos_x + math.cos(az) * self._muzzle_front
         my = self.pos_y + math.sin(az) * self._muzzle_front
         result = self._segment_clear(self.pos_x, self.pos_y, mz, mx, my, mz)
+        if memo is not None:
+            memo[key] = result
+        return result
+
+    def _cover_silhouette_blocked(self, ex: float, ey: float, oz: float,
+                                  cx: float, cy: float, cz: float) -> bool:
+        """True, wenn BEIDE Silhouetten-Ränder eines an (cx,cy) stehenden Tanks gegen einen Schützen
+        an (ex,ey,oz) verdeckt sind (P4-TAC-02). Statt der Tank-Mitte werden die beiden Punkte
+        ±TANK_HALF_DIAG senkrecht zur Linie Schütze→(cx,cy) geprüft — Rand- statt Zentrumstest, damit
+        eine 'herausschauende Nase' als exponiert gilt (konservativ für jede Drehlage). cz = Ziel-
+        Mündungshöhe des betrachteten Standpunkts."""
+        dx = cx - ex; dy = cy - ey
+        d = math.hypot(dx, dy)
+        if d < 1e-6:
+            return False
+        px = -dy / d; py = dx / d   # Einheitsnormale zur Sichtlinie
+        for s in (TANK_HALF_DIAG, -TANK_HALF_DIAG):
+            if self._segment_clear(ex, ey, oz, cx + px * s, cy + py * s, cz):
+                return False   # mind. ein Silhouetten-Rand beschießbar → nicht gedeckt
+        return True
+
+    def _covered_from(self, pid: int, now: float = 0.0) -> bool:
+        """True, wenn der Bot JETZT gegenüber Gegner pid in Deckung steht (beide Silhouetten-Ränder
+        verdeckt). Ursprung ist die Gegner-MÜNDUNG (Schuss-, nicht Sichtlinie); für einen springenden
+        Gegner zählt dessen aktuelle z. Per-Tick memoized (mehrfach pro Tick möglich)."""
+        memo = self._tick_memo
+        key = ("covered", pid)
+        if memo is not None:
+            cached = memo.get(key)
+            if cached is not None:
+                return cached
+        ep = self._get_enemy_pos(pid)
+        info = self.players.get(pid)
+        if ep is None or info is None or not info.alive:
+            result = False
+        else:
+            oz = info.pos[2] + MUZZLE_HEIGHT
+            result = self._cover_silhouette_blocked(
+                ep[0], ep[1], oz, self.pos_x, self.pos_y, self.pos_z + MUZZLE_HEIGHT)
+        if memo is not None:
+            memo[key] = result
+        return result
+
+    def _cover_edge_ahead(self, pid: int, now: float = 0.0) -> bool:
+        """True, wenn der Bot an einer Deckungskante steht: JETZT gedeckt (_covered_from), eine
+        Tanklänge in Bewegungsrichtung aber exponiert. Die Probe-Richtung ist die EFFEKTIVE
+        Bewegungsrichtung inkl. Wall-Slide — beim Herausschleifen zeigt der Azimut leicht in die
+        Wand, eine Probe stur entlang des Azimuts läge dann im Gebäude (P4-TAC-02)."""
+        memo = self._tick_memo
+        key = ("cover_edge", pid)
+        if memo is not None:
+            cached = memo.get(key)
+            if cached is not None:
+                return cached
+        result = False
+        if self._covered_from(pid, now):
+            ep = self._get_enemy_pos(pid)
+            if ep is not None:
+                # Basisrichtung: fährt der Bot, steckt der Slide schon im Geschwindigkeitsvektor;
+                # sonst der (ggf. bei Rückwärtsfahrt invertierte) Azimut.
+                if math.hypot(self.vel_x, self.vel_y) > 1.0:
+                    direction = math.atan2(self.vel_y, self.vel_x)
+                else:
+                    direction = self.azimuth + math.pi if self._move_reverse else self.azimuth
+                # Wand-Korrektur: liegt eine Wand voraus, ist die Tangente die tatsächliche Schleif-
+                # Richtung (min_steep_deg=0 → jede Wand zählt, nicht nur steile).
+                tan = self._steep_wall_ahead_raycast(direction, COVER_EDGE_PROBE_DIST, 0.0)
+                if tan is not None:
+                    direction = tan
+                probe_x = self.pos_x + math.cos(direction) * COVER_EDGE_PROBE_DIST
+                probe_y = self.pos_y + math.sin(direction) * COVER_EDGE_PROBE_DIST
+                oz = self.players[pid].pos[2] + MUZZLE_HEIGHT
+                # Exponiert am Probepunkt (mind. ein Rand frei) → Kante. Läge der Probepunkt selbst in
+                # einer Box, sind beide Ränder blockiert → 'keine Kante' (tief in Deckung), gewollt.
+                result = not self._cover_silhouette_blocked(
+                    ep[0], ep[1], oz, probe_x, probe_y, self.pos_z + MUZZLE_HEIGHT)
         if memo is not None:
             memo[key] = result
         return result
