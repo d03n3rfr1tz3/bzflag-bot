@@ -364,7 +364,7 @@ Taktische und infrastrukturelle Verbesserungen ohne harte Produktionsrelevanz.
 
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
-| P4-MOV-01 | Glatte Wegpunkt-Übergänge (kein hartes Zick-Zack an Pfad-Ecken) | 📋 | P2-PTH-01…03 |
+| P4-MOV-01 | Glatte Wegpunkt-Übergänge (kein hartes Zick-Zack an Pfad-Ecken) | ✅ | P2-PTH-01…03 |
 | P4-MOV-02a | Trägheitsmodell: lineare/angulare Beschleunigungsgrenzen (Server-Vorgabe) im normalen Bodenfahren, inkl. nachgeführter Stuck-/Timeout-Erkennung | 📋 | — |
 | P4-MOV-02b | Trägheitsmodell: committed Zustände und Vorberechnungen (Sprünge, Z-Angriff, Landing-Shot) einzeln bewerten und ggf. nachführen | 📋 | P4-MOV-02a |
 | P4-MOV-02c | Trägheitsmodell: Sprungkanten-Planung im Navigationsgraphen an die effektive Beschleunigung angleichen | 📋 | P4-MOV-02b |

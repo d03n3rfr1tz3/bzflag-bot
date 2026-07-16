@@ -1794,17 +1794,32 @@ betrifft NUR den eigenen Bot; `PlayerInfo.pos`/`Shot.pos` (andere Spieler/Schüs
 Analyse-Ergebnisse der FSD-Bereinigung (2026-07-10), damit die Umsetzungs-Sessions direkt
 aufsetzen können.
 
-**P4-MOV-01 — Glatte Wegpunkt-Übergänge: Ansatz „Early Advance mit Korridor-Check".**
+**P4-MOV-01 — Glatte Wegpunkt-Übergänge: umgesetzt als „Early Advance mit Korridor-Check".**
 Nicht das Aim verbiegen (ein früherer Aim-Blending-/„Scandinavian-Flick"-Versuch erzeugte
-Regressionen beim WP-Abfahren), sondern den aktuellen WP früher weiterschalten, wenn:
-Folge-WP auf gleicher Ebene; weder aktueller noch nächster WP ein
-Sprung-Anlauf-/Teleporter-/z-Wechsel-WP; direkter Korridor Bot→nächster WP frei
-(`query_segment`); kein Rückwärtsmodus. Die Steering-Formel bleibt unverändert — die
-vorhandene Kurvendrosselung rundet die Übergänge dann natürlich. Pure-Pursuit
-(Lookahead-Punkt auf dem Pfad-Polygon) wäre eine optionale zweite Stufe. Beim Umsetzen
-ersetzen: die zwei geskippten Vertrags-Tests (`tests/test_movement.py`,
-`TestLookaheadSmoothing`) und der veraltete „Lookahead"-Docstring in
-`bot/ai/navigation.py::_navigate_wp`.
+Regressionen beim WP-Abfahren), sondern der aktuelle WP wird früher weitergeschaltet:
+`_should_early_advance` (`bot/ai/tactics.py`) prüft sechs Gates billig→teuer — Pfadlänge ≥ 2;
+nächster WP im Horizont `EARLY_ADVANCE_LOOKAHEAD` (≈16u; `_smooth_path` kürzt Kollineares schon
+zur Planungszeit, zur Laufzeit sind nur lokale Ecken zu glätten); beide WPs auf Bot-Ebene
+(±1.5u); **Sprung-Anlauf-Schutz** via `nav_path[2]` (Run-up und Absprungzelle liegen auf
+DERSELBEN Ebene → das Z-Gate allein ließe sie durch, der Anlauf würde wegoptimiert);
+kein Teleporter-Exit-WP; Wand-Korridor frei (`_corridor_clear`); keine Kante
+(`_corridor_no_dropoff`). Aufruf in `_navigate_wp` nur bei `not reverse`, ohne `return`
+(Fall-through: der Tick lenkt sofort auf den neuen WP). Die Steering-Formel blieb unverändert —
+die vorhandene Kurvendrosselung rundet die Übergänge natürlich. Zwei Korrektheits-Kernpunkte:
+`_corridor_clear` läuft auf `nav._solid_grid`/`_obs` (Kollisions-Set), NICHT auf `_los_grid`
+(shoot-through-gefiltert — eine solide, aber überschießbare Wand wäre dort unsichtbar);
+`_corridor_no_dropoff` tastet den Boden (`get_floor_z`, Pixel-on-Overhang, Step
+`EARLY_ADVANCE_FLOOR_STEP`) entlang der Abkürzung ab, damit der Bot nicht über eine
+Plattformkante stürzt (HIX, Diagonalwand). Pure-Pursuit (Lookahead-Punkt auf dem Pfad-Polygon)
+bleibt eine optionale zweite Stufe. Die zwei geskippten Lookahead-Vertrags-Tests wurden durch
+`TestEarlyAdvance`/`TestCorridorChecks` ersetzt.
+
+Nebenprodukt: Die Server-Variable **`_maxBumpHeight`** (Default 0.33 — Stufe, die ein Tank
+direkt überfährt) wird jetzt geparst (`_SETVAR_VARS`) und an drei Stellen einheitlich genutzt:
+Kanten-Check `_corridor_no_dropoff` und Wall-Slide-Z-Band in `physics._apply_obstacle_bounds`
+(beide Laufzeit, `self._max_bump_height`; ersetzt ein 0.5-Literal) sowie Planungs-Walkability
+`nav_graph._obstacle_blocks_layer` (Build-Zeit, Modul-Konstante `MAX_BUMP_HEIGHT` analog
+`TANK_HEIGHT`, da der Graph gecacht/geteilt ist; ersetzt das 0.1-Epsilon).
 
 **P4-MOV-02a–c — Trägheitsmodell: verifizierte Fakten.** Der Zielserver setzt `-a 50 38`
 (→ MsgGameSettings `linear/angularAcceleration`). Der echte Client klemmt in

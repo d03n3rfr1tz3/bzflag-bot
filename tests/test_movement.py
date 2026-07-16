@@ -430,6 +430,26 @@ def test_ceiling_obb_beyond_nose_no_stop(bot):
     assert bot.vel_z == pytest.approx(10.0)
 
 
+def test_wall_slide_drives_over_low_step(bot):
+    """Stufe unter _maxBumpHeight (0.33) → Bot fährt drüber (keine Wall-Slide-Bremsung)."""
+    obs = _make_box_obstacle(cx=3.0, cy=0.0, bottom_z=0.0, half_w=1.0, half_d=5.0, height=0.3)
+    _give_bot_world_with_box(bot, obs)
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    bot.azimuth = 0.0; bot.vel_x = 25.0; bot.vel_y = 0.0
+    bot._apply_obstacle_bounds(0.02)
+    assert bot.vel_x == pytest.approx(25.0), "0.3 < 0.33 → überfahren"
+
+
+def test_wall_slide_stops_at_step_above_bump(bot):
+    """Stufe über _maxBumpHeight → Wall-Slide bremst (nicht überfahrbar)."""
+    obs = _make_box_obstacle(cx=3.0, cy=0.0, bottom_z=0.0, half_w=1.0, half_d=5.0, height=0.5)
+    _give_bot_world_with_box(bot, obs)
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    bot.azimuth = 0.0; bot.vel_x = 25.0; bot.vel_y = 0.0
+    bot._apply_obstacle_bounds(0.02)
+    assert bot.vel_x < 25.0, "0.5 > 0.33 → geblockt/gebremst"
+
+
 def test_is_airborne_set_from_ps_falling(bot):
     """PS_FALLING-Bit setzt is_airborne=True im PlayerInfo."""
     from conftest import make_player
@@ -955,34 +975,75 @@ class TestWpTimeoutScaling:
         assert bot._wp_start_time is None
 
 
-class TestLookaheadSmoothing:
-    """Lookahead in _move_to_target: aim wird Richtung nächsten WP geblendet."""
+class TestEarlyAdvance:
+    """P4-MOV-01: Early-Advance schneidet Ecken, indem der aktuelle WP früher weitergeschaltet
+    wird, wenn der direkte Korridor Bot→nächster WP frei UND begehbar ist (keine Wand, keine Kante)."""
 
-    @pytest.mark.skip(reason="Phase 5: Lookahead nicht implementiert")
-    def test_blend_toward_next_wp_when_close(self, bot):
-        """Im Entry-Blend-Bereich (d < 2×r) zeigt aim leicht Richtung nächsten WP."""
+    def test_advances_early_when_corridor_clear(self, bot):
+        """Freier Korridor, gleiche Ebene, WP im Horizont → WP übersprungen, Bot lenkt zum nächsten."""
+        _build_nav(bot, [])
         bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_pos = (10.0, 0.0)
         bot._nav_path = [(10.0, 0.0, 0.0), (10.0, 10.0, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        assert bot.vel_y > 0.0, "Lookahead soll aim Richtung nächsten WP (y=10) blenden"
+        assert bot._nav_path == [(10.0, 10.0, 0.0)]
+        assert bot.target_pos == (10.0, 10.0)
+        assert bot.vel_y > 0.0, "lenkt bereits Richtung nächstem WP (y=10)"
 
-    def test_no_blend_when_far(self, bot):
-        """Außerhalb des Blend-Bereichs (dist > 3×r = 22.5u) kein Blend."""
-        # Bot weit entfernt vom WP: dist = 30u > 3×7.5 = 22.5u → t = 0
+    def test_no_early_advance_when_corridor_blocked(self, bot):
+        """Solide Box auf der Diagonale (0,0)→(10,10) → kein Überspringen."""
+        _build_nav(bot, [(5.0, 5.0, 0.0, 0.0, 2.0, 2.0, 10.0)])
         bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
-        bot.target_pos = (30.0, 0.0)
-        bot._nav_path = [(30.0, 0.0, 0.0), (30.0, 10.0, 0.0)]
+        bot.target_pos = (10.0, 0.0)
+        bot._nav_path = [(10.0, 0.0, 0.0), (10.0, 10.0, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        # Kein Lookahead: aim direkt auf WP (0°), vel[1] ≈ 0
-        assert abs(bot.vel_y) < 0.5, "Kein Lookahead bei großer Distanz erwartet"
+        assert bot._nav_path == [(10.0, 0.0, 0.0), (10.0, 10.0, 0.0)]
+        assert bot.target_pos == (10.0, 0.0)
 
-    def test_no_blend_in_reverse_mode(self, bot):
-        """Im Rückwärtsmodus (_move_reverse=True) kein Lookahead."""
+    def test_no_early_advance_when_next_is_jump(self, bot):
+        """Nächster WP ist ein Sprung-hoch (z=10) → Ebenen-Gate blockt."""
+        _build_nav(bot, [])
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.target_pos = (10.0, 0.0)
+        bot._nav_path = [(10.0, 0.0, 0.0), (10.0, 10.0, 10.0)]
+        bot._wp_start_time = None
+        bot._move_to_target(0.02, bot.world_half)
+        assert bot._nav_path == [(10.0, 0.0, 0.0), (10.0, 10.0, 10.0)]
+
+    def test_no_early_advance_before_jump_runup(self, bot):
+        """cur=Run-up, nxt=Absprungzelle (gleiche Ebene!), danach Sprung-hoch (nav_path[2]) →
+        Anlauf nicht abkürzen, sonst geht die Sprung-Ausrichtung verloren."""
+        _build_nav(bot, [])
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.target_pos = (10.0, 0.0)
+        # Muster aus _insert_jump_runups: Run-up (10,0,0), Absprungzelle (14,0,0), Ziel (20,0,10).
+        # Alle anderen Gates wären erfüllt (nxt 14u < 16u Horizont, gleiche Ebene, Korridor frei).
+        bot._nav_path = [(10.0, 0.0, 0.0), (14.0, 0.0, 0.0), (20.0, 0.0, 10.0)]
+        bot._wp_start_time = None
+        bot._move_to_target(0.02, bot.world_half)
+        assert bot._nav_path == [(10.0, 0.0, 0.0), (14.0, 0.0, 0.0), (20.0, 0.0, 10.0)]
+
+    def test_no_early_advance_when_next_is_tele_exit(self, bot):
+        """Nächster WP ist ein Teleporter-Exit-WP → Teleporter-Gate blockt."""
+        _build_nav(bot, [])
+        bot._nav_graph._tele_exit_wps.add((10.0, 10.0))
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.target_pos = (10.0, 0.0)
+        bot._nav_path = [(10.0, 0.0, 0.0), (10.0, 10.0, 0.0)]
+        bot._wp_start_time = None
+        bot._move_to_target(0.02, bot.world_half)
+        assert bot._nav_path == [(10.0, 0.0, 0.0), (10.0, 10.0, 0.0)]
+
+    def test_no_early_advance_in_reverse(self, bot):
+        """Rückwärtsmodus → Early-Advance ist per not-reverse-Gate aus."""
+        _build_nav(bot, [])
         bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot._move_reverse = True
@@ -990,19 +1051,100 @@ class TestLookaheadSmoothing:
         bot._nav_path = [(10.0, 0.0, 0.0), (10.0, 10.0, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        # Rückwärtsmodus nutzt andere Formel; kein Lookahead → vel[1] minimal
-        assert abs(bot.vel_y) < 0.5, "Kein Lookahead im Rückwärtsmodus erwartet"
+        assert bot._nav_path == [(10.0, 0.0, 0.0), (10.0, 10.0, 0.0)]
 
-    @pytest.mark.skip(reason="Phase 5: Lookahead nicht implementiert")
-    def test_blend_before_nav_jump(self, bot):
-        """Starkes Lookahead wenn nächster WP Höhenwechsel hat (NAV_JUMP Anfahrt)."""
+    def test_no_early_advance_when_last_wp(self, bot):
+        """Nur noch ein WP (kein Folge-WP) → nichts zu überspringen."""
+        _build_nav(bot, [])
         bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_pos = (10.0, 0.0)
-        bot._nav_path = [(10.0, 0.0, 0.0), (20.0, 5.0, 10.0)]
+        bot._nav_path = [(10.0, 0.0, 0.0)]
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        assert bot.vel_y > 0.0, "NAV_JUMP-Anfahrt: Lookahead soll aim Richtung Sprungziel blenden"
+        assert bot._nav_path == [(10.0, 0.0, 0.0)]
+
+    def test_no_early_advance_when_next_beyond_horizon(self, bot):
+        """Nächster WP jenseits des Horizonts (>16u) → altes Verhalten, kein Skip."""
+        _build_nav(bot, [])
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.target_pos = (10.0, 0.0)
+        bot._nav_path = [(10.0, 0.0, 0.0), (30.0, 0.0, 0.0)]   # bot→next = 30u > 16u
+        bot._wp_start_time = None
+        bot._move_to_target(0.02, bot.world_half)
+        assert bot._nav_path == [(10.0, 0.0, 0.0), (30.0, 0.0, 0.0)]
+
+    def test_no_early_advance_over_platform_edge(self, bot):
+        """Beide WPs auf gleicher Plattform-Höhe (z=10), aber die gerade Abkürzung führt über die
+        Kante ins Leere (L-förmige Plattform, HIX-Szenario) → Absturz-Schutz blockt."""
+        _build_nav(bot, [
+            (0.0, 0.0, 0.0, 0.0, 10.0, 2.0, 10.0),   # Arm entlang X: Dach z=10, y in [-2,2]
+            (8.0, 8.0, 0.0, 0.0, 2.0, 10.0, 10.0),   # Arm entlang Y: Dach z=10, x in [6,10]
+        ])
+        bot.pos_x = -4.0; bot.pos_y = 0.0; bot.pos_z = 10.0
+        bot.azimuth = 0.0
+        bot.target_pos = (8.0, 0.0)
+        bot._nav_path = [(8.0, 0.0, 10.0), (8.0, 8.0, 10.0)]   # gerade (-4,0)→(8,8) verlässt das L
+        bot._wp_start_time = None
+        bot._move_to_target(0.02, bot.world_half)
+        assert bot._nav_path == [(8.0, 0.0, 10.0), (8.0, 8.0, 10.0)], "über Kante nicht abkürzen"
+
+
+class TestCorridorChecks:
+    """P4-MOV-01 Bausteine: _corridor_clear (Wände) und _corridor_no_dropoff (Kanten)."""
+
+    def test_corridor_clear_no_navgraph(self, bot):
+        """Ohne NavGraph → konservativ True (unverändertes Verhalten)."""
+        bot._nav_graph = None
+        assert bot._corridor_clear(10.0, 0.0) is True
+
+    def test_corridor_clear_open(self, bot):
+        """Leere Welt → Korridor frei."""
+        _build_nav(bot, [])
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        assert bot._corridor_clear(10.0, 0.0) is True
+
+    def test_corridor_blocked_by_wall(self, bot):
+        """Dünne Wand quer zur Linie (0,0)→(10,0) → blockiert."""
+        _build_nav(bot, [(5.0, 0.0, 0.0, 0.0, 0.3, 10.0, 10.0)])
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        assert bot._corridor_clear(10.0, 0.0) is False
+
+    def test_corridor_wall_off_line_is_clear(self, bot):
+        """Wand weit abseits der Linie → frei."""
+        _build_nav(bot, [(5.0, 50.0, 0.0, 0.0, 0.3, 10.0, 10.0)])
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        assert bot._corridor_clear(10.0, 0.0) is True
+
+    def test_corridor_wall_above_zband_is_clear(self, bot):
+        """Wand hängt über dem Tank-Kopf (bottom_z=20) → Z-Band filtert → frei."""
+        _build_nav(bot, [(5.0, 0.0, 20.0, 0.0, 0.3, 10.0, 10.0)])
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        assert bot._corridor_clear(10.0, 0.0) is True
+
+    def test_dropoff_no_navgraph(self, bot):
+        """Ohne NavGraph → konservativ True."""
+        bot._nav_graph = None
+        assert bot._corridor_no_dropoff(10.0, 0.0, 0.0) is True
+
+    def test_dropoff_flat_ground_continuous(self, bot):
+        """Ebener Weltboden (z=0) durchgehend → kein Dropoff."""
+        _build_nav(bot, [])
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        assert bot._corridor_no_dropoff(10.0, 0.0, 0.0) is True
+
+    def test_dropoff_over_edge_detected(self, bot):
+        """Gerade verlässt die Plattform (Dach z=10, y∈[-2,2]) → Boden fällt auf 0 → Dropoff."""
+        _build_nav(bot, [(0.0, 0.0, 0.0, 0.0, 10.0, 2.0, 10.0)])
+        bot.pos_x = -8.0; bot.pos_y = 0.0; bot.pos_z = 10.0
+        assert bot._corridor_no_dropoff(0.0, 8.0, 10.0) is False
+
+    def test_dropoff_on_platform_continuous(self, bot):
+        """Diagonale bleibt komplett auf dem großen Dach (z=10) → kein Dropoff."""
+        _build_nav(bot, [(0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0)])
+        bot.pos_x = -8.0; bot.pos_y = -8.0; bot.pos_z = 10.0
+        assert bot._corridor_no_dropoff(8.0, 8.0, 10.0) is True
 
 
 class TestBlindTurn:

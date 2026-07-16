@@ -42,6 +42,16 @@ def _make_box(cx, cy, bz, hw, hd, height, angle=0.0) -> BoxObstacle:
                        angle=angle, half_w=hw, half_d=hd, height=height)
 
 
+def test_obstacle_blocks_layer_bump_height():
+    """_obstacle_blocks_layer: Oberkante ≤ _maxBumpHeight über der Etage blockt NICHT (Tank
+    fährt drüber); darüber blockt (P4-MOV-01: 0.1-Epsilon → MAX_BUMP_HEIGHT vereinheitlicht)."""
+    from bzflag.nav_graph import _obstacle_blocks_layer, MAX_BUMP_HEIGHT
+    low  = _make_box(cx=0.0, cy=0.0, bz=0.0, hw=2.0, hd=2.0, height=MAX_BUMP_HEIGHT - 0.1)
+    high = _make_box(cx=0.0, cy=0.0, bz=0.0, hw=2.0, hd=2.0, height=MAX_BUMP_HEIGHT + 0.2)
+    assert _obstacle_blocks_layer(low,  0.0) is False
+    assert _obstacle_blocks_layer(high, 0.0) is True
+
+
 # ---------------------------------------------------------------------------
 # FloorLayer
 # ---------------------------------------------------------------------------

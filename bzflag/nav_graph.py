@@ -38,6 +38,10 @@ TANK_MARGIN: Final = 3.5           # Rand-Puffer = ceil(TANK_HALF_DIAG≈3.31); 
 THIN_WALL_MARGIN: Final = 1.4       # = TANK_WIDTH/2; reduzierter Rand-Puffer für dünne Wände, damit schmale
                              # Laufstege seitlich an der Wand befahrbar bleiben (bewusst enger als TANK_MARGIN)
 TANK_HEIGHT: Final = 2.05          # BZFlag-Standard-Tankhöhe (half_height=1.0 + Spielraum)
+MAX_BUMP_HEIGHT: Final = 0.33          # ↔ bot.constants.MAX_BUMP_HEIGHT / Server _maxBumpHeight: Stufe, die
+                             # ein Tank direkt überfährt. Planungs-Baseline (wie TANK_HEIGHT eine feste
+                             # Konstante, keine Live-Server-Var: der Graph ist gecacht/geteilt und baut
+                             # seine Layer bei spätem MsgSetVar nicht neu).
 # TANK_HALF_WIDTH: kanonische Definition seit W6 in obstacle_grid.py (re-importiert oben)
 JUMP_RANGE: Final = 95.0          # Max. aabb_dist für Sprung-Kanten (Abstiegsformel, dz≥5: max ~90u)
 JUMP_EDGE_TOL: Final = 1.4          # = TANK_WIDTH/2: zulässiger Überhang des Tank-Mittelpunkts über
@@ -1111,14 +1115,15 @@ def _obstacle_blocks_layer(obs: BoxObstacle, layer_z: float) -> bool:
     """True, wenn obs den Tank-Körper sperrt, der auf Höhe layer_z steht.
 
     Geprüft wird die vertikale Überlappung von [obs.bottom_z, obs.bottom_z+height]
-    mit der Tank-Box [layer_z, layer_z+TANK_HEIGHT]. Das +0.1 schließt das Dach-
-    erzeugende Obstacle aus (dessen Oberkante == layer_z) und Obstacles, deren
-    Oberkante exakt auf Etagenhöhe liegt (Tank fährt drüber).
+    mit der Tank-Box [layer_z, layer_z+TANK_HEIGHT]. Das +MAX_BUMP_HEIGHT schließt
+    das Dach-erzeugende Obstacle aus (dessen Oberkante == layer_z) und Obstacles,
+    deren Oberkante ≤ _maxBumpHeight über der Etage liegt (Tank fährt drüber —
+    ersetzt das alte 0.1-Epsilon durch die physikalisch korrekte Bump-Schwelle).
 
     Entscheidend für Wände, die UNTER einer Dachfläche beginnen und durch die
     Tank-Höhe nach oben stoßen (z.B. HIX-Diagonalwände bottom_z=14, height=16):
     diese sperren z=15, aber nicht z=30 (dort == Oberkante → drüberfahren)."""
-    return obs.bottom_z < layer_z + TANK_HEIGHT and obs.bottom_z + obs.height > layer_z + 0.1
+    return obs.bottom_z < layer_z + TANK_HEIGHT and obs.bottom_z + obs.height > layer_z + MAX_BUMP_HEIGHT
 
 
 def _margin_for(obs: BoxObstacle, layer_z: float) -> float:

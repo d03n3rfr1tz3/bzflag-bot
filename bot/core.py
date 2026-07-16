@@ -29,6 +29,7 @@ from bot.constants import (
     TANK_LENGTH,
     TANK_WIDTH,
     TANK_HEIGHT,
+    MAX_BUMP_HEIGHT,
     TANK_SPEED,
     TANK_TURN_RATE,
     JUMP_VELOCITY,
@@ -240,6 +241,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._tank_length        = TANK_LENGTH         # via MsgSetVar _tankLength
         self._tank_width         = TANK_WIDTH          # via MsgSetVar _tankWidth
         self._tank_height        = TANK_HEIGHT         # via MsgSetVar _tankHeight
+        self._max_bump_height    = MAX_BUMP_HEIGHT     # via MsgSetVar _maxBumpHeight
         self._wall_height        = WALL_HEIGHT_DEFAULT # via MsgSetVar _wallHeight / _tankHeight
         self._shot_radius        = SHOT_RADIUS         # via MsgSetVar _shotRadius
         # Hit-Detection-Fenster (Teil C): Zeitpunkt und eigene Position des letzten

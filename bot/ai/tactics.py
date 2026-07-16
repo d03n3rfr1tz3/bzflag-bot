@@ -7,6 +7,7 @@ import logging
 from bot.constants import (
     NAV_CELL_SIZE,
     NAV_JUMP_Z_TOL,
+    EARLY_ADVANCE_LOOKAHEAD,
     OPTIMAL_RANGE,
     TACT_JUMP_CLEARANCE,
     TACT_JUMP_REACTION_S,
@@ -80,6 +81,47 @@ class TacticsMixin(BZBotBase):
                 self._advance_path()
                 return True
         return False
+
+    def _should_early_advance(self) -> bool:
+        """P4-MOV-01: aktuellen WP früher weiterschalten (Ecke glätten), wenn der Folge-WP nah
+        und auf gleicher Ebene liegt, weder aktueller noch nächster WP ein Sprung-/Teleporter-WP
+        ist, der direkte Korridor frei ist und keine Kante überquert wird. Reines Prädikat (keine
+        Seiteneffekte); das Reverse-Gate erledigt der Aufrufer (_navigate_wp). Gate-Reihenfolge
+        bewusst billig→teuer, damit die Geometrie-Checks nur im Ecken-Nahbereich laufen."""
+        nav_path = self._nav_path
+        if len(nav_path) < 2 or self.target_pos is None:
+            return False
+        cur = nav_path[0]
+        nxt = nav_path[1]
+        # 1) Horizont: nächster WP im Ecken-Nahbereich? (Quadrat-Vergleich, kein hypot)
+        dx = nxt[0] - self.pos_x
+        dy = nxt[1] - self.pos_y
+        if dx * dx + dy * dy > EARLY_ADVANCE_LOOKAHEAD * EARLY_ADVANCE_LOOKAHEAD:
+            return False
+        # 2) Ebene: beide WPs auf Bot-Ebene, kein Sprung/Fall/Höhenwechsel (Schwelle 1.5 wie überall)
+        floor = self._get_floor_z()
+        if abs(cur[2] - floor) > 1.5 or abs(nxt[2] - floor) > 1.5 or abs(nxt[2] - cur[2]) > 1.5:
+            return False
+        # 3) Sprung-Anlauf-Schutz: folgt auf nxt ein Höhenwechsel (nav_path[2]), ist nxt die
+        #    Absprung-/Abfahrzelle und cur deren Run-up (_insert_jump_runups legt beide auf
+        #    DIESELBE Ebene → Gate 2 greift nicht). Den Anlauf nicht abkürzen, sonst kommt der
+        #    Bot falsch ausgerichtet an der Absprungzelle an (NAV_JUMP_ALIGN-Umweg / Fehlsprung).
+        if len(nav_path) >= 3 and abs(nav_path[2][2] - nxt[2]) > 1.5:
+            return False
+        # 4) Teleporter: weder cur noch nxt ist ein Teleporter-Exit-WP (wie _advance_path)
+        nav = self._nav_graph
+        if nav is not None:
+            tele = nav._tele_exit_wps
+            if ((round(cur[0], 1), round(cur[1], 1)) in tele
+                    or (round(nxt[0], 1), round(nxt[1], 1)) in tele):
+                return False
+        # 5) Wand-Korridor frei?
+        if not self._corridor_clear(nxt[0], nxt[1]):
+            return False
+        # 6) Keine Plattformkante / kein Absturz entlang der Abkürzung?
+        if not self._corridor_no_dropoff(nxt[0], nxt[1], floor):
+            return False
+        return True
 
     def _should_reverse_to_wp(self) -> bool:
         """Rückwärts zum NAV_JUMP-Anlauf-WP fahren, wenn dieser kurz hinter dem Bot liegt und
