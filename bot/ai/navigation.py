@@ -10,6 +10,7 @@ from bzflag.nav_graph import JUMP_EDGE_TOL
 from bzflag.shot_physics import (ray_teleporter_crossing, teleport_through)
 from bot.constants import (
     NAV_CELL_SIZE,
+    EARLY_ADVANCE_FLOOR_STEP,
     TELEPORT_TIME,
     WP_TIMEOUT_BASE,
     WP_TIMEOUT_SCALE,
@@ -40,6 +41,112 @@ class NavigationMixin(BZBotBase):
         if len(nav_path) >= 2 and nav_path[1][2] - self._get_floor_z() > 1.5:
             return NAV_CELL_SIZE
         return NAV_CELL_SIZE * 1.25
+
+    def _corridor_clear(self, ex: float, ey: float) -> bool:
+        """P4-MOV-01: True, wenn die Gerade (pos_x,pos_y)→(ex,ey) frei von soliden
+        (nicht-drive_through) Boxen ist. Spiegelt die reaktive Wall-Slide-Broadphase
+        (_apply_obstacle_bounds): _solid_grid.query_segment + drive_through-Filter + Z-Band +
+        Slab-Test des Segments gegen die um die Tank-Halbbreite aufgeblähte Box.
+        Ohne NavGraph → True (unverändertes Verhalten)."""
+        nav = self._nav_graph
+        if nav is None:
+            return True
+        px = self.pos_x
+        py = self.pos_y
+        pz = self.pos_z
+        tank_top = pz + self._tank_height
+        hw_pad = self._effective_half_width()
+        grid = nav._solid_grid
+        cands = grid.query_segment(px, py, ex, ey) if grid is not None else nav._obs
+        ddx = ex - px
+        ddy = ey - py
+        for obs in cands:
+            if obs.drive_through:
+                continue
+            # Z-Band: Box über dem Kopf oder Oberkante ≤ _maxBumpHeight über den Ketten
+            # (überfahrbar) → kein Blocker. MUSS dieselbe Schwelle wie die Wall-Slide-Kollision
+            # nutzen, sonst gälten Stufen im Korridor als frei, die die Physik real blockt
+            # (Early-Advance in eine Sackgasse bis zum WP-Timeout).
+            if tank_top <= obs.bottom_z or pz >= obs.bottom_z + obs.height - self._max_bump_height:
+                continue
+            # Slab-Test Segment vs. rotierte Box, Footprint um hw_pad aufgebläht (Logik wie
+            # nav_graph._segment_crosses_thin_obs, hier inline mit Inflation; Track 5/mypyc:
+            # zwei explizite Achsen-Blöcke statt Tupel-Loop).
+            cos_a = obs.cos_a
+            sin_a = obs.sin_a
+            ox =  (px - obs.cx) * cos_a + (py - obs.cy) * sin_a
+            oy = -(px - obs.cx) * sin_a + (py - obs.cy) * cos_a
+            dx =  ddx * cos_a + ddy * sin_a
+            dy = -ddx * sin_a + ddy * cos_a
+            half_w = obs.half_w + hw_pad
+            half_d = obs.half_d + hw_pad
+            t_min = 0.0
+            t_max = 1.0
+            crosses = True
+            # Achse w (lokal, Box-Breite)
+            if abs(dx) < 1e-9:
+                if abs(ox) > half_w:
+                    crosses = False
+            else:
+                ta = (-half_w - ox) / dx
+                tb = ( half_w - ox) / dx
+                if ta > tb:
+                    ta, tb = tb, ta
+                if ta > t_min:
+                    t_min = ta
+                if tb < t_max:
+                    t_max = tb
+                if t_min > t_max:
+                    crosses = False
+            # Achse d (lokal, Box-Tiefe)
+            if crosses:
+                if abs(dy) < 1e-9:
+                    if abs(oy) > half_d:
+                        crosses = False
+                else:
+                    ta = (-half_d - oy) / dy
+                    tb = ( half_d - oy) / dy
+                    if ta > tb:
+                        ta, tb = tb, ta
+                    if ta > t_min:
+                        t_min = ta
+                    if tb < t_max:
+                        t_max = tb
+                    if t_min > t_max:
+                        crosses = False
+            if crosses:
+                return False
+        return True
+
+    def _corridor_no_dropoff(self, ex: float, ey: float, ref_z: float) -> bool:
+        """P4-MOV-01: True, wenn der Boden entlang (pos_x,pos_y)→(ex,ey) nirgends mehr als
+        _maxBumpHeight unter ref_z abfällt. Verhindert, dass der Early-Advance den Bot über
+        eine Plattformkante abkürzen und abstürzen lässt (z.B. HIX nahe der Diagonalwand).
+        Abtastung mit Pixel-on-Overhang (wie _get_floor_z). Ohne NavGraph → True."""
+        nav = self._nav_graph
+        if nav is None:
+            return True
+        sx = self.pos_x
+        sy = self.pos_y
+        ddx = ex - sx
+        ddy = ey - sy
+        dist = math.hypot(ddx, ddy)
+        if dist < 1e-6:
+            return True
+        overhang = self._effective_half_width()
+        min_floor = ref_z - self._max_bump_height
+        probe_z = ref_z + 1.0
+        n = int(dist / EARLY_ADVANCE_FLOOR_STEP)
+        if n < 1:
+            n = 1
+        # n innere Stützstellen + Endpunkt: i = 1..n+1, t = i/(n+1) (i=n+1 → t=1.0 = Ziel-WP)
+        i = 1
+        while i <= n + 1:
+            t = i / (n + 1)
+            if nav.get_floor_z(sx + ddx * t, sy + ddy * t, probe_z, overhang) < min_floor:
+                return False
+            i += 1
+        return True
 
     def _nav_jump_geometry_ok(self, target_wp) -> bool:
         """True wenn Sprung geometrisch möglich ist (Höhe + Reichweite), ohne Azimuth.
@@ -80,8 +187,8 @@ class NavigationMixin(BZBotBase):
         return True
 
     def _navigate_wp(self, dt: float, half: float, reverse: bool = False) -> bool:
-        """Gemeinsamer WP-Navigations-Kern: Timeout, Advance, Lookahead, Drehen, Geschwindigkeit.
-        Gibt True zurück wenn der Tick vollständig behandelt wurde."""
+        """Gemeinsamer WP-Navigations-Kern: Timeout, Advance, Early-Advance (P4-MOV-01), Drehen,
+        Geschwindigkeit. Gibt True zurück wenn der Tick vollständig behandelt wurde."""
         if self.target_pos is None:
             return False
         nav_path = self._nav_path
@@ -112,6 +219,10 @@ class NavigationMixin(BZBotBase):
             return True
         if self._check_advance_path():
             return True
+        if not reverse and self._should_early_advance():
+            # P4-MOV-01: Ecke früher schneiden — kein return, der Tick fällt zum Steering durch
+            # und lenkt sofort auf den neuen WP (pop(0) mutiert nav_path in-place).
+            self._advance_path()
         if nav_path:
             wp_x, wp_y, wp_z = nav_path[0][0], nav_path[0][1], nav_path[0][2]
         else:

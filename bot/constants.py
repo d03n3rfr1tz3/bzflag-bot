@@ -20,6 +20,8 @@ from bzflag.nav_graph import CELL_SIZE as NAV_CELL_SIZE
 TANK_LENGTH: Final = 6.0                  # ↔ _tankLength ↔ self._tank_length
 TANK_WIDTH: Final = 2.8                  # ↔ _tankWidth ↔ self._tank_width
 TANK_HEIGHT: Final = 2.05                 # ↔ _tankHeight ↔ self._tank_height
+MAX_BUMP_HEIGHT: Final = 0.33                 # ↔ _maxBumpHeight ↔ self._max_bump_height: max. Stufen-
+                                          # höhe, die ein Tank direkt überfährt statt anzustoßen
 TANK_RADIUS_FACTOR: Final = 0.72                 # _tankRadius = 0.72 * _tankLength (global.cxx)
 TANK_RADIUS: Final = TANK_RADIUS_FACTOR * TANK_LENGTH   # 4.32 (_tankRadius; nicht nachgeführt —
                                            # an TANK_RADIUS hängen Modulkonstanten wie
@@ -126,6 +128,13 @@ NAV_TELE_TIMEOUT: Final = 2.0             # max. Sekunden Direktanflug in die To
 NAV_TELE_ENGAGE_DIST: Final = NAV_CELL_SIZE * 5.0  # nur engagen, wenn Tor-Mitte so nah ist (~20u)
 NAV_TELE_COOLDOWN: Final = 8.0             # Sperre eines Tors nach fehlgeschlagener Querung
 NAV_TELE_OVERSHOOT: Final = 4.0             # u über die Mitte hinaus anzielen → Tor-Ebene sicher queren
+# P4-MOV-01: Early-Advance (glatte WP-Übergänge / Ecken-Glättung)
+EARLY_ADVANCE_LOOKAHEAD: Final = NAV_CELL_SIZE * 4.0  # ≈16u: nur nahe Ecken glätten — hält query_segment
+                                                # klein (≤2×2 Grid-Zellen) und die Plan-Abweichung begrenzt
+EARLY_ADVANCE_FLOOR_STEP: Final = 1.0             # Abtast-Abstand Kanten-/Absturz-Check. Spalten < 2×Overhang
+                                                # (~2.8u) überfährt der Tank physisch (Pixel-on); ab Breite
+                                                # 2×Overhang + STEP ist ein Abtast-Treffer garantiert →
+                                                # 1.0 hält das Blindfenster klein (max. ~16 Punktabfragen)
 # P4-INF-01: Asynchrone Pfadplanung. Der Haupt-Thread plant schnell (Defaults 5k/125ms, ggf.
 # Best-Effort-Teilpfad); dauerte das länger als NAV_ASYNC_TRIGGER_MS, läuft parallel in einem
 # Zweit-Thread eine Vollsuche mit großen Limits, deren bessere Route (inkl. Treppen-Sprüngen)

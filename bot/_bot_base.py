@@ -105,6 +105,7 @@ class BZBotBase:
     _linear_acceleration: Any
     _link_map: Any
     _lock_on_angle: Any
+    _max_bump_height: Any
     _max_shots: int
     _mgun_ad_life: Any
     _mgun_ad_rate: Any
@@ -285,6 +286,10 @@ class BZBotBase:
         raise NotImplementedError
     def _compute_dodge_dir(self, threat, now: float):
         raise NotImplementedError
+    def _corridor_clear(self, ex: float, ey: float) -> bool:
+        raise NotImplementedError
+    def _corridor_no_dropoff(self, ex: float, ey: float, ref_z: float) -> bool:
+        raise NotImplementedError
     def _cross_floor_indirect(self, info) -> bool:
         raise NotImplementedError
     def _effective_fov(self) -> float:
@@ -400,6 +405,8 @@ class BZBotBase:
     def _setup_dodge(self, threat, now: float, time_to_impact: float, dodge_dir: float, orig_diff: Optional[float]=None) -> None:
         raise NotImplementedError
     def _shot_reveals_shooter(self, shooter, ox: float, oy: float, oz: float) -> bool:
+        raise NotImplementedError
+    def _should_early_advance(self) -> bool:
         raise NotImplementedError
     def _should_reverse_to_wp(self) -> bool:
         raise NotImplementedError

@@ -223,7 +223,9 @@ class PhysicsMixin(BZBotBase):
             if obs.drive_through:
                 continue
             tank_top = pz + self._tank_height
-            if tank_top <= obs.bottom_z or pz >= obs.bottom_z + obs.height - 0.5:
+            # Oberkante ≤ _maxBumpHeight über den Ketten → Tank fährt direkt drüber (Server-Var;
+            # ersetzt das alte 0.5-Literal — deckungsgleich mit bzfs' Bump-Regel).
+            if tank_top <= obs.bottom_z or pz >= obs.bottom_z + obs.height - self._max_bump_height:
                 continue
             nx = px + vx * dt
             ny = py + vy * dt
