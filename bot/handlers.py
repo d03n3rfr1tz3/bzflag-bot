@@ -303,7 +303,9 @@ class HandlersMixin(BZBotBase):
         if len(payload) < 13: return
         pid = unpack_uint8(payload, 0)
         if pid != self.player_id:
-            if pid in self.players: self.players[pid].alive = True
+            if pid in self.players:
+                self.players[pid].alive = True
+                self.players[pid].slot_reload_at = []   # P4-TAC-05: Respawn → alle Slots geladen
             return
         x, y, z     = unpack_vec3(payload, 1)
         self.azimuth = unpack_float(payload, 13) if len(payload) >= 17 else 0.0
@@ -389,6 +391,7 @@ class HandlersMixin(BZBotBase):
                                 self.callsign, killer, flag_abbv)
         elif victim in self.players:
             self.players[victim].alive = False
+            self.players[victim].slot_reload_at = []   # P4-TAC-05: tot → Slots verfallen (Respawn lädt neu)
             if self.target_player == victim: self.target_player = None
             # Genocide: wenn Teamkamerad mit G-Flagge getötet → Bot stirbt mit
             if (len(payload) >= 8 and self.alive and self.player_id is not None
@@ -653,6 +656,17 @@ class HandlersMixin(BZBotBase):
         # Einmal-Update auf den Schuss-Ursprung (x,y; z ist Mündungshöhe) — umgeht die Radar-
         # Aufmerksamkeit, deckt so auch sonst unsichtbare (ST/CL) Gegner kurz auf.
         _shooter_info = self.players.get(shooter)
+        # P4-TAC-05: Gegner-Schuss-Slot als belegt vormerken (Ready = fire_time + Reload für das
+        # Schützen-Flag AUS DEM PAYLOAD, nicht players[..].flag → kein Race mit späterem Flag-Wechsel).
+        # Kein Wahrnehmungs-Gate: MsgShotBegin kommt zuverlässig per TCP. Eigene Schüsse zählt
+        # _slot_reload_at separat.
+        if _shooter_info is not None and shooter != self.player_id:
+            _slot = shot_id & 0xFF
+            _flag = flag_type.rstrip(b"\x00").decode("ascii", "replace")
+            _slots = _shooter_info.slot_reload_at
+            while len(_slots) <= _slot:
+                _slots.append(0.0)   # bis dahin ungesehene Slots gelten als geladen (0.0)
+            _slots[_slot] = shot.fire_time + self._reload_time_for_flag(_flag)
         if (_shooter_info is not None and shooter != self.player_id
                 and self._shot_reveals_shooter(_shooter_info, px, py, pz)):
             _shooter_info.pos[0] = px; _shooter_info.pos[1] = py

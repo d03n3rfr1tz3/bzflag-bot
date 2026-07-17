@@ -34,6 +34,9 @@ from bot.constants import (
     COVER_PEEK_CHANCE,
     COVER_PEEK_OUT_S,
     COVER_MAX_RANGE_FACTOR,
+    COVER_BREAKOUT_MIN_WINDOW_S,
+    COVER_CLOSE_EXIT_FRAC,
+    RICO_AIM_MAX_COVER,
 )
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
@@ -193,8 +196,7 @@ class CombatMixin(BZBotBase):
 
     def _should_hold_in_cover(self, now: float) -> bool:
         """Eingangs-Entscheidung für COVER_HOLD (P4-TAC-02): steht der Bot an einer Deckungskante und
-        sollte defensiv halten statt offen anzugreifen? Bewusst eigene Methode — hier stöpselt
-        P4-TAC-05 später die Gegner-Schuss-Slots ein (nicht halten, wenn der Gegner leergeschossen ist)."""
+        sollte defensiv halten statt offen anzugreifen?"""
         if now < self._cover_cooldown_until:
             return False
         pid = self.target_player
@@ -206,6 +208,11 @@ class CombatMixin(BZBotBase):
         # SB durchschlägt Wände, SW wirkt radial → Deckung ist gegen beide wertlos. GM erwünscht
         # (Deckung bricht den Lock), daher keine Ausnahme.
         if info.flag in ("SB", "SW"):
+            return False
+        # P4-TAC-05: Gegner leergeschossen und Nachlade-Fenster groß genug → gar nicht erst verstecken,
+        # sondern die Blöße des Gegners zum Angriff nutzen.
+        if (self._enemy_slots_empty(info, now)
+                and self._enemy_next_slot_ready_in(info, now) >= COVER_BREAKOUT_MIN_WINDOW_S):
             return False
         ep = self._get_enemy_pos(pid)
         if ep is None:
@@ -224,6 +231,16 @@ class CombatMixin(BZBotBase):
         self._cover_peek_phase = 0
         self._transition_to(self._ground_state())
 
+    def _cover_hold_aim_az(self, pid: int, ep) -> float:
+        """Ziel-Azimut für die Rumpf-Ausrichtung in COVER_HOLD: ohne LoS zum Gegner der gecachte
+        Abprall-/Tor-Azimut (Rico-Drive-Muster aus _execute_combat_move — nur so passiert der Rumpf
+        das Fire-Gate und _maybe_shoot feuert Indirekt-Schüsse aus der Deckung); sonst direkt aufs Ziel."""
+        _cache = self._rico_aim_cache
+        if (_cache is not None and _cache[1] == pid and _cache[2] is not None
+                and not self._has_los_to_enemy(pid)):
+            return _cache[2][0]
+        return math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
+
     def _tick_cover_hold(self, now: float) -> None:
         """COVER_HOLD-Entscheidungen (10 Hz): Dodge hat Vorrang, sonst Ausgangsbedingungen prüfen und
         gelegentlich einen kurzen Peek starten. Die 60-Hz-Ausführung liegt in _dispatch_movement."""
@@ -232,24 +249,43 @@ class CombatMixin(BZBotBase):
             return
         pid = self.target_player
         info = self.players.get(pid) if pid is not None else None
-        # Ausgang: Timeout (P4-TAC-05 ergänzt später 'Gegner-Slots leer' → früher raus).
-        if now >= self._cover_hold_until:
-            self._cover_hold_exit(now)
-            return
-        # Ausgang: Ziel weg/tot/pausiert, außer Reichweite, Deckung ungültig, oder Gegner jetzt SB/SW.
+        # Ausgang: Ziel weg/tot/pausiert oder Gegner jetzt SB/SW → Deckung wertlos.
         if info is None or not info.alive or info.paused or info.flag in ("SB", "SW"):
             self._cover_hold_exit(now)
             return
+        # P4-TAC-05: Gegner leergeschossen + Fenster groß genug + eigener Schuss bereit → raus und
+        # angreifen, statt den Notausgang-Timeout abzuwarten.
+        if (self._enemy_slots_empty(info, now)
+                and self._enemy_next_slot_ready_in(info, now) >= COVER_BREAKOUT_MIN_WINDOW_S
+                and self._next_slot_ready(now)):
+            self._cover_hold_exit(now)
+            return
+        # Ausgang: Timeout (Fallback-Notausgang, falls das Slot-Fenster nie groß genug wird).
+        if now >= self._cover_hold_until:
+            self._cover_hold_exit(now)
+            return
         ep = self._get_enemy_pos(pid)
-        if (ep is None
-                or math.hypot(ep[0] - self.pos_x, ep[1] - self.pos_y) > self._shot_range * COVER_MAX_RANGE_FACTOR
+        if ep is None:
+            self._cover_hold_exit(now)
+            return
+        dist = math.hypot(ep[0] - self.pos_x, ep[1] - self.pos_y)
+        # Ausgang: außer Reichweite, Deckung ungültig (Gegner umrundet die Box), oder Gegner so nah,
+        # dass COMBAT wieder Abstand halten soll (Point-Blank lohnt kein Verstecken).
+        if (dist > self._shot_range * COVER_MAX_RANGE_FACTOR
+                or dist < self._effective_optimal_range() * COVER_CLOSE_EXIT_FRAC
                 or not self._covered_from(pid, now)):
             self._cover_hold_exit(now)
             return
-        # Gelegentlich kurz herausschauen (nur aus dem Halten heraus, nicht mitten im Peek).
-        if self._cover_peek_phase == 0 and random.random() < COVER_PEEK_CHANCE:
+        # Gelegentlich kurz herausschauen — aber nur, wenn der Gegner überhaupt schießen kann (sonst
+        # provoziert der Peek nichts; das Slot-leer-Fenster bricht ohnehin aktiv aus, s. o.).
+        if (self._cover_peek_phase == 0 and not self._enemy_slots_empty(info, now)
+                and random.random() < COVER_PEEK_CHANCE):
             self._cover_peek_phase = 1
             self._cover_peek_until = now + COVER_PEEK_OUT_S
+        # Abpraller-Ziel in Deckung frisch halten (breiter Sweep) — ohne LoS würde der Cache sonst
+        # verfallen und das Fire-Gate ließe keinen Indirekt-Schuss zu (s. COVER_HOLD-Dispatch).
+        if not self._has_los_to_enemy(pid):
+            self._find_ricochet_aim_angle(pid, None, RICO_AIM_MAX_COVER)
 
     def _execute_combat_move(self, dt: float, half: float, now: float = 0.0) -> None:
         """COMBAT 60Hz: dreht auf vorhergesagte Zielposition, fährt distanzbasiert."""

@@ -154,8 +154,10 @@ class StateMachineMixin(BZBotBase):
             if not self._jumping:
                 ep = (self._get_enemy_pos(self.target_player)
                       if self.target_player is not None else None)
-                if ep is not None:   # aufs Ziel drehen (Ausrichtung für Ausbruch/Peek-Schuss)
-                    self._turn_toward(math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x), dt)
+                if ep is not None:
+                    # Ausrichtung für Ausbruch/Peek-Schuss: bei fehlendem LoS auf den gecachten
+                    # Abprall-/Tor-Azimut (Rico-Drive), sonst direkt aufs Ziel (P4-TAC-05).
+                    self._turn_toward(self._cover_hold_aim_az(self.target_player, ep), dt)
                 else:
                     self.ang_vel = 0.0
                 # Peek-Zyklus: kurz vorfahren (Phase 1) und sofort rückwärts zurück (Phase 2).

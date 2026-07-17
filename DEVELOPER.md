@@ -1851,9 +1851,11 @@ anzugreifen. Design-Entscheidungen:
 - **Silhouetten- statt Zentrumstest** (`_covered_from`, `bot/ai/perception.py`): geprüft werden
   die zwei Ränder ±`TANK_HALF_DIAG` senkrecht zur Linie Schütze→Bot, nicht die Tank-Mitte —
   sonst gilt eine „herausschauende Nase" fälschlich als gedeckt. Ursprung ist die
-  Gegner-**Mündungshöhe** (`info.pos[2] + MUZZLE_HEIGHT`, Schuss- statt Sichtlinie); ein
-  springender Gegner schießt so über niedrige Boxen (Airborne-Fall). Alles über
-  `_segment_clear` (freier Ursprung, z-Slab, DDA-Broadphase) — kein neuer Raycast-Code.
+  Gegner-**Mündungshöhe** (`info.pos[2] + self._muzzle_height` — die via MsgSetVar nachgeführte
+  Server-Var, NICHT die Konstante; Schuss- statt Sichtlinie); ein springender Gegner schießt so
+  über niedrige Boxen (Airborne-Fall). Alles über `_segment_clear` (freier Ursprung, z-Slab,
+  DDA-Broadphase) — kein neuer Raycast-Code. (`self.players.get(pid)` mit None-Guard: der
+  Recv-Thread kann den Gegner zwischen den Silhouetten-Rays entfernen.)
 - **Kanten-Probe** (`_cover_edge_ahead`): derselbe Silhouetten-Test an einem Punkt eine
   Tanklänge (`COVER_EDGE_PROBE_DIST`) voraus. Probe-Richtung ist die *effektive*
   Bewegungsrichtung (Geschwindigkeitsvektor, sonst Azimut) — beim Wall-Slide zeigt der Azimut
@@ -1869,14 +1871,27 @@ anzugreifen. Design-Entscheidungen:
   Ausnahmen: SB (durchschlägt Wände) / SW (radial) → nie halten; GM (Deckung bricht Lock) →
   erwünscht. Ricochet um die Deckung herum bleibt bewusst der Dodge-Kaskade (`_ricochet_paths`)
   überlassen.
-- **TAC-05-Einstöpselstelle:** `COVER_HOLD_MAX_S` (10 s) ist nur ein großzügiger Notausgang.
-  Der klugе, frühe Ausgang („Gegner-Schuss-Slots leer → jetzt raus und angreifen") gehört zu
-  P4-TAC-05 und wird in `_should_hold_in_cover` (Eingang) sowie den Timeout-Zweig von
-  `_tick_cover_hold` (Ausgang) eingehängt.
+- **Indirekt-Schuss aus der Deckung (mit TAC-05):** ohne LoS dreht der COVER_HOLD-Dispatch den
+  Rumpf über `_cover_hold_aim_az` auf den gecachten Abprall-/Tor-Azimut (Rico-Drive-Muster aus
+  `_execute_combat_move`) statt auf den Gegner — nur so passiert der Rumpf das Fire-Gate und
+  `_maybe_shoot_standard` feuert Indirekt-Schüsse. `_tick_cover_hold` frischt den Cache
+  (`_rico_aim_cache`) im 10-Hz-Tick über `_find_ricochet_aim_angle(pid, None, RICO_AIM_MAX_COVER)`
+  auf — mit **breiterem Sweep** (`RICO_AIM_MAX_COVER` = 90° statt `RICO_AIM_MAX` = 45°; im Stand ist
+  Zeit dafür, Treffer sind simulationsvalidiert). Zusätzlich **Zu-nah-Exit**
+  (`COVER_CLOSE_EXIT_FRAC`): kommt der Gegner näher als `optimal × 0.5`, übernimmt wieder COMBAT.
 
-**P4-TAC-05 — Gegner-Schuss-Slots (offen, hängt an TAC-02).** Slot eines Fremdschusses =
-`shot_id & 0xFF`; `maxShots`/`_reloadTime` sind serverweit bekannt, `MsgShotBegin` kommt
-zuverlässig per TCP → per-Gegner-Slot-Cooldowns als neues Feld an `PlayerInfo`, befüllt in
-`_on_shot_begin` (Flag-Modifikatoren des Gegners analog `_effective_reload_time`). Nutzen: das
-Peek-/Ausbruch-Timing im bestehenden `COVER_HOLD` — „beide Slots gerade leergeschossen → ~3 s
-Fenster zum Rauskommen" ersetzt bzw. verkürzt den `COVER_HOLD_MAX_S`-Notausgang (s. o.).
+**P4-TAC-05 — Gegner-Schuss-Slots (umgesetzt, hängt an TAC-02).** Per-Gegner-Slot-Cooldowns als
+Feld `PlayerInfo.slot_reload_at` (Liste; Index = `shot_id & 0xFF`), befüllt in `_on_shot_begin`:
+`ready = shot.fire_time + _reload_time_for_flag(flag)`. Das Schützen-Flag kommt **aus dem
+Shot-Payload** (Abschusszeitpunkt) statt aus `players[..].flag` → kein Race mit späterem
+Flag-Wechsel. `_reload_time_for_flag` ist das aus `_effective_reload_time` extrahierte,
+flag-parametrisierte Pendant (MG/F beschleunigen; `_laser_ad_rate` wird — wie im Original bewusst —
+NICHT einbezogen, vorbestehende Lücke). Reload zählt **ab fire_time**, nicht ab Schuss-Ende
+(`MsgShotEnd` daher irrelevant, wie beim eigenen `_slot_reload_at`). `maxShots`/`_reloadTime` sind
+serverweit; kein Wahrnehmungs-Gate (TCP-zuverlässig). Konvention: leere Liste / fehlender Index =
+Slot gilt **geladen** (konservativ — ein nie gesehener Schuss heißt nicht leerer Slot). Reset auf
+`[]` bei Tod (`_on_killed`) und Respawn (`_on_alive`). Konsum via `_enemy_slots_empty` /
+`_enemy_next_slot_ready_in` an drei Stellen: **Eingang** (`_should_hold_in_cover`: Gegner leer +
+Fenster ≥ `COVER_BREAKOUT_MIN_WINDOW_S` → gar nicht verstecken), **Ausgang** (`_tick_cover_hold`:
+zusätzlich eigener Slot bereit → früh raus, vor dem `COVER_HOLD_MAX_S`-Notausgang), **Peek-Gate**
+(leerer Gegner → kein Peek, der Ausbruchszweig übernimmt).

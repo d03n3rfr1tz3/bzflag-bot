@@ -183,6 +183,7 @@ class ShootingMixin(BZBotBase):
         self,
         target_pid: int,
         predicted_pos: Optional[Tuple[float, float]] = None,
+        aim_max_deg: int = RICO_AIM_MAX,
     ) -> Optional[float]:
         now = time.monotonic()
         cache = self._rico_aim_cache
@@ -190,7 +191,7 @@ class ShootingMixin(BZBotBase):
                 and cache[1] == target_pid
                 and now - cache[0] < RICO_AIM_CACHE_TTL):
             return cache[2][0] if cache[2] is not None else None
-        result = self._compute_ricochet_aim(target_pid, predicted_pos)
+        result = self._compute_ricochet_aim(target_pid, predicted_pos, aim_max_deg)
         self._rico_aim_cache = (now, target_pid, result)
         if result is not None:
             az, via_tele = result
@@ -240,6 +241,7 @@ class ShootingMixin(BZBotBase):
         self,
         target_pid: int,
         predicted_pos: Optional[Tuple[float, float]],
+        aim_max_deg: int = RICO_AIM_MAX,
     ) -> Optional[Tuple[float, bool]]:
         enemy = self.players.get(target_pid)
         if not enemy or not enemy.alive:
@@ -270,7 +272,7 @@ class ShootingMixin(BZBotBase):
         # Feinpass unten verfeinert nur um tatsächliche Treffer herum.
         direct_az_deg = math.degrees(direct_az)
         cand_deg: set = set()
-        for az_deg in range(-(RICO_AIM_MAX), RICO_AIM_MAX, 3):
+        for az_deg in range(-aim_max_deg, aim_max_deg, 3):
             if abs(az_deg) > 5:
                 cand_deg.add(direct_az_deg + az_deg)
 

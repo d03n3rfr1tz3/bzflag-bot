@@ -382,7 +382,7 @@ Taktische und infrastrukturelle Verbesserungen ohne harte Produktionsrelevanz.
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
 | P4-TAC-02 | Deckung hinter Gebäuden: Deckungskanten-Erkennung + defensives Halten/Peeken (COVER_HOLD) | ✅ | — |
-| P4-TAC-05 | Gegner-Schuss-Slots tracken und passend aus der Deckung kommen (Peek-/Ausbruch-Timing in COVER_HOLD) | 📋 | P4-TAC-02 |
+| P4-TAC-05 | Gegner-Schuss-Slots tracken und passend aus der Deckung kommen (Peek-/Ausbruch-Timing in COVER_HOLD) | ✅ | P4-TAC-02 |
 | P4-TAC-06 | Landing-Shot nicht ausführen, wenn Landung > eigener Z | ✅ | — |
 | P4-TAC-07 | Landing-Shot eher ausführen, wenn Landung < eigener Z | ✅ | — |
 

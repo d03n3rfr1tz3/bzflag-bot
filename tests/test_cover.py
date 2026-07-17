@@ -12,7 +12,7 @@ from bzflag.nav_graph import NavGraph
 from bot.models import AIState
 from bot.constants import (
     TANK_HALF_DIAG, COVER_HOLD_MAX_S, COVER_HOLD_COOLDOWN_S,
-    COVER_PEEK_OUT_S, COVER_PEEK_BACK_S,
+    COVER_PEEK_OUT_S, COVER_PEEK_BACK_S, COVER_CLOSE_EXIT_FRAC, RICO_AIM_MAX_COVER,
 )
 from conftest import make_player
 
@@ -255,3 +255,101 @@ class TestCoverHoldBehaviour:
         bot._cover_peek_until = now - 0.01
         bot._dispatch_movement(1.0 / 60.0, now, ai_tick=False)
         assert bot._cover_peek_phase == 0
+
+
+class TestCoverHoldTac05:
+    """P4-TAC-05: Gegner-Schuss-Slots steuern Eingang/Ausgang/Peek von COVER_HOLD."""
+
+    def _setup(self, bot, monkeypatch, dist=100.0):
+        bot.pos_x, bot.pos_y, bot.pos_z = 0.0, 0.0, 0.0
+        bot.azimuth = 0.0
+        bot.target_player = 2
+        bot._nav_path = []
+        bot._cover_cooldown_until = 0.0
+        bot._max_shots = 1
+        bot._slot_reload_at = [0.0]      # eigener Slot bereit
+        bot._shot_slot = 0
+        p = make_player(bot, 2, pos=(dist, 0.0, 0.0), is_human=True)
+        p.alive = True
+        monkeypatch.setattr(bot, "_cover_edge_ahead", lambda pid, now=0.0: True)
+        monkeypatch.setattr(bot, "_covered_from", lambda pid, now=0.0: True)
+        return p
+
+    def test_no_enter_when_enemy_empty_wide_window(self, bot, monkeypatch):
+        """Gegner leergeschossen + großes Fenster → nicht verstecken, angreifen."""
+        p = self._setup(bot, monkeypatch)
+        now = time.monotonic()
+        p.slot_reload_at = [now + 3.0]
+        assert bot._should_hold_in_cover(now) is False
+
+    def test_enter_when_window_too_small(self, bot, monkeypatch):
+        """Gegner zwar leer, aber gleich wieder geladen → Fenster zu klein → weiter halten."""
+        p = self._setup(bot, monkeypatch)
+        now = time.monotonic()
+        p.slot_reload_at = [now + 0.5]
+        assert bot._should_hold_in_cover(now) is True
+
+    def test_exit_when_enemy_empty_and_own_ready(self, bot, monkeypatch):
+        """In COVER_HOLD: Gegner leer + Fenster groß + eigener Slot bereit → sofort raus."""
+        p = self._setup(bot, monkeypatch)
+        now = time.monotonic()
+        p.slot_reload_at = [now + 3.0]
+        bot._ai_state = AIState.COVER_HOLD
+        bot._cover_hold_until = now + COVER_HOLD_MAX_S   # Timeout NICHT erreicht
+        bot._tick_cover_hold(now)
+        assert bot._ai_state != AIState.COVER_HOLD
+
+    def test_no_exit_when_own_slot_not_ready(self, bot, monkeypatch):
+        """Gegner leer, aber eigener Schuss noch nicht bereit → nicht ausbrechen (nichts zu tun)."""
+        p = self._setup(bot, monkeypatch)
+        now = time.monotonic()
+        p.slot_reload_at = [now + 3.0]
+        bot._slot_reload_at = [now + 5.0]      # eigener Slot im Cooldown
+        bot._ai_state = AIState.COVER_HOLD
+        bot._cover_hold_until = now + COVER_HOLD_MAX_S
+        bot._tick_cover_hold(now)
+        assert bot._ai_state == AIState.COVER_HOLD
+
+    def test_no_peek_when_enemy_empty(self, bot, monkeypatch):
+        """Gegner leer → Peek sinnlos (provoziert nichts) → kein Peek-Start trotz Zufalls-Gate."""
+        p = self._setup(bot, monkeypatch)
+        now = time.monotonic()
+        p.slot_reload_at = [now + 0.5]         # leer, aber Fenster klein → kein Ausbruch, aber auch kein Peek
+        bot._ai_state = AIState.COVER_HOLD
+        bot._cover_hold_until = now + COVER_HOLD_MAX_S
+        bot._cover_peek_phase = 0
+        monkeypatch.setattr("random.random", lambda: 0.0)
+        bot._tick_cover_hold(now)
+        assert bot._cover_peek_phase == 0
+
+    def test_close_exit(self, bot, monkeypatch):
+        """Gegner sehr nah (< optimale Distanz × Faktor) → COMBAT übernimmt wieder das Abstandhalten."""
+        p = self._setup(bot, monkeypatch, dist=bot._effective_optimal_range() * COVER_CLOSE_EXIT_FRAC - 5.0)
+        now = time.monotonic()
+        bot._ai_state = AIState.COVER_HOLD
+        bot._cover_hold_until = now + COVER_HOLD_MAX_S
+        bot._tick_cover_hold(now)
+        assert bot._ai_state != AIState.COVER_HOLD
+
+    def test_rico_drive_aim_uses_cache_without_los(self, bot, monkeypatch):
+        """Ohne LoS dreht COVER_HOLD auf den gecachten Abprall-Azimut statt auf den Gegner."""
+        self._setup(bot, monkeypatch)
+        now = time.monotonic()
+        bot._rico_aim_cache = (now, 2, (1.234, False))
+        monkeypatch.setattr(bot, "_has_los_to_enemy", lambda pid: False)
+        assert bot._cover_hold_aim_az(2, (100.0, 0.0)) == pytest.approx(1.234)
+        # Mit LoS: direkt aufs Ziel (az = 0 bei Gegner in +x).
+        monkeypatch.setattr(bot, "_has_los_to_enemy", lambda pid: True)
+        assert bot._cover_hold_aim_az(2, (100.0, 0.0)) == pytest.approx(0.0)
+
+    def test_wide_sweep_param_passed_through(self, bot, monkeypatch):
+        """_find_ricochet_aim_angle reicht den breiteren Deckungs-Sweep an _compute_ricochet_aim durch."""
+        self._setup(bot, monkeypatch)
+        bot._rico_aim_cache = None
+        captured = {}
+        def _fake(pid, pp, amax=45):
+            captured["amax"] = amax
+            return None
+        monkeypatch.setattr(bot, "_compute_ricochet_aim", _fake)
+        bot._find_ricochet_aim_angle(2, None, RICO_AIM_MAX_COVER)
+        assert captured["amax"] == RICO_AIM_MAX_COVER
