@@ -1880,6 +1880,22 @@ entfällt der Grund weitgehend. Unverändert bleiben `IB_REACT_MULTIPLIER`/`CS_R
 `TACT_JUMP_REACTION_S`/`LANDING_DOUBLE_SHOT_DELAY` (modellieren Gegner- bzw. Menschlichkeits-Verhalten,
 nicht die eigene Chassis-Latenz).
 
+**P4-MOV-02b — Launch-Events bleiben bewusst instant.** `doMomentum` läuft im echten Client NUR
+am Boden; `doJump` übernimmt die alte Horizontal-Velocity unverändert und ruft KEIN `doMomentum`
+auf (verifiziert `LocalPlayer.cxx` 2.4). Ein Sprung-Absprung ist also kein Rampen-Pfad. Entsprechend
+setzen die drei Absprung-Stellen ihre Velocity weiterhin instant (kein `_ramp_linear_speed`):
+
+| Stelle | Verhalten | Warum korrekt |
+|---|---|---|
+| `_execute_jump` (`bot/ai/tactics.py`) | `vel = _tank_speed` in Blickrichtung, instant | Launch-Event; idealisierte Absprung-Geschwindigkeit, doJump rampt nicht |
+| `_initiate_nav_jump` (`bot/ai/navigation.py`) | `vel = needed_hspeed` instant | Launch-Event; needed_hspeed ist die geplante Absprung-Geschwindigkeit |
+| DODGE_JUMP-Setup (`bot/ai/combat.py`) | setzt gar kein `vel_x/vel_y`, nur `vel_z`/`ang_vel` | übernimmt die (gerampte) Bodengeschwindigkeit — exakt doJump-Semantik |
+
+Regressionsguards: `TestLaunchEventsIgnoreRamp` (`tests/test_dodge_and_jump.py`) sichert ab, dass
+diese Launches auch bei aktivem `-a`-Limit instant bleiben. Ebenfalls unverändert (selbstkonsistent,
+kein Ramp-Bezug): die Sprung-Vorberechnungen `_check_tactical_jump`/`_nav_jump_feasible` (Flugphase
+nutzt den beim Launch gesetzten Wert bzw. wird live bei Ankunft am Anlaufpunkt ausgewertet).
+
 **P4-FLG-04/05 — Best-Flags-Wissen: Wahrnehmungs-Gate.** Protokoll-seitig wäre der Bot
 allwissend: die `flag_id` ist über Drops stabil, `MsgFlagUpdate` liefert die exakte
 Bodenposition, und getragene Flaggen kommen mit echtem Kürzel durch (nur liegende sind

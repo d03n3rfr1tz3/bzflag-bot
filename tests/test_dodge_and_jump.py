@@ -1302,3 +1302,55 @@ class TestTactJumpRestrictionsTJ1:
             result = bot._check_tactical_jump(now)
         assert result is True
         assert bot._ai_state == AIState.JUMP_WINDUP
+
+
+class TestLaunchEventsIgnoreRamp:
+    """P4-MOV-02b: Sprung-Launches sind KEINE doMomentum-Pfade (der echte doJump übernimmt die
+    alte Horizontal-Velocity unverändert). Der Bot setzt die Absprung-Velocity daher bewusst
+    instant — auch bei aktivem Beschleunigungs-Limit. Diese Guards sichern die Entscheidung ab,
+    damit nicht versehentlich später eine Rampe in einen Launch eingebaut wird."""
+
+    def test_tactical_jump_launch_ignores_ramp(self, bot):
+        """_execute_jump setzt vel auf die volle _tank_speed, nicht auf einen einzelnen
+        Ramp-Schritt (20×50×0.02 = 20 wäre die Ein-Tick-Klemme bei -a 50)."""
+        import math
+        bot._linear_acceleration = 50.0   # Rampe aktiv — würde vel sonst auf 20 klemmen
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        bot.target_player = None
+        bot._escape_jump_ang_vel = None
+        bot._execute_jump()
+        assert math.hypot(bot.vel_x, bot.vel_y) == pytest.approx(bot._tank_speed)
+
+    def test_nav_jump_launch_ignores_ramp(self, bot):
+        """_initiate_nav_jump setzt vel auf die berechnete needed_hspeed instant — deutlich über
+        dem, was ein einzelner Ramp-Tick aus dem Stand (0) erlauben würde."""
+        import math
+        bot._linear_acceleration = 50.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        wp = [85.0, 0.0, 0.0]   # weit → needed_hspeed ~22.6, klar über der Ein-Tick-Ramp-Klemme
+        bot._initiate_nav_jump(wp)
+        speed = math.hypot(bot.vel_x, bot.vel_y)
+        # Ein-Tick-Ramp aus dem Stand bei -a 50 wäre 20×50×0.02 = 20; der Launch ist instant und
+        # setzt needed_hspeed (>20) sofort, statt über mehrere Ticks hochzurampen.
+        assert speed > 20.0
+
+    def test_dodge_jump_preserves_ground_velocity(self, bot):
+        """DODGE_JUMP setzt kein vel_x/vel_y → die (ggf. gerampte) Bodengeschwindigkeit bleibt
+        exakt erhalten (entspricht doJump: alte Horizontal-vel übernommen)."""
+        from bot.models import AIState
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.vel_x = 12.0; bot.vel_y = 0.0; bot.vel_z = 0.0   # fährt vorwärts am Boden
+        bot.alive = True
+        bot.human_count = 0
+        make_shot(bot, shooter_id=2, shot_id=1,
+                  pos=(5.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))   # zu nah → DODGE_JUMP
+        bot._last_threat_id = (2, 1)
+        bot._threat_detected_at = time.monotonic() - 1.0
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.DODGE_JUMP
+        assert bot.vel_x == pytest.approx(12.0)   # horizontal unverändert
+        assert bot.vel_y == pytest.approx(0.0)

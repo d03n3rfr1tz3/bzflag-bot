@@ -58,6 +58,9 @@ class TacticsMixin(BZBotBase):
             if self._debug_log_dodge:
                 logger.debug("[%s] Ausweichen: Frontal-Sprung ang_vel=%.2f az=%.1f°",
                              self.callsign, self._jump_ang_vel, math.degrees(self.azimuth))
+        # P4-MOV-02b: Launch-Event — Horizontalgeschwindigkeit bewusst instant (idealisiert)
+        # gesetzt, KEIN _ramp_linear_speed. Der echte doJump führt kein doMomentum aus (übernimmt
+        # die alte Horizontal-Velocity unverändert), also gibt es hier keine Rampe zu modellieren.
         self.vel_x = math.cos(self.azimuth) * self._tank_speed
         self.vel_y = math.sin(self.azimuth) * self._tank_speed
         self.vel_z = self._jump_launch_vz(self.vel_z)

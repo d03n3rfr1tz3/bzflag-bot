@@ -140,7 +140,10 @@ class CombatMixin(BZBotBase):
             # eingestuft wurde für 1 s ignorieren (verhindert sofortigen DODGE_JUMP).
             if self._evade_cleared_shots.get(threat_key, 0.0) > now:
                 return False
-            # Fix E3: DODGE_JUMP — defensiver Sprung, minimale Rotation
+            # Fix E3: DODGE_JUMP — defensiver Sprung, minimale Rotation.
+            # P4-MOV-02b: setzt bewusst KEIN vel_x/vel_y — die Horizontalgeschwindigkeit bleibt, was
+            # die Boden-Rampe hinterlassen hat (entspricht exakt doJump: alte vel übernommen, kein
+            # doMomentum). Damit ist der Dodge-Sprung ohne weitere Änderung bereits ramp-korrekt.
             self.vel_z = self._jump_launch_vz(self.vel_z)
             self._jumping = True
             jump_time = 2.0 * self._effective_jump_velocity() / max(abs(self._effective_gravity()), 0.001)

@@ -734,7 +734,9 @@ class NavigationMixin(BZBotBase):
             calc      = hdist_aim / max(t_desc, 0.01)
             if 1.0 < calc <= _ts:
                 needed_hspeed = calc
-        # Velocity in Blickrichtung (self.azimuth) — NAV_JUMP_ALIGN hat Ausrichtung sichergestellt
+        # Velocity in Blickrichtung (self.azimuth) — NAV_JUMP_ALIGN hat Ausrichtung sichergestellt.
+        # P4-MOV-02b: Launch-Event — needed_hspeed ist die idealisierte Absprung-Geschwindigkeit,
+        # bewusst instant (kein _ramp_linear_speed): doJump übernimmt die Horizontal-vel unverändert.
         self.vel_x       = math.cos(self.azimuth) * needed_hspeed
         self.vel_y       = math.sin(self.azimuth) * needed_hspeed
         self._jumping      = True
