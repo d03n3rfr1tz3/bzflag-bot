@@ -33,10 +33,6 @@ class BZBotBase:
     _active_gm: Any
     _agility_ad_vel: Any
     _ai_state: Any
-    _cover_cooldown_until: float
-    _cover_hold_until: float
-    _cover_peek_phase: int
-    _cover_peek_until: float
     _angular_acceleration: Any
     _angular_ad: Any
     _async_cancel: Any
@@ -51,6 +47,12 @@ class BZBotBase:
     _burrow_speed_ad: Any
     _combat_avoid: dict
     _connection_lost: bool
+    # P4-TAC-02: float-Zeitstempel bleiben `Any` (boxed) — float in @trait-Basis crasht mypyc
+    # (ValueError in emitfunc.get_attr_expr, s. DEVELOPER.md Sektion 12).
+    _cover_cooldown_until: Any
+    _cover_hold_until: Any
+    _cover_peek_phase: int
+    _cover_peek_until: Any
     _debug_log_dodge: bool
     _debug_log_flag: bool
     _debug_log_path: bool

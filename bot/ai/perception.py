@@ -19,7 +19,6 @@ from bot.constants import (
     PLAYER_LOS_TTL_S,
     TARGET_FOV,
     TANK_HALF_DIAG,
-    MUZZLE_HEIGHT,
     COVER_EDGE_PROBE_DIST,
 )
 from bot.util import _angle_diff
@@ -573,9 +572,9 @@ class PerceptionMixin(BZBotBase):
         if ep is None or info is None or not info.alive:
             result = False
         else:
-            oz = info.pos[2] + MUZZLE_HEIGHT
+            oz = info.pos[2] + self._muzzle_height
             result = self._cover_silhouette_blocked(
-                ep[0], ep[1], oz, self.pos_x, self.pos_y, self.pos_z + MUZZLE_HEIGHT)
+                ep[0], ep[1], oz, self.pos_x, self.pos_y, self.pos_z + self._muzzle_height)
         if memo is not None:
             memo[key] = result
         return result
@@ -608,11 +607,13 @@ class PerceptionMixin(BZBotBase):
                     direction = tan
                 probe_x = self.pos_x + math.cos(direction) * COVER_EDGE_PROBE_DIST
                 probe_y = self.pos_y + math.sin(direction) * COVER_EDGE_PROBE_DIST
-                oz = self.players[pid].pos[2] + MUZZLE_HEIGHT
-                # Exponiert am Probepunkt (mind. ein Rand frei) → Kante. Läge der Probepunkt selbst in
-                # einer Box, sind beide Ränder blockiert → 'keine Kante' (tief in Deckung), gewollt.
-                result = not self._cover_silhouette_blocked(
-                    ep[0], ep[1], oz, probe_x, probe_y, self.pos_z + MUZZLE_HEIGHT)
+                info = self.players.get(pid)   # Recv-Thread kann pid zwischenzeitlich entfernen
+                if info is not None:
+                    oz = info.pos[2] + self._muzzle_height
+                    # Exponiert am Probepunkt (mind. ein Rand frei) → Kante. Läge der Probepunkt selbst
+                    # in einer Box, sind beide Ränder blockiert → 'keine Kante' (tief in Deckung), gewollt.
+                    result = not self._cover_silhouette_blocked(
+                        ep[0], ep[1], oz, probe_x, probe_y, self.pos_z + self._muzzle_height)
         if memo is not None:
             memo[key] = result
         return result
