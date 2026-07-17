@@ -111,6 +111,12 @@ class TestSetVarPhysics:
         assert bot._tank_speed   == pytest.approx(30.0)
         assert bot._gravity      == pytest.approx(-15.0)
 
+    def test_momentum_accel_updated(self, bot):
+        # P4-MOV-02: Server kann _momentumLinAcc/_momentumAngAcc (M-Flaggen-Trägheit) setzen.
+        _fire_setvar(bot, {"_momentumLinAcc": "5.0", "_momentumAngAcc": "3.0"})
+        assert bot._momentum_lin_acc == pytest.approx(5.0)
+        assert bot._momentum_ang_acc == pytest.approx(3.0)
+
 
 # ---------------------------------------------------------------------------
 # P2-PRO-03: PS_FLAG_ACTIVE in MsgPlayerUpdate

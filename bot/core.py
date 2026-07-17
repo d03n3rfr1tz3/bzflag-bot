@@ -59,6 +59,8 @@ from bot.constants import (
     VELOCITY_AD,
     AGILITY_AD_VEL,
     LG_GRAVITY,
+    MOMENTUM_LIN_ACC_DEFAULT,
+    MOMENTUM_ANG_ACC_DEFAULT,
     BURROW_DEPTH,
     BURROW_SPEED_AD,
     BURROW_ANG_AD,
@@ -205,8 +207,12 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._tank_turn_rate = TANK_TURN_RATE
         self._jump_velocity  = JUMP_VELOCITY
         self._gravity        = GRAVITY
-        self._linear_acceleration  = 0.0   # aus MsgGameSettings; Nutzung in Phase 3
-        self._angular_acceleration = 0.0   # aus MsgGameSettings; Nutzung in Phase 3
+        self._linear_acceleration  = 0.0   # aus MsgGameSettings (-a); P4-MOV-02a
+        self._angular_acceleration = 0.0   # aus MsgGameSettings (-a); P4-MOV-02a
+        # M-Flagge (Momentum): ersetzen bei getragenem M die -a-Werte (P4-MOV-02, _accel_limits).
+        # Via MsgSetVar überschreibbar; sonst BZDB-Default 1.0/1.0.
+        self._momentum_lin_acc     = MOMENTUM_LIN_ACC_DEFAULT
+        self._momentum_ang_acc     = MOMENTUM_ANG_ACC_DEFAULT
         self._server_ricochet      = False  # aus MsgGameSettings gameOptions Bit 0x0020
         self._server_jumping       = False  # aus MsgGameSettings gameOptions Bit 0x0008 (JumpingGameStyle)
 

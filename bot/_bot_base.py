@@ -114,6 +114,8 @@ class BZBotBase:
     _max_bump_height: Any
     _max_shots: int
     _mgun_ad_life: Any
+    _momentum_lin_acc: Any
+    _momentum_ang_acc: Any
     _mgun_ad_rate: Any
     _mgun_ad_vel: Any
     _move_reverse: bool

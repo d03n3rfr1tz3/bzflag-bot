@@ -917,6 +917,8 @@ class HandlersMixin(BZBotBase):
         "_tankWidth":        ("_tank_width",         float, ">0",  "%.2f", None),
         "_tankHeight":       ("_tank_height",        float, ">0",  "%.2f", "_set_wall_height_from_tank"),
         "_maxBumpHeight":    ("_max_bump_height",    float, ">=0", "%.2f", None),
+        "_momentumLinAcc":   ("_momentum_lin_acc",   float, ">=0", "%.2f", None),
+        "_momentumAngAcc":   ("_momentum_ang_acc",   float, ">=0", "%.2f", None),
         "_wallHeight":       ("_wall_height",        float, ">0",  None,   None),
         "_muzzleHeight":     ("_muzzle_height",      float, ">=0", "%.2f", None),
         "_muzzleFront":      ("_muzzle_front",       float, ">=0", "%.2f", None),

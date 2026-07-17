@@ -6,7 +6,8 @@ Konstanten (aus bzbot.py):
   DODGE_REACT_DELAY   = 0.25s
   IB_REACT_MULTIPLIER = 1.5   → IB-Delay = 0.375s
   CS_REACT_MULTIPLIER = 3.0   → CS-Delay = 0.75s
-  M_REACT_MULTIPLIER  = 1.5   → M-Delay  = 0.375s
+  M_REACT_MULTIPLIER  = 1.1   (P4-MOV-02: von 1.5 gesenkt — Bot bewegt sich mit dem
+                              Trägheitsmodell selbst nicht mehr instant)
   JUMP_VELOCITY       = 19.0
   TANK_SPEED          = 25.0
 

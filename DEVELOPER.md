@@ -1854,6 +1854,32 @@ Regressionsrisiko auf Servern ohne `-a`. Bewusst NICHT in diesem Commit behandel
 States (Sprünge/Dodge/COVER_HOLD/LANDING_SHOT/NAV_TELE) nutzen weiterhin `_turn_toward` (nicht
 `_turn_toward_ramped`) und werden einzeln in P4-MOV-02b nachgezogen.
 
+**P4-MOV-02 — M-Flagge (Momentum) modelliert.** Die Beschleunigungsgrenzen liefert jetzt der
+zentrale Accessor `_accel_limits()` (`bot/ai/capabilities.py`): normal die `-a`-Server-Werte
+(`_linear_acceleration`/`_angular_acceleration`), bei getragenem M **ersetzen**
+`_momentumLinAcc`/`_momentumAngAcc` sie komplett (ternäre Auswahl in `LocalPlayer::doMomentum` —
+kein Max, keine Addition; verifiziert am Rohquelltext 2.4). Alle Rampen-Helper und `_momentum_ramp_time`
+lesen ausschließlich über `_accel_limits()`, damit M überall konsistent wirkt (auch in der
+Dodge-/Timeout-Vorberechnung, nicht nur im eigentlichen Ramp). BZDB-Defaults (`src/common/global.cxx`)
+`_momentumLinAcc`/`_momentumAngAcc` = **1.0/1.0** → linearer Clamp mit M = 20×1.0 = 20 u/s² (statt
+1000 bei `-a 50`), angular = 1.0 rad/s² (statt 38) → **~50× träger** als der Zielserver; via
+`MsgSetVar` überschreibbar (`_SETVAR_VARS`, Guard `>=0`, Defaults in `core._init_server_vars`).
+M bleibt **bad flag** und wird weiter nach `shakeTimeout` abgeworfen — die Modellierung macht M
+nicht behaltenswert, sondern dient (a) der Protokoll-Konformität während der erzwungenen Haltezeit
+(keine physikalisch unmöglichen PlayerUpdates mehr) und (b) korrekten Dodge-/Timing-Entscheidungen
+in dieser Zeit. `_momentumFriction` (BZDB-Default 0, gehört zur separaten `doFriction`) ist bewusst
+NICHT modelliert: der Bot hat kein Coasting-/Leerlauf-Konzept (jeder Tick gibt einen expliziten
+Ziel-Speed vor), das Ausrollen ohne Steuer-Input hat kein Äquivalent.
+
+**Reaktionszeit-Audit (P4-MOV-02).** Die einzige *bot-eigene* Motor-Reaktionsverzögerung ist
+`DODGE_REACT_DELAY` (0.2 s, Erkennung→Handlung auf Schüsse) — bereits menschlich-normal, unverändert.
+`M_REACT_MULTIPLIER` wurde **von 1.5 auf 1.1 gesenkt**: der Aufschlag gegen M-Schützen war ein
+Ausgleich dafür, dass der Bot sich früher instantan bewegte — mit dem eigenen Trägheitsmodell
+entfällt der Grund weitgehend. Unverändert bleiben `IB_REACT_MULTIPLIER`/`CS_REACT_MULTIPLIER`
+(Wahrnehmungs-/Sichtbarkeits-Modellierung schwer erkennbarer Schützen, P3-PER-06) sowie
+`TACT_JUMP_REACTION_S`/`LANDING_DOUBLE_SHOT_DELAY` (modellieren Gegner- bzw. Menschlichkeits-Verhalten,
+nicht die eigene Chassis-Latenz).
+
 **P4-FLG-04/05 — Best-Flags-Wissen: Wahrnehmungs-Gate.** Protokoll-seitig wäre der Bot
 allwissend: die `flag_id` ist über Drops stabil, `MsgFlagUpdate` liefert die exakte
 Bodenposition, und getragene Flaggen kommen mit echtem Kürzel durch (nur liegende sind

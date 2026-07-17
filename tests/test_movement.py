@@ -2725,3 +2725,59 @@ class TestNavigateWpMomentum:
             "erster Tick darf die volle Geschwindigkeit noch nicht erreichen"
         assert speeds[-1] == pytest.approx(bot._tank_speed, abs=1e-6), \
             "nach einigen Ticks ist die Zielgeschwindigkeit erreicht"
+
+
+# ── P4-MOV-02: M-Flagge (Momentum) modelliert ──────────────────────────────
+
+class TestAccelLimitsMFlag:
+    """_accel_limits() liefert bei getragenem M die _momentumLinAcc/_momentumAngAcc statt der
+    -a-Server-Werte (ternäre ERSETZUNG, verifiziert LocalPlayer::doMomentum — kein Max)."""
+
+    def test_m_flag_replaces_server_accel(self, bot):
+        bot._linear_acceleration = 50.0
+        bot._angular_acceleration = 38.0
+        bot._momentum_lin_acc = 1.0
+        bot._momentum_ang_acc = 1.0
+        bot.own_flag = "M"
+        assert bot._accel_limits() == (1.0, 1.0)   # M ersetzt, NICHT (50, 38)
+
+    def test_no_flag_uses_server_accel(self, bot):
+        bot._linear_acceleration = 50.0
+        bot._angular_acceleration = 38.0
+        bot._momentum_lin_acc = 1.0
+        bot._momentum_ang_acc = 1.0
+        bot.own_flag = ""
+        assert bot._accel_limits() == (50.0, 38.0)
+
+    def test_m_flag_activates_limits_without_dash_a(self, bot):
+        """Ohne Server-Option -a (beide Accel 0.0) aktiviert allein die M-Flagge die Klemme."""
+        bot._linear_acceleration = 0.0
+        bot._angular_acceleration = 0.0
+        bot._momentum_lin_acc = 1.0
+        bot._momentum_ang_acc = 1.0
+        bot.own_flag = "M"
+        assert bot._has_linear_momentum_limit() is True
+        assert bot._has_angular_momentum_limit() is True
+        # ohne M (und ohne -a) bleiben die Gates aus
+        bot.own_flag = ""
+        assert bot._has_linear_momentum_limit() is False
+        assert bot._has_angular_momentum_limit() is False
+
+
+class TestMomentumRampSeverity:
+    """M ist mit BZDB-Default 1.0 deutlich träger als der Zielserver -a 50: der lineare Clamp
+    beträgt 20×1.0=20 u/s² (statt 20×50=1000) → ~50× kleinere Rampe pro Tick."""
+
+    def test_m_flag_ramp_is_much_slower_than_server(self, bot):
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0
+        bot.vel_y = 0.0
+        # M ohne -a: max_delta = 20 * 1.0 * 0.02 = 0.4 u/s pro Tick
+        bot._linear_acceleration = 0.0
+        bot._momentum_lin_acc = 1.0
+        bot.own_flag = "M"
+        assert bot._ramp_linear_speed(25.0, 0.02) == pytest.approx(0.4)
+        # -a 50 ohne M: max_delta = 20 * 50 * 0.02 = 20.0 u/s pro Tick → 50× größer
+        bot.own_flag = ""
+        bot._linear_acceleration = 50.0
+        assert bot._ramp_linear_speed(25.0, 0.02) == pytest.approx(20.0)
