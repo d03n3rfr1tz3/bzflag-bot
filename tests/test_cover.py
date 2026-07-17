@@ -353,3 +353,34 @@ class TestCoverHoldTac05:
         monkeypatch.setattr(bot, "_compute_ricochet_aim", _fake)
         bot._find_ricochet_aim_angle(2, None, RICO_AIM_MAX_COVER)
         assert captured["amax"] == RICO_AIM_MAX_COVER
+
+
+class TestCoverHoldPeekMomentum:
+    """P4-MOV-02b: Der COVER_HOLD-Peek (Vor-/Zurückpendel) ist Bodenfahrt → die Geschwindigkeit
+    rampt bei aktivem -a hoch, statt instant auf 0.6×tank_speed zu springen (ohne -a unverändert)."""
+
+    def _setup_peek(self, bot):
+        now = time.monotonic()
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.target_player = None          # kein Gegner → reine Peek-Bewegung, keine Aim-Drehung
+        bot._jumping = False
+        bot._ai_state = AIState.COVER_HOLD
+        bot._cover_peek_phase = 1          # Phase 1: vorfahren (0.6×tank_speed)
+        bot._cover_peek_until = now + 10.0
+        return now
+
+    def test_peek_ramps_with_dash_a(self, bot):
+        now = self._setup_peek(bot)
+        bot._linear_acceleration = 10.0    # max_delta = 20×10×0.02 = 4.0 u/s pro Tick
+        bot._dispatch_movement(0.02, now, ai_tick=False)
+        peek_speed = bot._tank_speed * 0.6
+        assert bot.vel_x == pytest.approx(4.0, abs=1e-6)   # gerampt, noch nicht bei 0.6×speed
+        assert bot.vel_x < peek_speed
+
+    def test_peek_instant_without_dash_a(self, bot):
+        now = self._setup_peek(bot)
+        bot._linear_acceleration = 0.0
+        bot._dispatch_movement(0.02, now, ai_tick=False)
+        assert bot.vel_x == pytest.approx(bot._tank_speed * 0.6, abs=1e-6)

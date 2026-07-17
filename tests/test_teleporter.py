@@ -859,3 +859,51 @@ def test_nav_tele_timeout_aborts_and_cooldowns(bot):
     assert bot._ai_state == AIState.SEEKING
     assert bot._nav_path == []
     assert bot._nav_tele_cooldowns.get((5, 0), 0) > now
+
+
+# ── P4-MOV-02b: NAV_TELE-Endanflug rampt, Timeout wird nachgeführt ────────────
+
+def test_nav_tele_approach_ramps_with_dash_a(bot):
+    """Der NAV_TELE-Endanflug ist Bodenfahrt → die Geschwindigkeit rampt bei aktivem -a hoch,
+    statt instant auf _effective_tank_speed zu springen."""
+    from bot.models import AIState
+    now = 100.0
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+    bot.azimuth = 0.0
+    bot._ai_state = AIState.NAV_TELE
+    bot._nav_tele_center = (50.0, 0.0)          # geradeaus → diff≈0 → volle Fahrt angezielt
+    bot._nav_tele_return_state = AIState.SEEKING
+    bot._nav_tele_start = now
+    bot._teleporting_until = 0.0
+    bot._linear_acceleration = 10.0             # max_delta = 20×10×0.02 = 4.0 u/s pro Tick
+    bot._tick_nav_tele(0.02, now)
+    speed = math.hypot(bot.vel_x, bot.vel_y)
+    assert speed == pytest.approx(4.0, abs=1e-6)
+    assert speed < bot._effective_tank_speed()
+
+
+def test_nav_tele_timeout_extended_by_ramp(bot):
+    """Bei träger Beschleunigung (niedriges -a) verlängert _momentum_ramp_time den NAV_TELE-Timeout:
+    kurz nach dem Basis-Timeout bricht der Bot NOCH NICHT ab (ohne -a bräche er ab)."""
+    from bot.constants import NAV_TELE_TIMEOUT
+    from bot.models import AIState
+
+    def _drive_once(lin_acc):
+        now = 100.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._ai_state = AIState.NAV_TELE
+        bot._nav_tele_center = (50.0, 0.0)
+        bot._nav_tele_return_state = AIState.SEEKING
+        bot._teleporting_until = 0.0
+        bot._linear_acceleration = lin_acc
+        bot._nav_tele_start = now - (NAV_TELE_TIMEOUT + 0.5)   # 0.5 s über dem Basis-Timeout
+        bot._tick_nav_tele(0.02, now)
+        return bot._ai_state
+
+    # -a 1 → ramp_time(1.0) = 25/(20·1) = 1.25 s → effektiver Timeout 3.25 s > 2.5 s → weiterfahren
+    assert _drive_once(1.0) == AIState.NAV_TELE
+    # ohne -a → Basis-Timeout 2.0 s < 2.5 s → Abbruch auf den Boden-State
+    assert _drive_once(0.0) == AIState.SEEKING
