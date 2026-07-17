@@ -500,14 +500,17 @@ class StateMachineMixin(BZBotBase):
                 if self.own_flag == "OO" and self._is_inside_obstacle(include_oo=True):
                     speed = 0.0
                 else:
-                    self.ang_vel = 0.0
+                    self._ramp_azimuth_step(0.0, dt, self._tank_turn_rate)
                     speed = -self._tank_speed * 0.5
             elif self._dodge_forward:
-                self.ang_vel = 0.0
+                self._ramp_azimuth_step(0.0, dt, self._tank_turn_rate)
                 speed = self._tank_speed
             else:
-                self._turn_toward(self._dodge_dir, dt)
+                self._turn_toward_ramped(self._dodge_dir, dt)
                 speed = self._tank_speed
+            # P4-MOV-02b: EVADING/JUMP_WINDUP-Dodge ist Bodenfahrt → lineare Beschleunigungsklemme
+            # (ohne -a wie bisher instant). time_to_dodge führt die Anfahr-Rampe im Trigger nach.
+            speed = self._ramp_linear_speed(speed, dt)
             self.vel_x = math.cos(self.azimuth) * speed
             self.vel_y = math.sin(self.azimuth) * speed
             self._apply_bounds(dt, half)

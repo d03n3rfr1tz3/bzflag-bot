@@ -1304,6 +1304,84 @@ class TestTactJumpRestrictionsTJ1:
         assert bot._ai_state == AIState.JUMP_WINDUP
 
 
+class TestDodgeMomentumRamp:
+    """P4-MOV-02b: EVADING-Dodge ist Bodenfahrt → die Geschwindigkeit rampt bei aktivem -a hoch,
+    statt instant auf _tank_speed zu springen (ohne -a unverändert)."""
+
+    def _setup_active_evading(self, bot, now):
+        # Bot weicht vorwärts aus (azimuth = π/2), Schuss noch im Anflug → EVADING bleibt aktiv.
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = math.pi / 2
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.human_count = 1
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_dir = math.pi / 2
+        bot._dodge_until = now + 0.5
+        from bot.models import AIState
+        bot._ai_state = AIState.EVADING
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(50.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))
+
+    def test_forward_dodge_ramps_with_dash_a(self, bot):
+        now = time.monotonic()
+        bot._linear_acceleration = 50.0   # max_delta = 20×50×0.02 = 20 u/s pro Tick
+        self._setup_active_evading(bot, now)
+        bot._update_movement(0.02, now, ai_tick=False)
+        v1 = math.hypot(bot.vel_x, bot.vel_y)
+        assert v1 == pytest.approx(20.0, abs=1e-6)      # gerampt, noch nicht bei 25
+        assert v1 < bot._tank_speed
+
+    def test_forward_dodge_instant_without_dash_a(self, bot):
+        now = time.monotonic()
+        bot._linear_acceleration = 0.0   # keine Klemme → instant wie bisher
+        self._setup_active_evading(bot, now)
+        bot._update_movement(0.02, now, ai_tick=False)
+        v1 = math.hypot(bot.vel_x, bot.vel_y)
+        assert v1 == pytest.approx(bot._tank_speed, abs=1e-6)
+
+
+class TestDodgeMarginMomentumRamp:
+    """P4-MOV-02b: time_to_dodge berücksichtigt die Anfahr-Rampe (_momentum_ramp_time). Bei
+    trägen Beschleunigungen (niedriges -a oder M) kippt ein grenzwertiger Fall korrekt von EVADING
+    auf DODGE_JUMP, statt einen zu langsamen Dodge zu starten. Bei -a 50 bleibt die Entscheidung."""
+
+    def _fire_40u_shot(self, bot):
+        # 40u/−100 → t_impact ≈ 0.4s; Bot senkrecht (turn_rad=0) → time_to_dodge ≈ 0.29s.
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = math.pi / 2
+        bot.alive = True
+        bot.human_count = 0
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(40.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))
+        bot._last_threat_id = (2, 1)
+        bot._threat_detected_at = time.monotonic() - 1.0
+
+    def test_low_accel_flips_to_dodge_jump(self, bot):
+        from bot.models import AIState
+        bot._linear_acceleration = 1.0   # ramp ≈ 1.25s → time_to_dodge ≫ t_impact
+        self._fire_40u_shot(bot)
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.DODGE_JUMP
+
+    def test_m_flag_flips_to_dodge_jump(self, bot):
+        """M (Momentum-Default 1.0) ist ~50× träger als -a 50 → wie niedriges -a → DODGE_JUMP.
+        (Dieser Fall war für Commit 2 vorgesehen, braucht aber die time_to_dodge-Nachführung.)"""
+        from bot.models import AIState
+        bot._linear_acceleration = 0.0
+        bot.own_flag = "M"
+        bot._momentum_lin_acc = 1.0
+        self._fire_40u_shot(bot)
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.DODGE_JUMP
+
+    def test_target_server_still_evades(self, bot):
+        from bot.models import AIState
+        bot._linear_acceleration = 50.0   # ramp ≈ 0.05s → Entscheidung unverändert
+        self._fire_40u_shot(bot)
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.EVADING
+
+
 class TestLaunchEventsIgnoreRamp:
     """P4-MOV-02b: Sprung-Launches sind KEINE doMomentum-Pfade (der echte doJump übernimmt die
     alte Horizontal-Velocity unverändert). Der Bot setzt die Absprung-Velocity daher bewusst

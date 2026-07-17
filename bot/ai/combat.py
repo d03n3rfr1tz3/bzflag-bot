@@ -125,9 +125,14 @@ class CombatMixin(BZBotBase):
         dodge_dir, orig_diff = self._compute_dodge_dir(threat, now)
         turn_rad = abs(_angle_diff(dodge_dir, self.azimuth))
         # Wie viel Zeit braucht der Bot zum Ausweichen:
-        # Fahrweg (einen Trefferradius) + 30% der Drehzeit bis zur Ausweichrichtung
+        # Fahrweg (einen Trefferradius) + 30% der Drehzeit bis zur Ausweichrichtung.
+        # P4-MOV-02b: + Anfahr-Rampe (_momentum_ramp_time), da der Dodge jetzt beschleunigt statt
+        # instant loszufahren. Ohne -a/M = 0 (unverändert); bei -a 50 ~0,05 s, bei trägen Configs/M
+        # groß genug, um rechtzeitig auf DODGE_JUMP umzuschwenken statt einen zu langsamen Dodge zu
+        # starten (_accel_limits berücksichtigt dabei M).
         time_to_dodge = (HIT_RADIUS * 1.3 / max(self._tank_speed, 1e-6)
-                         + turn_rad / max(self._tank_turn_rate, 1e-6) * 0.3)
+                         + turn_rad / max(self._tank_turn_rate, 1e-6) * 0.3
+                         + self._momentum_ramp_time(1.0))
         # Wenn Ausweichen noch möglich (10% Puffer gegen knappe Situationen)
         if time_to_dodge * 1.1 <= time_to_impact:
             self._setup_dodge(threat, now, time_to_impact, dodge_dir, orig_diff)
