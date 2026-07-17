@@ -2576,3 +2576,152 @@ class TestThinWallLos:
         assert not bot._segment_clear(bx, by, eye, ex, ey, eye)         # 135°-Wand blockt
         assert not bot._has_los_to_enemy(2)
         assert bot._segment_clear(bx, by, 31.0, ex, ey, 31.0)          # über der Wand frei
+
+
+# ── P4-MOV-02a: Trägheitsmodell (Beschleunigungsrampen) ─────────────────────
+
+class TestMomentumRampDisabled:
+    """Ohne aktives -a-Limit (_linear/_angular_acceleration == 0.0, der Default aus core.py) sind
+    alle Rampen No-Ops — exaktes Alt-Verhalten (instantane Geschwindigkeit)."""
+
+    def test_ramp_linear_speed_is_noop(self, bot):
+        bot._linear_acceleration = 0.0
+        bot._angular_acceleration = 0.0
+        assert bot._ramp_linear_speed(25.0, 0.02) == 25.0
+
+    def test_momentum_ramp_time_is_zero(self, bot):
+        bot._linear_acceleration = 0.0
+        bot._angular_acceleration = 0.0
+        assert bot._momentum_ramp_time(1.0) == 0.0
+        assert bot._momentum_ramp_time(2.0) == 0.0
+
+    def test_has_momentum_limit_flags_false(self, bot):
+        bot._linear_acceleration = 0.0
+        bot._angular_acceleration = 0.0
+        assert bot._has_linear_momentum_limit() is False
+        assert bot._has_angular_momentum_limit() is False
+
+
+class TestMomentumRampLinear:
+    """Mit aktivem linearem Limit (_linear_acceleration=50.0) klemmt _ramp_linear_speed die
+    Änderung der Vorwärtsgeschwindigkeit auf 20×linearAcceleration·dt gegen den Vorframe-Wert
+    (verifiziert LocalPlayer::doMomentum)."""
+
+    def test_ramp_toward_clamps_up(self, bot):
+        bot._linear_acceleration = 50.0
+        assert bot._ramp_toward(0.0, 25.0, 20.0) == 20.0
+
+    def test_ramp_toward_reaches_target_within_delta(self, bot):
+        bot._linear_acceleration = 50.0
+        assert bot._ramp_toward(0.0, 25.0, 30.0) == 25.0
+
+    def test_ramp_toward_clamps_down_negative_target(self, bot):
+        bot._linear_acceleration = 50.0
+        assert bot._ramp_toward(0.0, -25.0, 20.0) == -20.0
+
+    def test_ramp_linear_speed_two_ticks_to_reach_target(self, bot):
+        """max_delta = 20*50*0.02 = 20.0 pro Tick. Tick 1 (prev=0): Ergebnis 20.0, noch nicht 25.
+        Tick 2 (vel_x auf 20 nachgeführt, azimuth=0 → prev=20): Ergebnis 25.0 (erreicht) — der
+        erwartete ~1-3-Tick-Effekt bei -a 50."""
+        bot._linear_acceleration = 50.0
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0
+        bot.vel_y = 0.0
+        result1 = bot._ramp_linear_speed(25.0, 0.02)
+        assert result1 == pytest.approx(20.0)
+        bot.vel_x = 20.0   # Aufrufer würde vel_x/vel_y aus dem Ergebnis nachführen (azimuth=0)
+        result2 = bot._ramp_linear_speed(25.0, 0.02)
+        assert result2 == pytest.approx(25.0)
+
+    def test_ramp_linear_speed_clamps_while_braking(self, bot):
+        """Vorzeichenwechsel/Bremsen: von +25 auf Ziel -12.5 (Rückwärts) — max_delta=20.0 klemmt
+        auf prev-20 = 5.0 (Zielgeschwindigkeit -12.5 noch nicht erreicht)."""
+        bot._linear_acceleration = 50.0
+        bot.azimuth = 0.0
+        bot.vel_x = 25.0
+        bot.vel_y = 0.0
+        result = bot._ramp_linear_speed(-12.5, 0.02)
+        assert result == pytest.approx(5.0)
+
+
+class TestMomentumRampAngular:
+    """Mit aktivem angularem Limit (_angular_acceleration=38.0) klemmt _ramp_azimuth_step die
+    Änderung von ang_vel auf 1×angularAcceleration·dt gegen die Vorframe-ang_vel — KEIN Faktor 20
+    wie beim linearen Clamp (verifiziert LocalPlayer::doMomentum)."""
+
+    def test_ramp_azimuth_step_clamps_ang_vel(self, bot):
+        bot._angular_acceleration = 38.0
+        bot.azimuth = 0.0
+        bot.ang_vel = 0.0
+        max_delta = 38.0 * 0.02  # 0.76
+        bot._ramp_azimuth_step(math.pi / 2, 0.02, bot._tank_turn_rate)
+        assert abs(bot.ang_vel) <= max_delta + 1e-9
+        assert bot.ang_vel > 0.0, "positive Richtung (diff war positiv)"
+        # azimuth hat sich nur um ang_vel*dt gedreht (kleiner Wert), nicht sofort um
+        # max_turn_rate*dt wie im ungeklemmten Alt-Verhalten.
+        assert bot.azimuth == pytest.approx(bot.ang_vel * 0.02)
+        assert bot.azimuth < bot._tank_turn_rate * 0.02
+
+    def test_ramp_azimuth_step_no_limit_uses_full_turn_rate(self, bot):
+        """Kontrolle ohne Limit: keine Klemme, ang_vel springt sofort auf den vollen (gecappten)
+        Drehrate-Zielwert — Alt-Verhalten unverändert."""
+        bot._angular_acceleration = 0.0
+        bot.azimuth = 0.0
+        bot.ang_vel = 0.0
+        bot._ramp_azimuth_step(math.pi / 2, 0.02, bot._tank_turn_rate)
+        expected = math.copysign(min(abs((math.pi / 2) / 0.02), bot._tank_turn_rate), math.pi / 2)
+        assert bot.ang_vel == pytest.approx(expected)
+        assert bot.ang_vel == pytest.approx(bot._tank_turn_rate)
+
+
+class TestMomentumWpTimeoutBonus:
+    """_momentum_ramp_time(cycles) liefert die Zeit für `cycles` volle Anfahr-Rampen (0→eff.
+    Speed) bei aktivem linearem Limit — Grundlage der WP-Timeout-/Stuck-Nachführung (P4-MOV-02a).
+    Erwartungswerte werden aus bot._tank_speed abgeleitet (conftest-Default TANK_SPEED=25.0),
+    nicht hart kodiert."""
+
+    def test_low_acceleration_yields_larger_bonus(self, bot):
+        from bot.constants import MOMENTUM_TIMEOUT_CYCLES, MOMENTUM_LIN_ACC_FACTOR
+        bot._linear_acceleration = 1.0
+        expected = MOMENTUM_TIMEOUT_CYCLES * bot._tank_speed / (MOMENTUM_LIN_ACC_FACTOR * 1.0)
+        assert bot._momentum_ramp_time(MOMENTUM_TIMEOUT_CYCLES) == pytest.approx(expected)
+
+    def test_high_acceleration_yields_small_bonus(self, bot):
+        from bot.constants import MOMENTUM_TIMEOUT_CYCLES, MOMENTUM_LIN_ACC_FACTOR
+        bot._linear_acceleration = 50.0
+        expected = MOMENTUM_TIMEOUT_CYCLES * bot._tank_speed / (MOMENTUM_LIN_ACC_FACTOR * 50.0)
+        result = bot._momentum_ramp_time(MOMENTUM_TIMEOUT_CYCLES)
+        assert result == pytest.approx(expected)
+        assert result < 0.2
+
+
+class TestNavigateWpMomentum:
+    """End-to-End (P4-MOV-02a): _navigate_wp nähert sich der Zielgeschwindigkeit über mehrere
+    Ticks an (Rampe), statt sie sofort zu erreichen, wenn ein lineares Limit aktiv ist."""
+
+    def test_speed_increases_monotonically_not_instantly(self, bot):
+        _build_nav(bot, [])
+        bot._linear_acceleration = 50.0
+        bot._angular_acceleration = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        # Ziel weit entfernt entlang der Azimut-Achse → diff=0 (kein Dreh-Einfluss auf die
+        # Geschwindigkeitskurve), so isoliert der Test die lineare Rampe.
+        bot.target_pos = (1000.0, 0.0)
+        bot._nav_path = [(1000.0, 0.0, 0.0)]
+        bot._wp_start_time = None
+        bot._wp_fail_count = 0
+
+        dt = 0.02
+        speeds = []
+        for _ in range(5):
+            bot._navigate_wp(dt, bot.world_half)
+            speeds.append(math.hypot(bot.vel_x, bot.vel_y))
+
+        for i in range(1, len(speeds)):
+            assert speeds[i] >= speeds[i - 1] - 1e-9, "Geschwindigkeit muss monoton steigen"
+        assert speeds[0] < bot._tank_speed - 1e-6, \
+            "erster Tick darf die volle Geschwindigkeit noch nicht erreichen"
+        assert speeds[-1] == pytest.approx(bot._tank_speed, abs=1e-6), \
+            "nach einigen Ticks ist die Zielgeschwindigkeit erreicht"

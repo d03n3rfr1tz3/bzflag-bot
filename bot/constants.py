@@ -123,6 +123,10 @@ TELEPORT_TIME: Final = 1.0    # BZDB_TELEPORTTIME-Default: PS_TELEPORTING-Dauer 
 WP_TIMEOUT_BASE: Final = 3.0             # Basiszeit für Drehen/Anfahren/Sicherheit
 WP_TIMEOUT_SCALE: Final = 0.3             # s pro Einheit Distanz (≈3.3 u/s effektiv)
 WP_TIMEOUT_JUMP_BONUS: Final = 2.0             # Aufschlag für NAV_JUMP-Anfahrt-WPs
+
+# ── Trägheitsmodell (P4-MOV-02a/b): Beschleunigungsgrenzen (LocalPlayer::doMomentum) ──
+MOMENTUM_LIN_ACC_FACTOR: Final = 20.0    # linearer Clamp = 20×linearAcceleration (verifiziert LocalPlayer.cxx)
+MOMENTUM_TIMEOUT_CYCLES: Final = 2.0     # WP-Timeout-/Stuck-Zuschlag: Anfahren + eine Kehre als Marge
 NAV_JUMP_Z_TOL: Final = 2.5             # max. Z-Abweichung bei NAV_JUMP-Landung
 NAV_TELE_TIMEOUT: Final = 2.0             # max. Sekunden Direktanflug in die Tor-Mitte vor Abbruch
 NAV_TELE_ENGAGE_DIST: Final = NAV_CELL_SIZE * 5.0  # nur engagen, wenn Tor-Mitte so nah ist (~20u)
@@ -324,6 +328,7 @@ __all__ = [
     'SHOOT_INTERVAL_RANDOM_MAX', 'MIN_BURST_INTERVAL', 'GM_BURST_INTERVAL',
     'LANDING_DOUBLE_SHOT_DELAY', 'RESPAWN_DELAY', 'EXPLODE_TIME', 'ROUND_END_LINGER',
     'TELEPORT_TIME', 'WP_TIMEOUT_BASE', 'WP_TIMEOUT_SCALE', 'WP_TIMEOUT_JUMP_BONUS',
+    'MOMENTUM_LIN_ACC_FACTOR', 'MOMENTUM_TIMEOUT_CYCLES',
     'NAV_JUMP_Z_TOL', 'NAV_TELE_TIMEOUT', 'NAV_TELE_ENGAGE_DIST', 'NAV_TELE_COOLDOWN',
     'NAV_TELE_OVERSHOOT', 'NAV_ASYNC_TRIGGER_MS', 'NAV_ASYNC_MAX_EXPANSIONS',
     'NAV_ASYNC_MAX_MS', 'NAV_ASYNC_RESYNC_TOL', 'NAV_WALL_PROBE_DIST', 'NAV_WALL_STEEP_DEG',

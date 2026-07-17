@@ -193,6 +193,10 @@ class TestShakeTimeout:
     def test_shake_timeout_15s(self, bot):
         bot._on_game_settings(self._build_settings(150))  # 15.0s
         assert bot._drop_bad_flag_delay == pytest.approx(15.0)
+        # P4-MOV-02a: dieselbe Payload kodiert linearAcceleration=1.0 (Offset 14) und
+        # angularAcceleration=0.5 (Offset 18) — beide müssen übernommen werden.
+        assert bot._linear_acceleration == pytest.approx(1.0)
+        assert bot._angular_acceleration == pytest.approx(0.5)
 
     def test_shake_timeout_zero_keeps_default(self, bot):
         old = bot._drop_bad_flag_delay

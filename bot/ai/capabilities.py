@@ -13,7 +13,9 @@ from bot.constants import (
     OPTIMAL_RANGE_SW,
     OPTIMAL_RANGE_GM,
     JUMP_COOLDOWN,
+    MOMENTUM_LIN_ACC_FACTOR,
 )
+from bot.util import _wrap
 
 
 from mypy_extensions import trait
@@ -225,6 +227,67 @@ class CapabilityMixin(BZBotBase):
         if not self._can_turn_left():     ang_vel = min(0.0, ang_vel)
         if not self._can_turn_right():    ang_vel = max(0.0, ang_vel)
         return speed, ang_vel
+
+    # ── Trägheitsmodell (P4-MOV-02a): Beschleunigungsgrenzen (LocalPlayer::doMomentum) ──
+    # Der echte Client klemmt pro Physik-Tick die ÄNDERUNG der Vorwärtsgeschwindigkeit auf
+    # 20×linearAcceleration und der Drehrate auf angularAcceleration — jeweils gegen den
+    # Vorframe-Wert (lastSpeed/oldAngVel), nur am Boden (Airborne-States rufen _navigate_wp/
+    # _execute_combat_move ohnehin nie auf). Server-Option -a setzt linear/angularAcceleration;
+    # ohne -a sind beide 0.0 → Rampe aus → exaktes Alt-Verhalten (instantane Geschwindigkeit).
+
+    def _has_linear_momentum_limit(self) -> bool:
+        """True wenn ein lineares Beschleunigungs-Limit aktiv ist (Server-Option -a)."""
+        return self._linear_acceleration > 0.0
+
+    def _has_angular_momentum_limit(self) -> bool:
+        """True wenn ein angulares Beschleunigungs-Limit aktiv ist (Server-Option -a)."""
+        return self._angular_acceleration > 0.0
+
+    def _ramp_toward(self, current: float, target: float, max_delta: float) -> float:
+        """Klemmt target auf [current-max_delta, current+max_delta]."""
+        if target > current + max_delta:
+            return current + max_delta
+        if target < current - max_delta:
+            return current - max_delta
+        return target
+
+    def _ramp_linear_speed(self, target_speed: float, dt: float) -> float:
+        """Klemmt die Änderung der SKALAREN Vorwärtsgeschwindigkeit auf 20×linearAcceleration·dt.
+
+        Der echte doMomentum klemmt die skalare Geschwindigkeit gegen den Vorframe-Wert lastSpeed;
+        die Fahrtrichtung folgt dem Heading instantan (kein Vektor-Momentum). prev = (vel_x,vel_y)
+        projiziert auf den bereits gedrehten Azimuth rekonstruiert genau diesen signierten Skalar
+        aus dem Vektor-Zustand (ohne ein Extra-Attribut) — da die Drehung pro 60-Hz-Tick winzig ist
+        (<1°), gilt prev ≈ lastSpeed. Ohne -a (kein lineares Limit) unverändert."""
+        if not self._has_linear_momentum_limit():
+            return target_speed
+        prev = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+        max_delta = MOMENTUM_LIN_ACC_FACTOR * self._linear_acceleration * dt
+        return self._ramp_toward(prev, target_speed, max_delta)
+
+    def _ramp_azimuth_step(self, diff: float, dt: float, max_turn_rate: float) -> None:
+        """Setzt ang_vel Richtung Ziel (geklemmt auf max_turn_rate) und dreht azimuth entsprechend.
+
+        Ersetzt das bisherige Dreh-Snippet aus _navigate_wp/_turn_toward 1:1 und ergänzt die
+        angulare Beschleunigungsklemme (angularAcceleration·dt gegen die Vorframe-ang_vel, Faktor 1
+        — nicht 20× wie linear). Der Überschwing-Cap min(…, |diff|) verhindert Drehen über das Ziel
+        hinaus (erhält das Alt-Verhalten). Ohne -a identisch zum bisherigen Verhalten."""
+        target = math.copysign(min(abs(diff / max(dt, 1e-6)), max_turn_rate), diff)
+        if self._has_angular_momentum_limit():
+            target = self._ramp_toward(self.ang_vel, target,
+                                       self._angular_acceleration * dt)
+        self.ang_vel = target
+        self.azimuth = _wrap(
+            self.azimuth + math.copysign(min(abs(target) * dt, abs(diff)), diff))
+
+    def _momentum_ramp_time(self, cycles: float) -> float:
+        """Zeit für `cycles` volle Anfahr-Rampen (0→eff. Speed) bei aktivem linearem Limit, sonst
+        0.0. cycles=1.0: einmaliges Anfahren (Dodge/NAV_TELE); MOMENTUM_TIMEOUT_CYCLES: WP-Timeout/
+        Stuck (Anfahren + Kehre). Für die nachgeführte Stuck-/Timeout-Erkennung (P4-MOV-02a)."""
+        if not self._has_linear_momentum_limit():
+            return 0.0
+        return cycles * self._effective_tank_speed() / max(
+            MOMENTUM_LIN_ACC_FACTOR * self._linear_acceleration, 1e-6)
 
     def _has_presence(self) -> bool:
         """True, wenn mindestens ein MENSCH (Mitspieler ODER Zuschauer) anwesend ist.

@@ -1833,6 +1833,27 @@ modelliert) fast gratis (`_momentumLinAcc/_momentumAngAcc`, gleiche Klemme). Hin
 `_inertiaLinear/_inertiaAngular` sind 3.0-BZDB-Variablen und existieren in 2.4 nicht —
 2.4 nutzt ausschließlich die `-a`-Option.
 
+**P4-MOV-02a — umgesetzt.** Beschleunigungsrampe im normalen Bodenfahren: `_ramp_linear_speed`
+und `_ramp_azimuth_step` (`bot/ai/capabilities.py`), angewandt in `_navigate_wp`
+(`bot/ai/navigation.py`), `_execute_combat_move` und `_stall_maneuver_tick`
+(`bot/ai/combat.py`) — jeweils als Drop-in-Ersatz des bisherigen Dreh-/Speed-Snippets, ohne
+dessen Verhalten ohne `-a` zu ändern. Verifizierte Formeln (`LocalPlayer::doMomentum`): linear
+klemmt die Änderung der Vorwärtsgeschwindigkeit auf **20×linearAcceleration·dt** gegen den
+Vorframe-Speed (Projektion von `vel_x/vel_y` auf den bereits gedrehten Azimuth); angular klemmt
+die Änderung von `ang_vel` auf **1×angularAcceleration·dt** gegen die Vorframe-`ang_vel` (KEIN
+Faktor 20 wie linear) — beides nur am Boden (Airborne-States rufen diese Pfade ohnehin nie auf).
+Getrennte Gates `_has_linear_momentum_limit`/`_has_angular_momentum_limit`
+(`self._linear_acceleration > 0.0` bzw. `self._angular_acceleration > 0.0`) schalten die
+jeweilige Rampe unabhängig scharf. Timeout-/Stuck-Nachführung über `_momentum_ramp_time(cycles)`
+(0.0 ohne Limit, sonst `cycles * effektive Speed / (20×linearAcceleration)`): der WP-Timeout
+bekommt an vier Stellen in `navigation.py` einen Zuschlag von `MOMENTUM_TIMEOUT_CYCLES` Rampen
+(Anfahren + eine Kehre als Marge), das Stuck-Fenster in `states.py` (`_tick_seeking`) einen
+Zuschlag von einer Rampe. Ohne Server-Option `-a` sind `_linear_acceleration`/
+`_angular_acceleration` beide 0.0 → alle Rampen sind No-Ops → exaktes Alt-Verhalten, kein
+Regressionsrisiko auf Servern ohne `-a`. Bewusst NICHT in diesem Commit behandelt: committed
+States (Sprünge/Dodge/COVER_HOLD/LANDING_SHOT/NAV_TELE) nutzen weiterhin `_turn_toward` (nicht
+`_turn_toward_ramped`) und werden einzeln in P4-MOV-02b nachgezogen.
+
 **P4-FLG-04/05 — Best-Flags-Wissen: Wahrnehmungs-Gate.** Protokoll-seitig wäre der Bot
 allwissend: die `flag_id` ist über Drops stabil, `MsgFlagUpdate` liefert die exakte
 Bodenposition, und getragene Flaggen kommen mit echtem Kürzel durch (nur liegende sind

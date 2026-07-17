@@ -81,6 +81,15 @@ class StateMachineMixin(BZBotBase):
             self.azimuth + math.copysign(min(abs(diff), self._tank_turn_rate * dt), diff))
         return diff
 
+    def _turn_toward_ramped(self, target_az: float, dt: float) -> float:
+        """Wie _turn_toward, aber mit angularer Beschleunigungsklemme (P4-MOV-02a, via
+        _ramp_azimuth_step). Gleicher Vertrag: gibt den Winkelabstand VOR der Drehung zurück.
+        Ohne aktives -a-Limit identisch zu _turn_toward. Für 02a-Bodenfahren (Combat); die
+        committed States nutzen weiter _turn_toward, bis sie in 02b einzeln umgestellt werden."""
+        diff = _angle_diff(target_az, self.azimuth)
+        self._ramp_azimuth_step(diff, dt, self._tank_turn_rate)
+        return diff
+
     def _dispatch_movement(self, dt: float, now: float, ai_tick: bool = True) -> None:
         """Physik (60 Hz) + KI (10 Hz): State-Machine-Dispatch."""
         half = self.world_half
@@ -662,7 +671,9 @@ class StateMachineMixin(BZBotBase):
             return
         if self._handle_threat(now):
             return
-        if now - self._last_pos_check_time >= STUCK_WINDOW:
+        # P4-MOV-02a: Stuck-Fenster um die Anfahr-Rampe nachführen (ohne -a: +0 → wie bisher),
+        # damit die träge Anfahrt auf sehr niedrigen -a-Configs nicht als "festgefahren" gilt.
+        if now - self._last_pos_check_time >= STUCK_WINDOW + self._momentum_ramp_time(1.0):
             d = math.hypot(self.pos_x - self._last_pos_check[0],
                            self.pos_y - self._last_pos_check[1])
             if d < STUCK_MIN_DIST and self.target_pos is not None:
