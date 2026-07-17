@@ -1896,6 +1896,25 @@ diese Launches auch bei aktivem `-a`-Limit instant bleiben. Ebenfalls unverände
 kein Ramp-Bezug): die Sprung-Vorberechnungen `_check_tactical_jump`/`_nav_jump_feasible` (Flugphase
 nutzt den beim Launch gesetzten Wert bzw. wird live bei Ankunft am Anlaufpunkt ausgewertet).
 
+**P4-MOV-02b — Gesamtübersicht committed States.** Jeder Zustand, der `vel/ang_vel` am Boden setzt,
+wurde einzeln bewertet. Am Boden fahrende States rampen jetzt (via `_ramp_linear_speed`/
+`_ramp_azimuth_step`/`_turn_toward_ramped`); Launch-Events und Vorberechnungen bleiben bewusst
+instant bzw. selbstkonsistent. Ohne `-a`/M ist alles No-Op.
+
+| State/Stelle | Entscheidung | Begründung |
+|---|---|---|
+| `_navigate_wp`, `_execute_combat_move`, `_stall_maneuver_tick` (02a) | rampen | normales Bodenfahren |
+| EVADING/JUMP_WINDUP-Dodge (`_tick_committed`) | rampen | Bodenfahrt; kein doMomentum-Sonderfall für Dodges |
+| COVER_HOLD-Peek | rampen | Bodenpendel (Peek-Timing bleibt Wanduhr) |
+| `_tick_nav_tele` Endanflug | rampen | Bodenfahrt; Timeout um `_momentum_ramp_time(1.0)` nachgeführt |
+| LANDING_SHOT | rampen | Ramp gegen 0 (sanftes Abbremsen) + gerampte Drehung |
+| `_execute_jump`, `_initiate_nav_jump`, DODGE_JUMP-Setup | instant | Launch-Events (doJump rampt nicht; DODGE_JUMP übernimmt die gerampte Boden-vel) |
+| `time_to_dodge` | nachführen | `+ _momentum_ramp_time(1.0)` → rechtzeitig DODGE_JUMP statt zu langsamer Dodge |
+| `_check_tactical_jump`/`_nav_jump_feasible`, LANDING_SHOT `t_rem/tof` | unverändert | selbstkonsistent bzw. live pro Tick ausgewertet |
+
+Nicht Teil von 02b: die Sprungkanten-Planung im Navigationsgraphen an die effektive Beschleunigung
+angleichen (→ **P4-MOV-02c**, offen).
+
 **P4-FLG-04/05 — Best-Flags-Wissen: Wahrnehmungs-Gate.** Protokoll-seitig wäre der Bot
 allwissend: die `flag_id` ist über Drops stabil, `MsgFlagUpdate` liefert die exakte
 Bodenposition, und getragene Flaggen kommen mit echtem Kürzel durch (nur liegende sind

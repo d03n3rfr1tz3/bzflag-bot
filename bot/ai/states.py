@@ -143,15 +143,17 @@ class StateMachineMixin(BZBotBase):
             if ai_tick:
                 self._tick_landing_shot(now)
             if not self._jumping:
-                # Position halten; aktiv auf Landepunkt drehen
-                self.vel_x = 0.0
-                self.vel_y = 0.0
+                # Position halten; aktiv auf Landepunkt drehen. P4-MOV-02b: Ramp gegen 0 (sanftes
+                # Abbremsen aus der Landegeschwindigkeit) statt Hart-Stopp; ohne -a/M instant.
+                speed = self._ramp_linear_speed(0.0, dt)
+                self.vel_x = math.cos(self.azimuth) * speed
+                self.vel_y = math.sin(self.azimuth) * speed
                 if self._landing_aim_pos is not None:
                     ax, ay = self._landing_aim_pos
-                    self._turn_toward(
+                    self._turn_toward_ramped(
                         math.atan2(ay - self.pos_y, ax - self.pos_x), dt)
                 else:
-                    self.ang_vel = 0.0
+                    self._ramp_azimuth_step(0.0, dt, self._tank_turn_rate)
             return
 
         if self._ai_state == AIState.COVER_HOLD:
