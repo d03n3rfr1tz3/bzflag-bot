@@ -450,6 +450,21 @@ def test_wall_slide_stops_at_step_above_bump(bot):
     assert bot.vel_x < 25.0, "0.5 > 0.33 → geblockt/gebremst"
 
 
+def test_solid_boxes_cached(bot):
+    """_solid_boxes() liefert bei wiederholtem Aufruf dasselbe Objekt (gecacht); nach
+    manuellem Invalidieren (_solid_boxes_cache = None) wird neu gebaut (neues Objekt,
+    gleicher Inhalt)."""
+    obs = _make_box_obstacle(cx=0.0, cy=0.0, bottom_z=0.0, half_w=5.0, half_d=5.0, height=2.0)
+    _give_bot_world_with_box(bot, obs)
+    result1 = bot._solid_boxes()
+    result2 = bot._solid_boxes()
+    assert result1 is result2
+    bot._solid_boxes_cache = None
+    result3 = bot._solid_boxes()
+    assert result3 is not result1
+    assert result3 == result1
+
+
 def test_is_airborne_set_from_ps_falling(bot):
     """PS_FALLING-Bit setzt is_airborne=True im PlayerInfo."""
     from conftest import make_player

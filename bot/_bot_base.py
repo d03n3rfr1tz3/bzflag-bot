@@ -174,6 +174,7 @@ class BZBotBase:
     _shots_lock: Any
     _shots_remaining: int
     _slot_reload_at: Any
+    _solid_boxes_cache: Any
     _spawn_sent_at: Any
     _sr_radius_mult: Any
     _stall_anchor: Any
@@ -443,6 +444,8 @@ class BZBotBase:
     def _should_reverse_to_wp(self) -> bool:
         raise NotImplementedError
     def _should_update_player(self, info, px: float, py: float, pz: float, now: float) -> bool:
+        raise NotImplementedError
+    def _solid_boxes(self):
         raise NotImplementedError
     def _spawn(self) -> None:
         raise NotImplementedError

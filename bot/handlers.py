@@ -108,6 +108,7 @@ class HandlersMixin(BZBotBase):
         # P3-NAV-02: solide Teleporter-Teile (Posts + Crossbar) für die reaktive Kollision cachen.
         self._tele_solid_boxes = [box for t in world_map.teleporters
                                   for box in teleporter_solid_boxes(t)]
+        self._solid_boxes_cache = None   # Invalidieren: _solid_boxes() baut lazy neu (neue Welt)
         if self._debug_log_tele:
             teles = world_map.teleporters
             logger.debug("[%s] Tele: %d Teleporter, %d Links geparst",

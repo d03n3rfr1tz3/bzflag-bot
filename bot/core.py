@@ -296,6 +296,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._shot_grid = None   # Optional[ObstacleGrid] — Broad-Phase für simulate_shot_path (P1)
         self._link_map = {}      # face-Index → Ziel-face-Index (Teleporter), aus _world_map.links
         self._tele_solid_boxes = []  # Teleporter-Posts+Crossbar als BoxObstacle (Kollision)
+        self._solid_boxes_cache = None  # Cache für _solid_boxes() — None = noch nicht gebaut
         self._teleporting_until = 0.0      # P3-NAV-02: PS_TELEPORTING-Ende + Re-Trigger-Sperre
         # Event-getriebener Anwesenheits-Cache (statt 60-Hz-Scan in _has_presence):
         # nur bei Add/Remove/Callsign-Liste neu berechnet, siehe _recompute_presence.

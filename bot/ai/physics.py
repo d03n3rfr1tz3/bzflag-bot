@@ -136,10 +136,9 @@ class PhysicsMixin(BZBotBase):
         if world_map is None:
             return False
         px, py, pz = self.pos_x, self.pos_y, self.pos_z
-        _solid = world_map.boxes + self._tele_solid_boxes
         _nav = self._nav_graph
         _grid = _nav._solid_grid if _nav is not None else None
-        cands = _grid.query_point(px, py) if _grid is not None else _solid
+        cands = _grid.query_point(px, py) if _grid is not None else self._solid_boxes()
         tank_top = pz + self._tank_height
         half_len = self._tank_length / 2.0
         half_w = self._effective_half_width()
@@ -175,6 +174,17 @@ class PhysicsMixin(BZBotBase):
                 return True
         return False
 
+    def _solid_boxes(self):
+        """Solide Kollisions-Boxen (world_map.boxes + Teleporter-Posts/Crossbar), einmalig pro
+        Weltladen gecacht — die Karte ist nach dem Download unveränderlich. Lazy, damit auch
+        Tests funktionieren, die _world_map/_tele_solid_boxes direkt setzen."""
+        cache = self._solid_boxes_cache
+        if cache is None:
+            wm = self._world_map
+            cache = (wm.boxes if wm is not None else []) + self._tele_solid_boxes
+            self._solid_boxes_cache = cache
+        return cache
+
     def _apply_obstacle_bounds(self, dt: float) -> None:
         """Wall-Sliding + Decken-Kollision: korrigiert self.vel_*/pos_* bei Gebäude-Kollision (60 Hz)."""
         if self._can_drive_through_obstacles():
@@ -187,15 +197,15 @@ class PhysicsMixin(BZBotBase):
         vx, vy = self.vel_x, self.vel_y
         # P3-NAV-02: Teleporter-Posts + Crossbar als solide Boxen mitprüfen (Decken-Kollision von
         # unten gegen den Crossbar, Wall-Slide an den Posts). Das Querungsfeld bleibt frei.
-        _solid = world_map.boxes + self._tele_solid_boxes
         # Broad-Phase: bei vorhandenem NavGraph nur die Boxen der Bot-Zelle statt linear über alle.
         # nav._obs = non-drive_through world_map.boxes + dieselben Teleporter-Solidboxen → deckungs-
-        # gleicher Kandidatensatz wie _solid nach dem drive_through-Skip. Ohne nav: linearer Fallback.
+        # gleicher Kandidatensatz wie _solid_boxes() nach dem drive_through-Skip. Ohne nav: linearer
+        # Fallback (nur dann wird _solid_boxes() überhaupt ausgewertet).
         _nav = self._nav_graph
         _grid = _nav._solid_grid if _nav is not None else None
         # ── Decken-Kollision: Bot-Kopf stößt von unten an Plattform-Boden ──────
         bot_top = pz + self._tank_height
-        ceil_cands = _grid.query_point(px, py) if _grid is not None else _solid
+        ceil_cands = _grid.query_point(px, py) if _grid is not None else self._solid_boxes()
         for obs in ceil_cands:
             if obs.drive_through:
                 continue
@@ -218,7 +228,7 @@ class PhysicsMixin(BZBotBase):
         # innerhalb der Schleife (vx/vy werden geklemmt), deshalb query_segment über die (sub-zellige)
         # Anfangsstrecke — deckt alle geprüften Zwischenpunkte ab, jede Box genau einmal.
         slide_cands = (_grid.query_segment(px, py, px + vx * dt, py + vy * dt)
-                       if _grid is not None else _solid)
+                       if _grid is not None else self._solid_boxes())
         for obs in slide_cands:
             if obs.drive_through:
                 continue
