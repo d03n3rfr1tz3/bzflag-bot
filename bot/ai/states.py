@@ -18,6 +18,7 @@ from bot.constants import (
     M_REACT_MULTIPLIER,
     CS_REACT_MULTIPLIER,
     COVER_PEEK_BACK_S,
+    TANK_LENGTH,
 )
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
@@ -240,14 +241,19 @@ class StateMachineMixin(BZBotBase):
 
         Mit WG (_wings_air_control_active(), P4-MOV-03a): Bewegung ist strikt an ±Blickrichtung
         gekoppelt (_wings_air_steer) statt entkoppelt zu drehen (_jump_ang_vel wird dann NIE
-        angewandt). Zielwahl-Priorität: expliziter Steuerziel-Azimuth (_wings_steer_az — aus
+        angewandt). Zielwahl-Priorität: WG-TactJump-Finte (_wg_feint_target, P4-MOV-03b —
+        _wg_feint_tick) > expliziter Steuerziel-Azimuth (_wings_steer_az — aus
         Escape-/DODGE_JUMP-Drehwünschen, s. tactics.py/combat.py) > Gegner-Verfolgung
         (target_player + _has_presence, volle Speed) > Heading halten (aktueller signierter
-        Horizontal-Speed, Projektion von vel auf azimuth)."""
+        Horizontal-Speed, Projektion von vel auf azimuth). Die Finte kann pro Tick abbrechen
+        (Gegner weg/tot, Rest-Sinkzeit zu knapp, Blick-Check negativ) — dann übernimmt im
+        SELBEN Tick die nächste Priorität (_wg_feint_tick gibt False zurück)."""
         self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
         if self._wings_air_control_active():
-            if self._wings_steer_az is not None:
+            if self._wg_feint_target is not None and self._wg_feint_tick(dt):
+                pass
+            elif self._wings_steer_az is not None:
                 speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
                 self._wings_air_steer(dt, self._wings_steer_az, speed)
             else:
@@ -284,6 +290,8 @@ class StateMachineMixin(BZBotBase):
             self._jumping = False
             self._wings_jumps_used = 0
             self._wings_steer_az = None
+            self._wg_feint_target = None   # P4-MOV-03b: Finte endet spätestens bei der Landung
+            self._wg_feint_phase = 0
             self._last_jump_at = now
             self.ang_vel = 0.0
             if self.target_player is not None and self._has_presence():
@@ -292,6 +300,76 @@ class StateMachineMixin(BZBotBase):
                 self._transition_to(AIState.SEEKING)
             else:
                 self._transition_to(AIState.IDLE)
+
+    def _wg_feint_tick(self, dt: float) -> bool:
+        """Ein Steuer-Tick der WG-TactJump-Finte (P4-MOV-03b) — höchste Priorität im WG-Zweig
+        von _tick_jumping, solange _wg_feint_target gesetzt ist (gesetzt vom Frontal-Zweig von
+        _execute_jump, s. tactics.py).
+
+        Phase 0 (vorwärts, _wg_feint_phase == 0): fliegt mit voller _effective_tank_speed()
+        Richtung Gegner, bis er horizontal an ihm vorbei ist — Kriterium: Projektion von
+        (bot_pos − enemy_pos) auf die aktuelle Flugrichtung (Einheitsvektor aus vel_x/vel_y,
+        bei Speed≈0 ersatzweise azimuth) ≥ TANK_LENGTH. Am Umschaltpunkt wird die Blickrichtung
+        des Gegners GENAU EINMAL geprüft (keine Flatter-Entscheidung pro Tick):
+          - Gegner hat sich zum Bot gedreht (< 45° Abweichung) → Finte bestätigt:
+            _wg_feint_phase = 1, ab jetzt Phase 1 (rückwärts) bis zur Landung.
+          - Gegner hat sich NICHT gedreht → keine Finte: _wg_feint_target wird gelöscht und
+            _wings_steer_az auf die aktuelle Blickrichtung fixiert (Heading halten statt
+            Gegner-Verfolgung — sonst würde Priorität (2) in _tick_jumping die Flugbahn zurück
+            zum Gegner krümmen), der Bot landet klassisch vorwärts hinter dem Gegner.
+
+        Phase 1 (rückwärts, _wg_feint_phase == 1): _wings_air_steer mit Ziel-Azimuth Richtung
+        Gegner und halber Rückwärts-Speed (Azimuth bleibt auf dem Gegner — Feuerfenster bei der
+        Landung), kein erneuter Blick-Check.
+
+        Fallback (in JEDER Phase): Gegner tot/verschwunden ODER Rest-Sinkzeit zu knapp
+        (sinkend UND < 2u über dem Boden) → Finte abbrechen (_wg_feint_target = None).
+
+        Rückgabe: True, wenn dieser Tick von der Finte gesteuert wurde (vel_x/vel_y/azimuth
+        bereits gesetzt); False, wenn sie abgebrochen wurde — der Aufrufer (_tick_jumping)
+        fällt dann im SELBEN Tick auf die nächste Priorität zurück."""
+        info = self.players.get(self._wg_feint_target)
+        if info is None or not info.alive:
+            self._wg_feint_target = None
+            self._wg_feint_phase = 0
+            return False
+        if self.vel_z < 0.0 and self.pos_z - self._get_floor_z() < 2.0:
+            self._wg_feint_target = None
+            self._wg_feint_phase = 0
+            return False
+
+        ex, ey = info.pos[0], info.pos[1]
+        bx, by = self.pos_x - ex, self.pos_y - ey             # bot − Gegner
+        az_to_enemy = math.atan2(-by, -bx)                    # Steuerziel: Blick zum Gegner
+
+        if self._wg_feint_phase == 1:
+            # Phase 1 (rückwärts): Umschaltpunkt bereits entschieden, kein erneuter Blick-Check.
+            self._wings_air_steer(dt, az_to_enemy, -0.5 * self._effective_tank_speed())
+            return True
+
+        # Phase 0 (vorwärts): Flugrichtung als Einheitsvektor (bei ~Stillstand: Azimuth-Ausweiche)
+        speed_now = math.hypot(self.vel_x, self.vel_y)
+        if speed_now > 1e-3:
+            fdir_x, fdir_y = self.vel_x / speed_now, self.vel_y / speed_now
+        else:
+            fdir_x, fdir_y = math.cos(self.azimuth), math.sin(self.azimuth)
+        proj = bx * fdir_x + by * fdir_y
+        if proj < TANK_LENGTH:
+            self._wings_air_steer(dt, az_to_enemy, self._effective_tank_speed())
+            return True
+
+        # Umschaltpunkt erreicht: Gegner-Blickrichtung genau einmal prüfen.
+        az_enemy_to_bot = math.atan2(by, bx)                  # Blick des Gegners zum Bot hin
+        hat_gedreht = abs(_angle_diff(info.azimuth, az_enemy_to_bot)) < math.radians(45)
+        if hat_gedreht:
+            self._wg_feint_phase = 1
+            self._wings_air_steer(dt, az_to_enemy, -0.5 * self._effective_tank_speed())
+            return True
+        # Gegner NICHT gedreht: keine Finte — Heading halten statt Gegner-Verfolgung.
+        self._wg_feint_target = None
+        self._wg_feint_phase = 0
+        self._wings_steer_az = self.azimuth
+        return False
 
     def _tick_explosion(self, dt: float) -> None:
         """Integriert den Explosions-Bogen des Wracks (tot, PS_EXPLODING) — spiegelt explodeTank:
@@ -351,6 +429,8 @@ class StateMachineMixin(BZBotBase):
             self._jumping = False
             self._wings_jumps_used = 0
             self._wings_steer_az = None
+            self._wg_feint_target = None   # P4-MOV-03b: Finte endet spätestens bei der Landung
+            self._wg_feint_phase = 0
             self._last_jump_at = now
             self.ang_vel = 0.0
             ret = self._nav_jump_return_state
@@ -493,6 +573,8 @@ class StateMachineMixin(BZBotBase):
             self._jumping = False
             self._wings_jumps_used = 0
             self._wings_steer_az = None
+            self._wg_feint_target = None   # P4-MOV-03b: Finte endet spätestens bei der Landung
+            self._wg_feint_phase = 0
             self._last_jump_at = now
             self._z_attack_mode = False
             self.ang_vel = 0.0
@@ -530,6 +612,8 @@ class StateMachineMixin(BZBotBase):
             self._jumping = False
             self._wings_jumps_used = 0
             self._wings_steer_az = None
+            self._wg_feint_target = None   # P4-MOV-03b: Finte endet spätestens bei der Landung
+            self._wg_feint_phase = 0
             # _last_jump_at nicht setzen — kein echter Sprung, kein Cooldown
             self.ang_vel = 0.0
             self._transition_to(self._pre_fall_state)

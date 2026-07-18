@@ -211,6 +211,8 @@ class BZBotBase:
     _unreach_until: Any
     _velocity_ad: Any
     _wall_height: Any
+    _wg_feint_phase: int
+    _wg_feint_target: Any
     _wide_angle_ang: Any
     _wings_gravity: Any
     _wings_jump_count: int

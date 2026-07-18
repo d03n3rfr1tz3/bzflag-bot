@@ -275,6 +275,10 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._wings_jump_velocity = None
         self._wings_slide_time = 0.0    # via MsgSetVar _wingsSlideTime (>0 → Slide-Downgrade)
         self._wings_steer_az = None     # WG-Luftsteuerung: explizites Steuerziel (P4-MOV-03a)
+        # WG-TactJump-Finte (P4-MOV-03b): Gegner-ID der laufenden Finte (None = keine aktive
+        # Finte) + Flugphase (0 = Vorwärtsflug/Blick-Check offen, 1 = Rückwärtsflug/bestätigt).
+        self._wg_feint_target = None
+        self._wg_feint_phase = 0
         self._dropped_neutrals = collections.deque(maxlen=5)
 
         # Schuss-Typ-Multiplikatoren (via MsgSetVar)

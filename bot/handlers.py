@@ -325,6 +325,8 @@ class HandlersMixin(BZBotBase):
         self._jumping             = False
         self._jump_ang_vel        = 0.0
         self._wings_steer_az      = None
+        self._wg_feint_target     = None   # P4-MOV-03b: Finte darf über Respawn nicht überleben
+        self._wg_feint_phase      = 0
         self._last_threat_id      = None
         self._evade_cleared_shots = {}
         self._threat_detected_at  = 0.0
@@ -375,6 +377,8 @@ class HandlersMixin(BZBotBase):
                 self._jumping             = False
                 self._jump_ang_vel        = 0.0
                 self._wings_steer_az      = None
+                self._wg_feint_target     = None   # P4-MOV-03b: Finte darf Tod nicht überleben
+                self._wg_feint_phase      = 0
                 self._last_threat_id      = None
                 self._evade_cleared_shots = {}
                 self._threat_detected_at  = 0.0

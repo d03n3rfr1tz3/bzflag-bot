@@ -1761,3 +1761,390 @@ class TestWingsAirControl:
         assert ok is True
         assert bot._wings_steer_az is not None
         assert bot._jump_ang_vel == pytest.approx(0.0)
+
+
+# ── P4-MOV-03b: WG-TactJump-Finte (Commit C2) ───────────────────────────────
+
+class TestWingsFeint:
+    """Der klassische TactJump (feste Lande-Drehung) ist mit WG-Luftsteuerung physikalisch
+    unmöglich (Bewegung strikt an ±Blickrichtung gekoppelt, P4-MOV-03a). Ersatz: die
+    Übersprung-Finte (_wg_feint_target/_wg_feint_phase, _wg_feint_tick in states.py) —
+    höchste Priorität im WG-Zweig von _tick_jumping."""
+
+    # ── _execute_jump: Finte nur WG-aktiv + Frontal-Zweig ───────────────────
+
+    def test_execute_jump_frontal_wg_sets_feint_target(self, bot):
+        bot.own_flag = "WG"
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        info = make_player(bot, 99, pos=(30.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        bot._escape_jump_ang_vel = None
+        bot._wg_feint_target = None
+        bot._wg_feint_phase = 1   # Deko: muss von _execute_jump auf 0 zurückgesetzt werden
+        bot._execute_jump()
+        assert bot._wg_feint_target == 99
+        assert bot._wg_feint_phase == 0
+
+    def test_execute_jump_escape_wg_no_feint_target(self, bot):
+        """Escape-Zweig (_escape_jump_ang_vel gesetzt) setzt KEINE Finte, auch nicht mit WG."""
+        bot.own_flag = "WG"
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        info = make_player(bot, 99, pos=(30.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        bot._escape_jump_ang_vel = bot._tank_turn_rate
+        bot._wg_feint_target = None
+        bot._execute_jump()
+        assert bot._wg_feint_target is None
+
+    def test_execute_jump_frontal_without_wg_no_feint_target(self, bot):
+        """Gegenprobe ohne WG: _wg_feint_target bleibt unangetastet (byte-identisches Verhalten)."""
+        bot.own_flag = ""
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        info = make_player(bot, 99, pos=(30.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        bot._escape_jump_ang_vel = None
+        bot._wg_feint_target = None
+        bot._execute_jump()
+        assert bot._wg_feint_target is None
+
+    def test_execute_jump_frontal_wg_without_target_player_no_feint(self, bot):
+        """Kein target_player → keine Finte, kein Crash."""
+        bot.own_flag = "WG"
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        bot.target_player = None
+        bot._escape_jump_ang_vel = None
+        bot._wg_feint_target = None
+        bot._execute_jump()
+        assert bot._wg_feint_target is None
+
+    # ── Umschaltpunkt-Entscheidung: Gegner gedreht → Finte, sonst klassisch ─
+
+    def test_feint_switch_confirms_when_enemy_faces_bot(self, bot):
+        """Am Umschaltpunkt (Projektion ≥ TANK_LENGTH) blickt der Gegner zum Bot →
+        Finte bestätigt: Phase wechselt auf 1 (rückwärts), projizierte Geschwindigkeit < 0."""
+        bot.own_flag = "WG"
+        bot.pos_x = 26.0; bot.pos_y = 0.0; bot.pos_z = 30.0   # 6u (TANK_LENGTH) am Gegner vorbei
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        info.azimuth = 0.0   # Blick Richtung +x = zum Bot (bei x=26) → "hat gedreht"
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 0
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        assert bot._wg_feint_target == 99
+        assert bot._wg_feint_phase == 1
+        speed_proj = bot.vel_x * math.cos(bot.azimuth) + bot.vel_y * math.sin(bot.azimuth)
+        assert speed_proj < 0.0
+
+    def test_feint_switch_aborts_when_enemy_not_facing(self, bot):
+        """Gegner blickt am Umschaltpunkt WEG vom Bot → keine Finte: Ziel gelöscht, Heading
+        wird über _wings_steer_az fixiert (kein Rückkrümmen zum Gegner), Bot fliegt im selben
+        Tick unverändert vorwärts weiter (keine Rückwärts-Klemme)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 26.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        info.azimuth = math.pi   # Blick weg vom Bot → "nicht gedreht"
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 0
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+        assert bot._wings_steer_az == pytest.approx(0.0)
+        speed_proj = bot.vel_x * math.cos(bot.azimuth) + bot.vel_y * math.sin(bot.azimuth)
+        assert speed_proj > 0.0   # weiter vorwärts, keine Rückwärts-Klemme
+        assert bot.azimuth == pytest.approx(0.0)   # Flugrichtung unverändert
+
+        # Folge-Tick: Heading bleibt fix (kein Zurückkrümmen zum jetzt hinter dem Bot liegenden
+        # Gegner — Zielwahl (2) würde sonst wieder Richtung Gegner steuern).
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.02)
+        assert bot.azimuth == pytest.approx(0.0)
+        assert bot.vel_x > 0.0
+
+    # ── Kein Phasen-Flattern: Blick-Check passiert genau einmal ─────────────
+
+    def test_feint_no_phase_flutter_after_switch(self, bot):
+        """Nach dem Umschalten (Phase 1) ändert sich die Gegner-Blickrichtung so, dass ein
+        erneuter Check 'nicht gedreht' ergäbe — die Entscheidung bleibt trotzdem bestehen
+        (kein erneuter Blick-Check pro Tick)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 26.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = -12.5; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = math.pi
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        info.azimuth = math.pi   # würde bei Neubewertung "nicht gedreht" (weg vom Bot) ergeben
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 1   # Umschaltpunkt bereits entschieden (Rückwärts-Phase)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        assert bot._wg_feint_target == 99
+        assert bot._wg_feint_phase == 1
+        speed_proj = bot.vel_x * math.cos(bot.azimuth) + bot.vel_y * math.sin(bot.azimuth)
+        assert speed_proj < 0.0
+
+    # ── Fallback: Gegner verschwindet mid-flight ────────────────────────────
+
+    def test_feint_aborts_when_enemy_removed_mid_flight(self, bot):
+        """Gegner wird während des Vorwärtsflugs aus players entfernt → Finte bricht ab
+        (kein Crash), normale Kette übernimmt im selben Tick."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 0
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)   # normaler Vorwärts-Tick, Finte noch aktiv
+            assert bot._wg_feint_target == 99
+            del bot.players[99]
+            bot._tick_jumping(0.02, now=1000.02)   # Gegner weg → Finte bricht ab, kein Crash
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+
+    def test_feint_aborts_when_enemy_never_existed(self, bot):
+        """_wg_feint_target zeigt auf keine bekannte Spieler-ID → sofortiger Abbruch, kein Crash."""
+        bot.own_flag = "WG"
+        bot.pos_x = 10.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot.target_player = None
+        bot._wg_feint_target = 99   # nie in bot.players registriert
+        bot._wg_feint_phase = 0
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+
+    # ── Voller Ablauf: Finte bestätigt → Landung mit Gegner im Visier ───────
+
+    def test_feint_confirmed_lands_aiming_at_enemy(self, bot):
+        """Gegner verfolgt den Bot durchgehend (garantiert 'hat gedreht' am Umschaltpunkt) →
+        Finte bestätigt, Rückwärtsflug bis zur Landung. Selbst-konsistent geprüft: der finale
+        Azimuth zeigt auf die (stationäre) Gegnerposition (±5°) — unabhängig vom genauen
+        Rückflug-Pfad."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 100.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(20.0, 2.0, 0.0))   # leichter Seitenversatz (reale Geometrie)
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 0
+        dt = 0.02
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1e6), \
+             patch.object(bot, "_is_landed", return_value=False):
+            for i in range(600):
+                # Gegner "verfolgt" den Bot live → der EINMALIGE Blick-Check am Umschaltpunkt
+                # ergibt deterministisch "hat gedreht", unabhängig vom genauen Umschalt-Tick.
+                dxb = bot.pos_x - info.pos[0]
+                dyb = bot.pos_y - info.pos[1]
+                info.azimuth = math.atan2(dyb, dxb)
+                bot._tick_jumping(dt, now=1000.0 + i * dt)
+                if bot._wg_feint_phase == 1:
+                    break
+            assert bot._wg_feint_phase == 1, "Umschaltpunkt nicht erreicht — Testaufbau prüfen"
+            for _ in range(800):
+                bot._tick_jumping(dt, now=2000.0)
+        assert bot._wg_feint_target == 99   # Finte lief bis hierhin ungebrochen durch
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1e6), \
+             patch.object(bot, "_is_landed", return_value=True):
+            bot._tick_jumping(dt, now=3000.0)
+        assert bot._jumping is False
+        assert bot._wg_feint_target is None   # bei Landung zurückgesetzt
+        expected_az = math.atan2(info.pos[1] - bot.pos_y, info.pos[0] - bot.pos_x)
+        assert abs(_angle_diff(bot.azimuth, expected_az)) < math.radians(5)
+
+    def test_feint_not_confirmed_lands_forward_past_enemy(self, bot):
+        """Gegner dreht sich NICHT (Blick bleibt weg vom Bot) → keine Finte: Bot fliegt
+        vorwärts weiter (Projektion wächst monoton), Azimuth bleibt bei der fixierten
+        Flugrichtung (kein Rückkrümmen zum Gegner) bis zur Landung."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 100.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        info.azimuth = math.pi   # blickt konstant weg vom Bot → nie "gedreht"
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 0
+        dt = 0.02
+        last_proj = -1e9
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1e6), \
+             patch.object(bot, "_is_landed", return_value=False):
+            for i in range(80):
+                bot._tick_jumping(dt, now=1000.0 + i * dt)
+                proj = bot.pos_x - info.pos[0]
+                assert proj >= last_proj - 1e-6   # Projektion wächst monoton (kein Rückflug)
+                last_proj = proj
+        # Finte ist beim Umschaltpunkt bereits abgebrochen (keine Rückwärtsphase erreicht)
+        assert bot._wg_feint_target is None
+        assert bot.vel_x > 0.0
+        # Nahe am Umschaltpunkt (Projektion 0..TANK_LENGTH, Gegner exakt kollinear) versucht die
+        # Phase-0-Verfolgung kurz Richtung Gegner zu drehen (az_to_enemy springt bei bx=0 auf π,
+        # bevor der Umschaltpunkt bx>=TANK_LENGTH erreicht) — begrenzter Transient, kein volles
+        # Zurückkrümmen (das wäre erst bei Fortsetzung der Verfolgung, die hier NICHT stattfindet).
+        assert abs(bot.azimuth) < math.radians(25)
+        az_after_abort = bot.azimuth
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1e6), \
+             patch.object(bot, "_is_landed", return_value=True):
+            bot._tick_jumping(dt, now=1000.9)
+        assert bot._jumping is False
+        # Landung fixiert die Heading exakt bei der Abbruch-Ausrichtung — keine Land-Drehung.
+        assert bot.azimuth == pytest.approx(az_after_abort)
+
+    # ── Fallback: Rest-Sinkzeit zu knapp ─────────────────────────────────────
+
+    def test_feint_aborts_when_sink_time_too_tight(self, bot):
+        """Kurz vor dem Boden (< 2u, vel_z < 0) bricht die Finte ab statt weiter zu manövrieren."""
+        bot.own_flag = "WG"
+        bot.pos_x = 10.0; bot.pos_y = 0.0; bot.pos_z = 1.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = -5.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 1   # bereits im Rückwärtsflug, aber Boden zu nah
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=0.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+
+    # ── Reset bei Landung/Tod/Respawn (dieselben Stellen wie _wings_steer_az) ─
+
+    def test_wg_feint_target_reset_on_tick_jumping_landing(self, bot):
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.05
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 1
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=0.0), \
+             patch.object(bot, "_is_landed", return_value=True):
+            bot._tick_jumping(0.02, now=1000.0)
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+
+    def test_wg_feint_target_reset_on_nav_jump_landing(self, bot):
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.05
+        bot.vel_x = 15.0; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.NAV_JUMP
+        bot._nav_jump_return_state = AIState.SEEKING
+        bot._nav_jump_target_z = 0.0
+        bot._nav_path = [(15.0, 0.0, 0.0)]
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 1
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=0.0), \
+             patch.object(bot, "_is_landed", return_value=True):
+            bot._tick_nav_jump(0.02, now=1000.0)
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+
+    def test_wg_feint_target_reset_on_falling_landing(self, bot):
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.05
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._pre_fall_state = AIState.SEEKING
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 1
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=0.0), \
+             patch.object(bot, "_is_landed", return_value=True):
+            bot._tick_falling(0.02, now=1000.0)
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+
+    def test_wg_feint_target_reset_on_death(self, bot):
+        import struct
+        from bzflag.protocol import MsgKilled
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 1
+        bot.alive = True
+        bot._on_killed(MsgKilled, struct.pack(">B", bot.player_id))
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+
+    def test_wg_feint_target_reset_on_respawn(self, bot):
+        import struct
+        from bzflag.protocol import MsgAlive
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 1
+        payload = (struct.pack(">B", bot.player_id) + struct.pack(">fff", 0.0, 0.0, 0.0)
+                   + struct.pack(">f", 0.0))
+        bot._on_alive(MsgAlive, payload)
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+
+    # ── Ohne WG: byte-identisches Verhalten (kein Feint-Feld gesetzt) ───────
+
+    def test_tick_jumping_without_wg_feint_field_untouched(self, bot):
+        bot.own_flag = ""
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 50.0
+        bot.vel_x = 7.0; bot.vel_y = -3.0; bot.vel_z = 2.0
+        bot.azimuth = 1.0
+        bot._jump_ang_vel = 0.4
+        bot._jumping = True
+        bot._wg_feint_target = None
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        assert bot._wg_feint_target is None
+        assert bot.azimuth == pytest.approx(1.0 + 0.4 * 0.02)
+        assert bot.vel_x == pytest.approx(7.0)
+        assert bot.vel_y == pytest.approx(-3.0)

@@ -46,7 +46,11 @@ class TacticsMixin(BZBotBase):
         P4-MOV-03a: mit WG-Luftsteuerung (_wings_air_control_active()) wird der Drehwunsch NIE
         mehr in _jump_ang_vel geschrieben (entkoppeltes Drehen ist mit WG physikalisch unmöglich)
         — der Escape-Drehwunsch wird stattdessen zum Steuerziel-Azimuth _wings_steer_az (gleicher
-        Gesamtdrehwinkel wie die alte Ballistik-Spin-Rate über die volle Flugzeit integriert)."""
+        Gesamtdrehwinkel wie die alte Ballistik-Spin-Rate über die volle Flugzeit integriert).
+
+        P4-MOV-03b: der klassische TactJump (feste Lande-Drehung) ist mit WG unmöglich — im
+        FRONTAL-Zweig (nicht Escape) setzt WG-aktiv + vorhandener target_player stattdessen die
+        WG-TactJump-Finte (_wg_feint_target, ausgeführt in states.py::_wg_feint_tick)."""
         wg_air = self._wings_air_control_active()
         if self._escape_jump_ang_vel is not None:
             if wg_air:
@@ -71,6 +75,11 @@ class TacticsMixin(BZBotBase):
                 # Bereits auf den Gegner ausgerichtet — kein zusätzliches Steuerziel nötig, die
                 # normale Gegner-Verfolgungs-Priorität in _tick_jumping übernimmt (live Tracking).
                 self._wings_steer_az = None
+                if self.target_player is not None:
+                    # P4-MOV-03b: Übersprung-Finte statt fester Lande-Drehung (nur Frontal-Sprung,
+                    # nicht Escape — s. Docstring).
+                    self._wg_feint_target = self.target_player
+                    self._wg_feint_phase = 0
             else:
                 self._jump_ang_vel = self.ang_vel
             if self._debug_log_dodge:
