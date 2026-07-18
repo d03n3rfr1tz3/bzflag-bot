@@ -378,9 +378,54 @@ class TestCoverHoldPeekMomentum:
         peek_speed = bot._tank_speed * 0.6
         assert bot.vel_x == pytest.approx(4.0, abs=1e-6)   # gerampt, noch nicht bei 0.6×speed
         assert bot.vel_x < peek_speed
+        # F2: _apply_bounds integriert mit der NEUEN (gerampten) vel — wie beim LANDING_SHOT-Fix.
+        assert bot.pos_x == pytest.approx(4.0 * 0.02, abs=1e-6)
 
     def test_peek_instant_without_dash_a(self, bot):
         now = self._setup_peek(bot)
         bot._linear_acceleration = 0.0
         bot._dispatch_movement(0.02, now, ai_tick=False)
         assert bot.vel_x == pytest.approx(bot._tank_speed * 0.6, abs=1e-6)
+        # F2: auch ohne -a bewegt der Peek jetzt real (vorher Bug: pos blieb 0).
+        assert bot.pos_x == pytest.approx(bot._tank_speed * 0.6 * 0.02, abs=1e-6)
+
+
+class TestCoverHoldPeekIntegration:
+    """F2: Der Peek-Zyklus bewegt den Bot jetzt real (nicht nur auf dem Wire) — Phase 1
+    (vorfahren) lässt pos_x monoton wachsen, Phase 2 (rückwärts) lässt sie wieder sinken."""
+
+    def _setup_peek(self, bot):
+        now = time.monotonic()
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.target_player = None          # kein Gegner → reine Peek-Bewegung, keine Aim-Drehung
+        bot._jumping = False
+        bot._ai_state = AIState.COVER_HOLD
+        bot._cover_peek_until = now + 10.0
+        return now
+
+    def test_peek_phase1_advances_position(self, bot):
+        """Phase 1 (vorfahren) ohne -a: pos_x wächst über mehrere Ticks hinweg monoton."""
+        now = self._setup_peek(bot)
+        bot._linear_acceleration = 0.0
+        bot._cover_peek_phase = 1
+        dt = 0.02
+        last_x = bot.pos_x
+        for _ in range(10):
+            bot._dispatch_movement(dt, now, ai_tick=False)
+            assert bot.pos_x > last_x   # real vorgefahren, nicht nur vel gesetzt
+            last_x = bot.pos_x
+            now += dt
+
+    def test_peek_phase2_retreats_position(self, bot):
+        """Phase 2 (rückwärts) ohne -a: pos_x sinkt über mehrere Ticks hinweg."""
+        now = self._setup_peek(bot)
+        bot._linear_acceleration = 0.0
+        bot._cover_peek_phase = 2
+        dt = 0.02
+        start_x = bot.pos_x
+        for _ in range(10):
+            bot._dispatch_movement(dt, now, ai_tick=False)
+            now += dt
+        assert bot.pos_x < start_x

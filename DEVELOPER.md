@@ -1964,6 +1964,14 @@ anzugreifen. Design-Entscheidungen:
   Ausnahmen: SB (durchschlägt Wände) / SW (radial) → nie halten; GM (Deckung bricht Lock) →
   erwünscht. Ricochet um die Deckung herum bleibt bewusst der Dodge-Kaskade (`_ricochet_paths`)
   überlassen.
+- **Bugfix (F2):** Der Peek-Zyklus setzte bis zu diesem Fix nur `vel_x`/`vel_y`, ohne die
+  Position zu integrieren — `_dispatch_movement` rief im COVER_HOLD-Zweig kein `_apply_bounds`
+  auf (der einzige X/Y-Positions-Integrator der Bodenfahrt). Folge: Der Peek fand nur auf dem
+  Wire statt (vel≠0 gemeldet, Position eingefroren), das Schussfenster öffnete sich physisch nie.
+  Behoben analog zum LANDING_SHOT-Fix (F1): `_apply_bounds(dt, half)` wird jetzt am Ende des
+  `if not self._jumping:`-Blocks aufgerufen — der Bot fährt beim Peek jetzt real vor/zurück,
+  `_apply_obstacle_bounds` (Teil von `_apply_bounds`) verhindert per Wall-Slide das Clippen in
+  die Deckungsbox.
 - **Indirekt-Schuss aus der Deckung (mit TAC-05):** ohne LoS dreht der COVER_HOLD-Dispatch den
   Rumpf über `_cover_hold_aim_az` auf den gecachten Abprall-/Tor-Azimut (Rico-Drive-Muster aus
   `_execute_combat_move`) statt auf den Gegner — nur so passiert der Rumpf das Fire-Gate und

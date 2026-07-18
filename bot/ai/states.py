@@ -190,6 +190,10 @@ class StateMachineMixin(BZBotBase):
                 speed = self._ramp_linear_speed(speed, dt)
                 self.vel_x = math.cos(self.azimuth) * speed
                 self.vel_y = math.sin(self.azimuth) * speed
+                # F2: Peek bewegt den Bot jetzt real (vorher nur vel gesetzt, Position
+                # eingefroren); _apply_obstacle_bounds (Teil von _apply_bounds) verhindert
+                # per Wall-Slide das Clippen in die Deckungsbox.
+                self._apply_bounds(dt, half)
             return
 
         # IDLE / SEEKING / COMBAT (10 Hz KI-Tick)
