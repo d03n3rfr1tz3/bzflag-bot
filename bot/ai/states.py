@@ -236,10 +236,33 @@ class StateMachineMixin(BZBotBase):
                     self._move_to_target(dt, half)
 
     def _tick_jumping(self, dt: float, now: float) -> None:
-        """Sprungphysik (BZFlag: in der Luft keine Steuerung). LocalPlayer.cxx Z. 364-368."""
+        """Sprungphysik. Ohne WG-Luftsteuerung: keine Kontrolle (LocalPlayer.cxx Z. 364-368).
+
+        Mit WG (_wings_air_control_active(), P4-MOV-03a): Bewegung ist strikt an ±Blickrichtung
+        gekoppelt (_wings_air_steer) statt entkoppelt zu drehen (_jump_ang_vel wird dann NIE
+        angewandt). Zielwahl-Priorität: expliziter Steuerziel-Azimuth (_wings_steer_az — aus
+        Escape-/DODGE_JUMP-Drehwünschen, s. tactics.py/combat.py) > Gegner-Verfolgung
+        (target_player + _has_presence, volle Speed) > Heading halten (aktueller signierter
+        Horizontal-Speed, Projektion von vel auf azimuth)."""
         self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
-        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
+        if self._wings_air_control_active():
+            if self._wings_steer_az is not None:
+                speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+                self._wings_air_steer(dt, self._wings_steer_az, speed)
+            else:
+                target_az = None
+                if self.target_player is not None and self._has_presence():
+                    ep = self._get_enemy_pos(self.target_player)
+                    if ep is not None:
+                        target_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
+                if target_az is not None:
+                    self._wings_air_steer(dt, target_az, self._effective_tank_speed())
+                else:
+                    speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+                    self._wings_air_steer(dt, self.azimuth, speed)
+        else:
+            self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
         self.pos_x += self.vel_x * dt
@@ -260,6 +283,7 @@ class StateMachineMixin(BZBotBase):
             self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
+            self._wings_steer_az = None
             self._last_jump_at = now
             self.ang_vel = 0.0
             if self.target_player is not None and self._has_presence():
@@ -286,10 +310,32 @@ class StateMachineMixin(BZBotBase):
         self.pos_y = max(-half, min(half, self.pos_y))
 
     def _tick_nav_jump(self, dt: float, now: float) -> None:
-        """Navigationssprung-Physik. Landet auf Ziel-Etage → return_state."""
+        """Navigationssprung-Physik. Landet auf Ziel-Etage → return_state.
+
+        Mit WG-Luftsteuerung (P4-MOV-03a): Kurskorrektur Richtung Lande-WP (nav_path[0]) +
+        Speed-Nachführung aus der Rest-Sinkzeit (Lösung von z(t)=_nav_jump_target_z), statt der
+        am Absprung fixierten Lande-Drehung (_jump_ang_vel wird dann NIE angewandt) — kein
+        Land-Spin, Landeausrichtung = Flugrichtung; Nachdrehen übernimmt die Bodensteuerung nach
+        der Landung."""
         self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
-        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)   # Lande-Drehung (am Absprung fixiert)
+        if self._wings_air_control_active() and self._nav_path:
+            wp = self._nav_path[0]
+            g_abs = abs(self._effective_gravity())
+            disc = self.vel_z * self.vel_z - 2.0 * g_abs * (self._nav_jump_target_z - self.pos_z)
+            if disc >= 0.0 and g_abs > 1e-6:
+                t_rem = max((self.vel_z + math.sqrt(disc)) / g_abs, 0.01)
+            else:
+                t_rem = 0.01
+            hdist_rem = math.hypot(wp[0] - self.pos_x, wp[1] - self.pos_y)
+            target_az = math.atan2(wp[1] - self.pos_y, wp[0] - self.pos_x)
+            speed = max(1.0, min(hdist_rem / t_rem, self._travel_tank_speed()))
+            self._wings_air_steer(dt, target_az, speed)
+        elif self._wings_air_control_active():
+            speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+            self._wings_air_steer(dt, self.azimuth, speed)
+        else:
+            self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)   # Lande-Drehung (am Absprung fixiert)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
         self.pos_x += self.vel_x * dt
@@ -304,6 +350,7 @@ class StateMachineMixin(BZBotBase):
             self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
+            self._wings_steer_az = None
             self._last_jump_at = now
             self.ang_vel = 0.0
             ret = self._nav_jump_return_state
@@ -397,10 +444,25 @@ class StateMachineMixin(BZBotBase):
                     speed, math.degrees(self.azimuth), self._is_inside_obstacle())
 
     def _tick_z_attack(self, dt: float, now: float) -> None:
-        """ZJ1-Sprungphysik. Nur aus COMBAT erreichbar; Landung → immer COMBAT."""
+        """ZJ1-Sprungphysik. Nur aus COMBAT erreichbar; Landung → immer COMBAT.
+
+        Mit WG-Luftsteuerung (P4-MOV-03a): kein entkoppelter Spin — Steuerziel ist der beim
+        Absprung berechnete Ziel-Azimuth (_wings_steer_az), sonst der Live-Gegner, sonst Heading;
+        die Horizontalgeschwindigkeit bleibt betragsgleich (Z-Attack übernimmt die Boden-vel)."""
         self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
-        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
+        if self._wings_air_control_active():
+            target_az = self._wings_steer_az
+            if target_az is None and self.target_player is not None:
+                _ep_wg = self._get_enemy_pos(self.target_player)
+                if _ep_wg is not None:
+                    target_az = math.atan2(_ep_wg[1] - self.pos_y, _ep_wg[0] - self.pos_x)
+            if target_az is None:
+                target_az = self.azimuth
+            speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+            self._wings_air_steer(dt, target_az, speed)
+        else:
+            self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
         self.pos_x += self.vel_x * dt
@@ -430,6 +492,7 @@ class StateMachineMixin(BZBotBase):
             self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
+            self._wings_steer_az = None
             self._last_jump_at = now
             self._z_attack_mode = False
             self.ang_vel = 0.0
@@ -437,11 +500,22 @@ class StateMachineMixin(BZBotBase):
 
     def _tick_falling(self, dt: float, now: float) -> None:
         """Fall-Physik für unkontrollierten Fall vom Dach (analog _tick_jumping).
-        Kein Lenken: vel[0]/vel[1] und azimuth bleiben committed.
-        _jump_ang_vel wird nicht zurückgesetzt — bestehende Drehbewegung bleibt."""
+        Ohne WG-Luftsteuerung: kein Lenken, vel[0]/vel[1] und azimuth bleiben committed
+        (_jump_ang_vel wird nicht zurückgesetzt — bestehende Drehbewegung bleibt).
+        Mit WG (P4-MOV-03a): steuerbar Richtung aktuellem Nav-WP (nav_path[0]), falls
+        vorhanden, sonst Heading halten (aktueller signierter Horizontal-Speed)."""
         self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
-        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
+        if self._wings_air_control_active():
+            if self._nav_path:
+                wp = self._nav_path[0]
+                target_az = math.atan2(wp[1] - self.pos_y, wp[0] - self.pos_x)
+            else:
+                target_az = self.azimuth
+            speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+            self._wings_air_steer(dt, target_az, speed)
+        else:
+            self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
         self.pos_x += self.vel_x * dt
@@ -455,6 +529,7 @@ class StateMachineMixin(BZBotBase):
             self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
+            self._wings_steer_az = None
             # _last_jump_at nicht setzen — kein echter Sprung, kein Cooldown
             self.ang_vel = 0.0
             self._transition_to(self._pre_fall_state)

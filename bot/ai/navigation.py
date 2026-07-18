@@ -690,10 +690,14 @@ class NavigationMixin(BZBotBase):
 
     def _nav_jump_land_spin(self, wp, v0: float, g_abs: float) -> float:
         """Im Sprung fixe Drehrate, sodass der Bot ausgerichtet landet: auf den Gegner, wenn der
-        Landepunkt auf Gegner-Höhe liegt, sonst auf den nächsten Wegpunkt. Fallback 0.0 (WG:
-        bestehende Rate). Auf _tank_turn_rate gedeckelt — BZFlag: am Absprung fixiert, in der Luft
-        unveränderlich. vel[0/1] müssen vor dem Aufruf gesetzt sein."""
-        fallback = self._jump_ang_vel if self.own_flag == "WG" else 0.0
+        Landepunkt auf Gegner-Höhe liegt, sonst auf den nächsten Wegpunkt. Fallback 0.0 (WG ohne
+        aktive Luftsteuerung/Slide-Downgrade: bestehende Rate — P4-MOV-03a: mit aktiver
+        WG-Luftsteuerung gibt es KEINEN Land-Spin mehr, _tick_nav_jump steuert stattdessen aktiv
+        Richtung Lande-WP). Auf _tank_turn_rate gedeckelt — BZFlag: am Absprung fixiert, in der
+        Luft unveränderlich (ohne WG-Luftsteuerung). vel[0/1] müssen vor dem Aufruf gesetzt sein."""
+        fallback = (self._jump_ang_vel
+                    if self.own_flag == "WG" and not self._wings_air_control_active()
+                    else 0.0)
         disc = v0 * v0 - 2.0 * g_abs * (wp[2] - self.pos_z)
         if disc < 0:
             return fallback

@@ -70,6 +70,12 @@ class TestSetVarPhysics:
         _fire_setvar(bot, {"_gravity": "-20.0"})
         assert bot._gravity == pytest.approx(-20.0)
 
+    def test_wings_slide_time_updated(self, bot):
+        """P4-MOV-03a: _wingsSlideTime > 0 → WG-Luftsteuerung wird zum Slide-Downgrade
+        (_wings_air_control_active() liefert dann False, s. TestWingsAirControl)."""
+        _fire_setvar(bot, {"_wingsSlideTime": "0.5"})
+        assert bot._wings_slide_time == pytest.approx(0.5)
+
     def test_defaults_unchanged_without_setvar(self, bot):
         from bot.constants import SHOT_SPEED_DEFAULT, TANK_SPEED, TANK_TURN_RATE, JUMP_VELOCITY, GRAVITY
         assert bot._shot_speed    == pytest.approx(SHOT_SPEED_DEFAULT)

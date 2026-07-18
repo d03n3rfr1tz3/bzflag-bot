@@ -16,7 +16,7 @@ from bot.constants import (
     FLAG_GRAB_RADIUS,
     FLAG_GRAB_MARGIN,
 )
-from bot.util import _wrap
+from bot.util import _angle_diff, _wrap
 
 
 from mypy_extensions import trait
@@ -224,6 +224,29 @@ class CapabilityMixin(BZBotBase):
         (WG/LG-bewusst). Eine Quelle der Wahrheit für alle Sprunghöhen-Checks."""
         v = self._effective_jump_velocity()
         return v * v / (2.0 * abs(self._effective_gravity()))
+
+    def _wings_air_control_active(self) -> bool:
+        """True, wenn WG-Luftsteuerung modelliert wird: WG getragen und _wingsSlideTime == 0
+        (Slide-Physik/doSlideMotion bewusst nicht modelliert → dann faithful Ballistik wie bisher)."""
+        return self.own_flag == "WG" and self._wings_slide_time <= 0.0
+
+    def _wings_air_steer(self, dt: float, target_az: float, speed: float) -> None:
+        """Ein Luft-Steuer-Tick faithful zu doUpdateMotion (Wings-Zweig): ang_vel instant Richtung
+        Ziel (Klemme _effective_turn_rate, KEINE Accel-Rampe — doMomentum läuft nicht airborne),
+        Halbschritt-Winkelintegration, Horizontal-vel = speed ENTLANG der neuen Blickrichtung
+        (signiert: speed < 0 = Rückwärtsflug). Bewegung ist damit strikt an ±azimuth gekoppelt —
+        Drehen krümmt die Flugbahn, seitliches Driften ist unmöglich (P4-MOV-03a-Invariante)."""
+        speed = max(-0.5 * self._effective_tank_speed(),
+                    min(speed, self._effective_tank_speed()))   # Rückwärts 0,5× wie am Boden
+        diff = _angle_diff(target_az, self.azimuth)
+        if not self._can_turn_left()  and diff > 0: diff = 0.0
+        if not self._can_turn_right() and diff < 0: diff = 0.0
+        max_turn = self._effective_turn_rate()
+        self.ang_vel = math.copysign(min(abs(diff / max(dt, 1e-6)), max_turn), diff)
+        angle = self.azimuth + 0.5 * dt * self.ang_vel        # Halbschritt wie der echte Client
+        self.azimuth = _wrap(self.azimuth + self.ang_vel * dt)
+        self.vel_x = math.cos(angle) * speed
+        self.vel_y = math.sin(angle) * speed
 
     def _next_slot_ready(self, now: float) -> bool:
         """True wenn der nächste Slot (Zyklus-Reihenfolge) seinen Reload abgewartet hat."""

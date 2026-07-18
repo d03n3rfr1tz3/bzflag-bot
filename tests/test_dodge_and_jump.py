@@ -17,7 +17,10 @@ Dodge ist machbar wenn: dist_achievable = TANK_SPEED * time_to_impact >= DODGE_D
 import math
 import time
 import pytest
+from unittest.mock import patch
 from conftest import make_shot, make_player
+from bot.models import AIState
+from bot.util import _angle_diff
 
 DODGE_REACT_DELAY   = 0.25
 IB_REACT_DELAY      = DODGE_REACT_DELAY * 1.5   # 0.375s
@@ -1432,3 +1435,329 @@ class TestLaunchEventsIgnoreRamp:
         assert bot._ai_state == AIState.DODGE_JUMP
         assert bot.vel_x == pytest.approx(12.0)   # horizontal unverändert
         assert bot.vel_y == pytest.approx(0.0)
+
+
+# ── P4-MOV-03a: WG-Luftsteuerung (Commit C1) ────────────────────────────────
+
+class TestWingsAirControl:
+    """_wings_air_control_active()/_wings_air_steer(): Bewegung in der Luft mit WG ist strikt
+    an ±Blickrichtung gekoppelt (faithful zu doUpdateMotion, Wings-Zweig) — Drehen krümmt die
+    Flugbahn statt (wie vorher) entkoppelt zu strafen. Fix der unmöglichen WG-Luftdrehung in
+    _tick_jumping/_tick_nav_jump/_tick_falling + DODGE_JUMP/Escape-Steuerziel."""
+
+    # ── _wings_air_control_active() ─────────────────────────────────────────
+
+    def test_air_control_active_requires_wg_and_no_slide(self, bot):
+        bot.own_flag = "WG"
+        bot._wings_slide_time = 0.0
+        assert bot._wings_air_control_active() is True
+        bot._wings_slide_time = 0.5
+        assert bot._wings_air_control_active() is False    # Slide-Downgrade
+        bot._wings_slide_time = 0.0
+        bot.own_flag = ""
+        assert bot._wings_air_control_active() is False    # keine WG-Flagge
+
+    # ── Kopplungs-Invariante (wichtigster Test) ─────────────────────────────
+
+    def test_air_steer_couples_velocity_to_azimuth_while_curving(self, bot):
+        """Mit WG-aktiv ist (vel_x,vel_y) in JEDEM Tick parallel/antiparallel zu azimuth
+        (Halbschritt-Toleranz) — auch über mehrere Ticks mit Drehung (Kurvenflug)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 50.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(0.0, 60.0, 50.0))   # seitlich → erzwingt Kurvenflug
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        dt = 0.05
+        tol = 0.5 * dt * bot._tank_turn_rate + 1e-6   # Halbschritt-Winkeltoleranz
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            for _ in range(20):
+                bot._tick_jumping(dt, now=1000.0)
+                speed = math.hypot(bot.vel_x, bot.vel_y)
+                if speed > 1e-6:
+                    vel_ang = math.atan2(bot.vel_y, bot.vel_x)
+                    diff = abs(_angle_diff(vel_ang, bot.azimuth))
+                    assert diff < tol or abs(diff - math.pi) < tol
+        # Drehen hat die Flugbahn tatsächlich gekrümmt (kein reiner Geradeausflug)
+        assert bot.azimuth != pytest.approx(0.0)
+
+    def test_air_steer_clamps_reverse_to_half_speed(self, bot):
+        """Rückwärts-Klemme: Luft-Reverse ≤ 0,5·_effective_tank_speed() (wie am Boden)."""
+        bot.own_flag = "WG"
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        bot._wings_air_steer(0.02, 0.0, -1000.0)   # extremer Rückwärtswunsch
+        speed = math.hypot(bot.vel_x, bot.vel_y)
+        assert speed == pytest.approx(0.5 * bot._effective_tank_speed())
+        assert bot.vel_x < 0.0   # tatsächlich rückwärts (Blickrichtung 0°)
+
+    def test_air_steer_forward_speed_uncapped_below_tank_speed(self, bot):
+        """Gegenprobe: Vorwärts bis volle _effective_tank_speed(), keine 0,5×-Klemme."""
+        bot.own_flag = "WG"
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        bot._wings_air_steer(0.02, 0.0, bot._effective_tank_speed())
+        assert math.hypot(bot.vel_x, bot.vel_y) == pytest.approx(bot._effective_tank_speed())
+
+    # ── Regressionsschutz: ohne WG / mit _wingsSlideTime>0 unveränderte Ballistik ──
+
+    def test_tick_jumping_without_wg_byte_identical_ballistics(self, bot):
+        bot.own_flag = ""
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 50.0
+        bot.vel_x = 7.0; bot.vel_y = -3.0; bot.vel_z = 2.0
+        bot.azimuth = 1.0
+        bot._jump_ang_vel = 0.4
+        bot._jumping = True
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        assert bot.azimuth == pytest.approx(1.0 + 0.4 * 0.02)
+        assert bot.vel_x == pytest.approx(7.0)    # _tick_jumping fasst vel_x/vel_y ohne WG nie an
+        assert bot.vel_y == pytest.approx(-3.0)
+
+    def test_tick_jumping_wg_with_slide_time_keeps_old_ang_vel_behavior(self, bot):
+        """_wingsSlideTime > 0 → Slide-Downgrade: altes _jump_ang_vel-Verhalten + Ballistik,
+        WG-Luftsteuerung greift NICHT (doSlideMotion wird bewusst nicht modelliert)."""
+        bot.own_flag = "WG"
+        bot._wings_slide_time = 0.5
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 50.0
+        bot.vel_x = 7.0; bot.vel_y = -3.0; bot.vel_z = 2.0
+        bot.azimuth = 1.0
+        bot._jump_ang_vel = 0.4
+        bot._jumping = True
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        assert bot.azimuth == pytest.approx(1.0 + 0.4 * 0.02)
+        assert bot.vel_x == pytest.approx(7.0)
+        assert bot.vel_y == pytest.approx(-3.0)
+
+    # ── DODGE_JUMP + Escape: Steuerziel statt entkoppelter _jump_ang_vel ────
+
+    def test_dodge_jump_wg_uses_steer_target_not_jump_ang_vel(self, bot):
+        """DODGE_JUMP mit WG-aktiv: der alte entkoppelte Korrektur-Pfad (_jump_ang_vel) wird
+        NICHT mehr benutzt — stattdessen wird _wings_steer_az gesetzt (Gegner-Azimuth)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = math.pi   # Rücken zum Gegner bei +x → Korrektur-Zweig (>135°)
+        bot.alive = True
+        bot.human_count = 1
+        info = make_player(bot, 99, pos=(30.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        make_shot(bot, shooter_id=2, shot_id=1,
+                  pos=(5.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))
+        bot._last_threat_id = (2, 1)
+        bot._threat_detected_at = time.monotonic() - 1.0
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.DODGE_JUMP
+        assert bot._jump_ang_vel == pytest.approx(0.0)          # alter Pfad unangetastet
+        assert bot._wings_steer_az == pytest.approx(0.0)        # neues Steuerziel = Gegner-Azimuth
+        # Folge-Tick: die Steuerung dreht tatsächlich Richtung Steuerziel, statt zu strafen.
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        diff_before = abs(_angle_diff(0.0, math.pi))
+        diff_after = abs(_angle_diff(0.0, bot.azimuth))
+        assert diff_after < diff_before
+
+    def test_dodge_jump_wg_no_correction_when_facing_enemy(self, bot):
+        """< 135° zum Gegner → keine Korrektur nötig: kein Steuerziel gesetzt (Gegner-Verfolgung
+        in _tick_jumping übernimmt die Ausrichtung ohnehin live)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0   # schaut direkt auf Gegner bei +x
+        bot.alive = True
+        bot.human_count = 1
+        info = make_player(bot, 99, pos=(30.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        make_shot(bot, shooter_id=2, shot_id=1,
+                  pos=(5.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))
+        bot._last_threat_id = (2, 1)
+        bot._threat_detected_at = time.monotonic() - 1.0
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.DODGE_JUMP
+        assert bot._wings_steer_az is None
+
+    def test_execute_jump_escape_wg_sets_steer_az_not_jump_ang_vel(self, bot):
+        """_execute_jump: Escape-Drehwunsch (_escape_jump_ang_vel) wird mit WG zum
+        Steuerziel-Azimuth statt in _jump_ang_vel geschrieben."""
+        bot.own_flag = "WG"
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        bot.target_player = None
+        bot._jump_ang_vel = 0.0
+        bot._escape_jump_ang_vel = bot._tank_turn_rate   # positiver Escape-Spin-Wunsch
+        bot._execute_jump()
+        assert bot._escape_jump_ang_vel is None
+        assert bot._jump_ang_vel == pytest.approx(0.0)   # alter Pfad unangetastet
+        assert bot._wings_steer_az is not None
+
+    def test_execute_jump_escape_without_wg_unchanged(self, bot):
+        """Gegenprobe ohne WG: altes Verhalten (_jump_ang_vel = _escape_jump_ang_vel)."""
+        bot.own_flag = ""
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        bot.target_player = None
+        bot._jump_ang_vel = 0.0
+        bot._escape_jump_ang_vel = bot._tank_turn_rate
+        bot._execute_jump()
+        assert bot._escape_jump_ang_vel is None
+        assert bot._jump_ang_vel == pytest.approx(bot._tank_turn_rate)
+
+    # ── Momentum-Wechselwirkung: Luftsteuerung bleibt instant ───────────────
+
+    def test_wg_air_steer_ignores_linear_acceleration_limit(self, bot):
+        """_linear_acceleration=50 gesetzt (Bodenrampe) → Luftsteuerung bleibt instant (kein
+        Ramp — doMomentum läuft nicht airborne)."""
+        bot.own_flag = "WG"
+        bot._linear_acceleration = 50.0
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        bot._wings_air_steer(0.02, 0.0, bot._effective_tank_speed())
+        assert math.hypot(bot.vel_x, bot.vel_y) == pytest.approx(bot._effective_tank_speed())
+
+    # ── _tick_nav_jump + WG: Kurskorrektur, Landung ohne Land-Spin ──────────
+
+    def test_nav_jump_wg_corrects_course_toward_wp(self, bot):
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0
+        bot.vel_x = 10.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 5.0   # Deko-Wert: darf mit WG-Steuerung NICHT angewandt werden
+        bot._jumping = True
+        bot._nav_jump_target_z = 0.0
+        bot._nav_path = [(0.0, 20.0, 0.0)]   # Ziel-WP seitlich → erzwingt Kurskorrektur
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_nav_jump(0.05, now=1000.0)
+        # Deko-_jump_ang_vel hätte azimuth auf 5*0.05=0.25 gesetzt — NICHT angewandt.
+        assert bot.azimuth != pytest.approx(5.0 * 0.05, abs=1e-6)
+        # Stattdessen dreht der Bot Richtung WP (atan2(20,0)=+90°) → azimuth wächst positiv.
+        assert bot.azimuth > 0.0
+
+    def test_nav_jump_wg_lands_without_land_spin(self, bot):
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.05
+        bot.vel_x = 15.0; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.05   # bereits fast Richtung Flug ausgerichtet
+        bot._jump_ang_vel = 5.0   # Deko: würde bei altem Land-Spin-Verhalten weiterdrehen
+        bot._jumping = True
+        bot._ai_state = AIState.NAV_JUMP
+        bot._nav_jump_return_state = AIState.SEEKING
+        bot._nav_jump_target_z = 0.0
+        bot._nav_path = [(15.0, 0.0, 0.0)]
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=0.0), \
+             patch.object(bot, "_is_landed", return_value=True):
+            bot._tick_nav_jump(0.02, now=1000.0)
+        assert bot._jumping is False
+        assert bot._wings_steer_az is None
+        # Landeausrichtung ≈ Flugrichtung, NICHT durch den Deko-_jump_ang_vel weitergedreht
+        # (der hätte +5.0*0.02=0.1 rad zusätzlich draufgesetzt).
+        assert abs(bot.azimuth - 0.05) < 0.05
+
+    def test_nav_jump_without_wg_unchanged(self, bot):
+        """Gegenprobe ohne WG: alte Lande-Drehung (_jump_ang_vel) bleibt unverändert wirksam."""
+        bot.own_flag = ""
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 10.0
+        bot.vel_x = 10.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 0.3
+        bot._jumping = True
+        bot._nav_jump_target_z = 30.0
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_nav_jump(0.05, now=1000.0)
+        assert bot.azimuth == pytest.approx(0.3 * 0.05)
+
+    # ── FALLING + WG steuerbar, ohne WG unverändert ─────────────────────────
+
+    def test_falling_wg_steers_toward_nav_wp(self, bot):
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 3.0   # Deko, darf mit WG nicht angewandt werden
+        bot._jumping = True
+        bot._nav_path = [(0.0, 30.0, 20.0)]   # seitlicher Ziel-WP
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_falling(0.05, now=1000.0)
+        assert bot.azimuth != pytest.approx(3.0 * 0.05, abs=1e-6)
+        assert bot.azimuth > 0.0   # dreht Richtung +y (WP)
+
+    def test_falling_wg_without_nav_path_holds_heading(self, bot):
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
+        az0 = 0.3
+        speed0 = 5.0
+        bot.vel_x = speed0 * math.cos(az0); bot.vel_y = speed0 * math.sin(az0); bot.vel_z = -1.0
+        bot.azimuth = az0
+        bot._jump_ang_vel = 3.0
+        bot._jumping = True
+        bot._nav_path = []
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_falling(0.05, now=1000.0)
+        assert bot.azimuth == pytest.approx(az0)   # Heading halten, keine Drehung
+        assert math.hypot(bot.vel_x, bot.vel_y) == pytest.approx(speed0)
+
+    def test_falling_without_wg_unchanged(self, bot):
+        bot.own_flag = ""
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.3
+        bot._jump_ang_vel = 0.4
+        bot._jumping = True
+        bot._nav_path = [(0.0, 30.0, 20.0)]
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_falling(0.05, now=1000.0)
+        assert bot.azimuth == pytest.approx(0.3 + 0.4 * 0.05)
+        assert bot.vel_x == pytest.approx(5.0)
+        assert bot.vel_y == pytest.approx(0.0)
+
+    def test_z_attack_wg_steers_instead_of_decoupled_spin(self, bot):
+        """Z_ATTACK mit WG-aktiv: _jump_ang_vel wird NICHT angewandt — das beim Absprung
+        gesetzte Steuerziel (_wings_steer_az) wird per _wings_air_steer angesteuert
+        (Kopplungs-Invariante gilt auch hier)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 5.0
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = 10.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._jump_ang_vel = 3.0            # dürfte mit WG nie mehr wirken
+        bot._wings_steer_az = 1.0
+        bot._z_attack_mode = False         # kein Feuer-Zweig in diesem Test
+        dt = 0.05
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_z_attack(dt, now=1000.0)
+        # Drehung Richtung Steuerziel mit max. Drehrate — nicht die 3.0-Spin-Rate
+        assert bot.azimuth == pytest.approx(bot._tank_turn_rate * dt)
+        vel_ang = math.atan2(bot.vel_y, bot.vel_x)
+        assert abs(_angle_diff(vel_ang, bot.azimuth)) < 0.5 * dt * bot._tank_turn_rate + 1e-6
+
+    def test_z_attack_check_sets_steer_az_with_wg(self, bot):
+        """_check_z_attack_jump schreibt mit WG-aktiv das Ziel in _wings_steer_az statt
+        _jump_ang_vel (kein entkoppelter Spin mehr)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 0.0
+        info = make_player(bot, 99, pos=(3.0, 0.0, 8.0))   # Gegner erhöht → Z-Attack-Kandidat
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        with patch.object(bot, "_can_jump", return_value=True), \
+             patch("random.random", return_value=0.0):
+            ok = bot._check_z_attack_jump(now=1000.0)
+        assert ok is True
+        assert bot._wings_steer_az is not None
+        assert bot._jump_ang_vel == pytest.approx(0.0)

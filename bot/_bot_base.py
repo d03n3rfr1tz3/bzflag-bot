@@ -216,6 +216,8 @@ class BZBotBase:
     _wings_jump_count: int
     _wings_jump_velocity: Any
     _wings_jumps_used: int
+    _wings_slide_time: Any
+    _wings_steer_az: Any
     _world_map: Any
     _wp_fail_count: int
     _wp_start_time: Any
@@ -480,6 +482,10 @@ class BZBotBase:
     def _update_indirect_hold(self, now: float, in_hold_case: bool) -> bool:
         raise NotImplementedError
     def _validate_and_find_target(self) -> None:
+        raise NotImplementedError
+    def _wings_air_control_active(self) -> bool:
+        raise NotImplementedError
+    def _wings_air_steer(self, dt: float, target_az: float, speed: float) -> None:
         raise NotImplementedError
     def _wp_reach_radius(self) -> float:
         raise NotImplementedError

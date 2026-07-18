@@ -273,6 +273,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # sind die Ausdrücke "_gravity" bzw. "_jumpVelocity").
         self._wings_gravity = None
         self._wings_jump_velocity = None
+        self._wings_slide_time = 0.0    # via MsgSetVar _wingsSlideTime (>0 → Slide-Downgrade)
+        self._wings_steer_az = None     # WG-Luftsteuerung: explizites Steuerziel (P4-MOV-03a)
         self._dropped_neutrals = collections.deque(maxlen=5)
 
         # Schuss-Typ-Multiplikatoren (via MsgSetVar)

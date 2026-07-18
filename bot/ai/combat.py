@@ -151,25 +151,46 @@ class CombatMixin(BZBotBase):
             # doMomentum). Damit ist der Dodge-Sprung ohne weitere Änderung bereits ramp-korrekt.
             self.vel_z = self._jump_launch_vz(self.vel_z)
             self._jumping = True
-            jump_time = 2.0 * self._effective_jump_velocity() / max(abs(self._effective_gravity()), 0.001)
-            if self.own_flag != "WG":
-                self._jump_ang_vel = 0.0
-            if self.target_player is not None:
-                ep = self._get_enemy_pos(self.target_player)
-                if ep is not None:
-                    enemy_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
-                    needed = _angle_diff(enemy_az, self.azimuth)
-                    if abs(needed) > math.radians(135):
-                        # Nur korrigieren wenn Rücken zum Gegner → sanfte Rotation
-                        self._jump_ang_vel = math.copysign(
-                            min(abs(needed / max(jump_time, 0.001)) * 0.5,
-                                self._tank_turn_rate * 0.5), needed)
-                        if self._debug_log_dodge:
-                            logger.debug("[%s] Ausweichen: Dodge-Sprung mit Korrektur (%.0f°)",
-                                         self.callsign, math.degrees(needed))
+            # P4-MOV-03a: mit WG-Luftsteuerung wird der Drehwunsch NIE mehr in _jump_ang_vel
+            # geschrieben (entkoppeltes Drehen ist mit WG physikalisch unmöglich) — die Korrektur
+            # wird stattdessen zum Steuerziel-Azimuth _wings_steer_az (direkt der Gegner-Azimuth,
+            # da hier — anders als beim Escape-Spin — ein echtes Ziel statt einer Rate vorliegt).
+            wg_air = self._wings_air_control_active()
+            if wg_air:
+                self._wings_steer_az = None
+                if self.target_player is not None:
+                    ep = self._get_enemy_pos(self.target_player)
+                    if ep is not None:
+                        enemy_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
+                        needed = _angle_diff(enemy_az, self.azimuth)
+                        if abs(needed) > math.radians(135):
+                            # Nur korrigieren wenn Rücken zum Gegner → Steuerziel = Gegner-Azimuth
+                            self._wings_steer_az = enemy_az
+                            if self._debug_log_dodge:
+                                logger.debug("[%s] Ausweichen: Dodge-Sprung mit Korrektur (%.0f°)",
+                                             self.callsign, math.degrees(needed))
+            else:
+                jump_time = 2.0 * self._effective_jump_velocity() / max(abs(self._effective_gravity()), 0.001)
+                if self.own_flag != "WG":
+                    self._jump_ang_vel = 0.0
+                if self.target_player is not None:
+                    ep = self._get_enemy_pos(self.target_player)
+                    if ep is not None:
+                        enemy_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
+                        needed = _angle_diff(enemy_az, self.azimuth)
+                        if abs(needed) > math.radians(135):
+                            # Nur korrigieren wenn Rücken zum Gegner → sanfte Rotation
+                            self._jump_ang_vel = math.copysign(
+                                min(abs(needed / max(jump_time, 0.001)) * 0.5,
+                                    self._tank_turn_rate * 0.5), needed)
+                            if self._debug_log_dodge:
+                                logger.debug("[%s] Ausweichen: Dodge-Sprung mit Korrektur (%.0f°)",
+                                             self.callsign, math.degrees(needed))
             if self._debug_log_dodge:
                 logger.debug("[%s] Ausweichen: Dodge-Sprung statt Ausweichen (Zeit zu knapp)", self.callsign)
-            self.ang_vel = self._jump_ang_vel  # analog zu _initiate_nav_jump
+            # analog zu _initiate_nav_jump; bei WG-Luftsteuerung überschreibt der nächste
+            # _tick_jumping-Tick (_wings_air_steer) ang_vel ohnehin sofort mit dem echten Wert.
+            self.ang_vel = 0.0 if wg_air else self._jump_ang_vel
             self._transition_to(AIState.DODGE_JUMP)
         else:
             if self._debug_log_shot:

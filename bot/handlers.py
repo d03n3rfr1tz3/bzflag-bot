@@ -324,6 +324,7 @@ class HandlersMixin(BZBotBase):
         self._dodging             = False
         self._jumping             = False
         self._jump_ang_vel        = 0.0
+        self._wings_steer_az      = None
         self._last_threat_id      = None
         self._evade_cleared_shots = {}
         self._threat_detected_at  = 0.0
@@ -373,6 +374,7 @@ class HandlersMixin(BZBotBase):
                 self._dodging             = False
                 self._jumping             = False
                 self._jump_ang_vel        = 0.0
+                self._wings_steer_az      = None
                 self._last_threat_id      = None
                 self._evade_cleared_shots = {}
                 self._threat_detected_at  = 0.0
@@ -928,6 +930,7 @@ class HandlersMixin(BZBotBase):
         "_wingsGravity":     ("_wings_gravity",      float, "!=0", "%.2f", None),
         "_wingsJumpVelocity": ("_wings_jump_velocity", float, ">0", "%.1f", None),
         "_wingsJumpCount":   ("_wings_jump_count",   int,   ">=0", "%d",   None),
+        "_wingsSlideTime":   ("_wings_slide_time",   float, ">=0", "%.2f", None),
         "_dropBadFlagDelay": ("_drop_bad_flag_delay", float, ">=0", "%.1f", None),
         "_shockInRadius":    ("_shock_in_radius",    float, ">=0", "%.1f", "_recompute_sw_expand_speed"),
         "_shockOutRadius":   ("_shock_out_radius",   float, ">0",  "%.1f", "_recompute_sw_expand_speed"),
