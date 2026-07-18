@@ -2595,11 +2595,12 @@ class TestMomentumRampDisabled:
         assert bot._momentum_ramp_time(1.0) == 0.0
         assert bot._momentum_ramp_time(2.0) == 0.0
 
-    def test_has_momentum_limit_flags_false(self, bot):
+    def test_accel_limits_are_zero(self, bot):
+        """Kein Helper mehr - die Rampen gaten direkt über _accel_limits() (lin/ang == 0.0)."""
         bot._linear_acceleration = 0.0
         bot._angular_acceleration = 0.0
-        assert bot._has_linear_momentum_limit() is False
-        assert bot._has_angular_momentum_limit() is False
+        lin, ang = bot._accel_limits()
+        assert lin == 0.0 and ang == 0.0
 
 
 class TestMomentumRampLinear:
@@ -2671,6 +2672,32 @@ class TestMomentumRampAngular:
         bot._ramp_azimuth_step(math.pi / 2, 0.02, bot._tank_turn_rate)
         expected = math.copysign(min(abs((math.pi / 2) / 0.02), bot._tank_turn_rate), math.pi / 2)
         assert bot.ang_vel == pytest.approx(expected)
+        assert bot.ang_vel == pytest.approx(bot._tank_turn_rate)
+
+
+class TestRampAzimuthExecutedRate:
+    """F3: nach der Ramp-Klemme wird ang_vel zusätzlich auf die tatsächlich ausgeführte Drehrate
+    geschnappt (|target|*dt darf |diff| nicht übersteigen) — Konsumenten (Wire-Update, Sprung-/
+    Fall-Spin-Übernahme, Combat-Edge-Guard) erwarten ang_vel ≡ ausgeführte Drehung."""
+
+    def test_settle_snaps_ang_vel_to_executed_rate(self, bot):
+        bot._angular_acceleration = 1.0
+        bot.ang_vel = 0.785
+        bot.azimuth = 0.0
+        diff = 0.01
+        bot._ramp_azimuth_step(diff, 0.02, bot._tank_turn_rate)
+        # ohne Snap wäre ang_vel die Ramp-Klemme (~0.765, nur um max_delta=0.02 von 0.785 runter) -
+        # der Snap zieht auf die tatsächlich ausgeführte Rate diff/dt = 0.5.
+        assert bot.ang_vel == pytest.approx(0.5)
+        assert bot.azimuth == pytest.approx(0.01)
+
+    def test_no_limit_control_uses_full_clamped_target(self, bot):
+        """Kontrolle ohne Limit: |target|*dt <= |diff| gilt konstruktionsbedingt, der Snap feuert
+        nie — voller geklemmter Zielwert wie bisher."""
+        bot._angular_acceleration = 0.0
+        bot.ang_vel = 0.0
+        bot.azimuth = 0.0
+        bot._ramp_azimuth_step(math.pi / 2, 0.02, bot._tank_turn_rate)
         assert bot.ang_vel == pytest.approx(bot._tank_turn_rate)
 
 
@@ -2750,18 +2777,19 @@ class TestAccelLimitsMFlag:
         assert bot._accel_limits() == (50.0, 38.0)
 
     def test_m_flag_activates_limits_without_dash_a(self, bot):
-        """Ohne Server-Option -a (beide Accel 0.0) aktiviert allein die M-Flagge die Klemme."""
+        """Ohne Server-Option -a (beide Accel 0.0) aktiviert allein die M-Flagge die Klemme.
+        Kein Helper mehr - direkt über _accel_limits() geprüft."""
         bot._linear_acceleration = 0.0
         bot._angular_acceleration = 0.0
         bot._momentum_lin_acc = 1.0
         bot._momentum_ang_acc = 1.0
         bot.own_flag = "M"
-        assert bot._has_linear_momentum_limit() is True
-        assert bot._has_angular_momentum_limit() is True
+        lin, ang = bot._accel_limits()
+        assert lin > 0.0 and ang > 0.0
         # ohne M (und ohne -a) bleiben die Gates aus
         bot.own_flag = ""
-        assert bot._has_linear_momentum_limit() is False
-        assert bot._has_angular_momentum_limit() is False
+        lin, ang = bot._accel_limits()
+        assert lin == 0.0 and ang == 0.0
 
 
 class TestMomentumRampSeverity:

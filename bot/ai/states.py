@@ -154,6 +154,9 @@ class StateMachineMixin(BZBotBase):
                         math.atan2(ay - self.pos_y, ax - self.pos_x), dt)
                 else:
                     self._ramp_azimuth_step(0.0, dt, self._tank_turn_rate)
+                # F1: Abbremsen bewegt den Bot jetzt real (Ausrollen wie im echten Client);
+                # ohne -a/M ist vel=0 → No-Op.
+                self._apply_bounds(dt, half)
             return
 
         if self._ai_state == AIState.COVER_HOLD:

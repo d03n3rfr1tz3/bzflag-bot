@@ -323,7 +323,7 @@ Kritische Fähigkeiten für den produktiven Server-Betrieb.
 |---|---|---|---|
 | P3-PER-01 | Freund/Feind- und Sicht-Mechaniken: Rogue/Colorblindness werten alle als Feind | ✅ | — |
 
-| P3-PER-06 | Verstärkte Reaktionsverzögerung gegen schwer wahrnehmbare Schützen: IB ×3, Momentum ×1,1, Cloaked Shot ×3 | ✅ | — |
+| P3-PER-06 | Verstärkte Reaktionsverzögerung gegen schwer wahrnehmbare Schützen: IB ×1,1, Momentum ×1,1, Cloaked Shot ×2,0 | ✅ | — |
 | P3-PER-07 | Ziel-Scoring (Distanz, Mensch-Bonus, PhantomZone-/Stealth-gegen-GM-Abwertung) | ✅ | — |
 | P3-PER-08 | Rabbit-Chase: Team-Umbelegung verarbeiten (neuer Rabbit vs. Hunter korrekt als Freund/Feind gewertet) | ✅ | — |
 

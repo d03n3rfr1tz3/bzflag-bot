@@ -1842,9 +1842,9 @@ klemmt die Änderung der Vorwärtsgeschwindigkeit auf **20×linearAcceleration·
 Vorframe-Speed (Projektion von `vel_x/vel_y` auf den bereits gedrehten Azimuth); angular klemmt
 die Änderung von `ang_vel` auf **1×angularAcceleration·dt** gegen die Vorframe-`ang_vel` (KEIN
 Faktor 20 wie linear) — beides nur am Boden (Airborne-States rufen diese Pfade ohnehin nie auf).
-Getrennte Gates `_has_linear_momentum_limit`/`_has_angular_momentum_limit`
-(`self._linear_acceleration > 0.0` bzw. `self._angular_acceleration > 0.0`) schalten die
-jeweilige Rampe unabhängig scharf. Timeout-/Stuck-Nachführung über `_momentum_ramp_time(cycles)`
+Die Rampen sind jeweils unabhängig über `_accel_limits()` gegated (`lin > 0` bzw. `ang > 0`) —
+kein separater Helper, die Ramp-Helper lesen den Accessor direkt. Timeout-/Stuck-Nachführung
+über `_momentum_ramp_time(cycles)`
 (0.0 ohne Limit, sonst `cycles * effektive Speed / (20×linearAcceleration)`): der WP-Timeout
 bekommt an vier Stellen in `navigation.py` einen Zuschlag von `MOMENTUM_TIMEOUT_CYCLES` Rampen
 (Anfahren + eine Kehre als Marge), das Stuck-Fenster in `states.py` (`_tick_seeking`) einen
@@ -1853,6 +1853,12 @@ Zuschlag von einer Rampe. Ohne Server-Option `-a` sind `_linear_acceleration`/
 Regressionsrisiko auf Servern ohne `-a`. Bewusst NICHT in diesem Commit behandelt: committed
 States (Sprünge/Dodge/COVER_HOLD/LANDING_SHOT/NAV_TELE) nutzen weiterhin `_turn_toward` (nicht
 `_turn_toward_ramped`) und werden einzeln in P4-MOV-02b nachgezogen.
+
+Nach der Accel-Klemme wird `ang_vel` in `_ramp_azimuth_step` zusätzlich auf die tatsächlich
+ausgeführte Drehrate geschnappt (kein Überschwingen des Ziels) — bewusste Abweichung vom echten
+Client (der überschwingt), relevant für Konsumenten, die `ang_vel` als Ist-Drehrate lesen:
+Wire-Update (`core.py`), Sprung-/Fall-Spin-Übernahme (`tactics.py`, `states.py`) und der
+Combat-Edge-Guard (`combat.py`).
 
 **P4-MOV-02 — M-Flagge (Momentum) modelliert.** Die Beschleunigungsgrenzen liefert jetzt der
 zentrale Accessor `_accel_limits()` (`bot/ai/capabilities.py`): normal die `-a`-Server-Werte
@@ -1914,6 +1920,11 @@ instant bzw. selbstkonsistent. Ohne `-a`/M ist alles No-Op.
 
 Nicht Teil von 02b: die Sprungkanten-Planung im Navigationsgraphen an die effektive Beschleunigung
 angleichen (→ **P4-MOV-02c**, offen).
+
+**F4-Notiz (`time_to_dodge`).** Der Zuschlag nutzt bewusst die volle 0→v_max-Rampenzeit
+(`_momentum_ramp_time(1.0)`) statt exakter Kinematik am aktuellen Geschwindigkeitspunkt — bei
+extremer Trägheit (M) liegt der Fehler konservativ Richtung DODGE_JUMP (sichere Seite), nicht
+Richtung zu später Erkennung.
 
 **P4-FLG-04/05 — Best-Flags-Wissen: Wahrnehmungs-Gate.** Protokoll-seitig wäre der Bot
 allwissend: die `flag_id` ist über Drops stabil, `MsgFlagUpdate` liefert die exakte

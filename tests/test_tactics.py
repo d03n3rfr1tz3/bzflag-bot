@@ -1185,3 +1185,32 @@ class TestLandingShotMomentumStop:
         bot._linear_acceleration = 0.0
         bot._dispatch_movement(0.02, time.monotonic(), ai_tick=False)
         assert bot.vel_x == pytest.approx(0.0, abs=1e-9)   # sofortiger Stopp wie bisher
+
+
+class TestLandingShotSlideIntegration:
+    """F1: der LANDING_SHOT-Ramp-gegen-0-Zweig integriert die Position jetzt real über
+    _apply_bounds (statt vel ungenutzt auf dem Wire zu melden) — Ausrollen wie im echten Client."""
+
+    def _setup_landed(self, bot):
+        from bot.models import AIState
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.vel_x = 20.0; bot.vel_y = 0.0; bot.vel_z = 0.0   # trägt Landegeschwindigkeit
+        bot._jumping = False
+        bot._landing_aim_pos = None
+        bot._ai_state = AIState.LANDING_SHOT
+
+    def test_ramps_and_moves_with_dash_a(self, bot):
+        self._setup_landed(bot)
+        bot._linear_acceleration = 10.0    # max_delta = 20×10×0.02 = 4.0 → 20 → 16
+        bot._dispatch_movement(0.02, time.monotonic(), ai_tick=False)
+        assert bot.vel_x == pytest.approx(16.0)
+        # _apply_bounds integriert mit der NEUEN (gerampten) vel: pos_x = 0 + 16.0*0.02 = 0.32
+        assert bot.pos_x == pytest.approx(16.0 * 0.02)
+        assert bot.pos_x != 0.0
+
+    def test_no_movement_without_dash_a(self, bot):
+        self._setup_landed(bot)
+        bot._linear_acceleration = 0.0
+        bot._dispatch_movement(0.02, time.monotonic(), ai_tick=False)
+        assert bot.pos_x == 0.0

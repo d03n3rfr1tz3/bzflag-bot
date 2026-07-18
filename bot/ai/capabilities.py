@@ -246,14 +246,6 @@ class CapabilityMixin(BZBotBase):
             return (self._momentum_lin_acc, self._momentum_ang_acc)
         return (self._linear_acceleration, self._angular_acceleration)
 
-    def _has_linear_momentum_limit(self) -> bool:
-        """True wenn ein lineares Beschleunigungs-Limit aktiv ist (Server-Option -a oder M-Flagge)."""
-        return self._accel_limits()[0] > 0.0
-
-    def _has_angular_momentum_limit(self) -> bool:
-        """True wenn ein angulares Beschleunigungs-Limit aktiv ist (Server-Option -a oder M-Flagge)."""
-        return self._accel_limits()[1] > 0.0
-
     def _ramp_toward(self, current: float, target: float, max_delta: float) -> float:
         """Klemmt target auf [current-max_delta, current+max_delta]."""
         if target > current + max_delta:
@@ -283,11 +275,19 @@ class CapabilityMixin(BZBotBase):
         Ersetzt das bisherige Dreh-Snippet aus _navigate_wp/_turn_toward 1:1 und ergänzt die
         angulare Beschleunigungsklemme (angAcc·dt gegen die Vorframe-ang_vel, Faktor 1 — nicht 20×
         wie linear). Der Überschwing-Cap min(…, |diff|) verhindert Drehen über das Ziel hinaus
-        (erhält das Alt-Verhalten). ang=0 (weder -a noch M) → identisch zum bisherigen Verhalten."""
+        (erhält das Alt-Verhalten). ang=0 (weder -a noch M) → identisch zum bisherigen Verhalten.
+
+        F3: ang_vel wird nach der Ramp-Klemme auf die tatsächlich ausgeführte Drehrate
+        geschnappt — die Accel-Klemme (Turn-In) bleibt vollständig, das Settle erfolgt ohne
+        Überschwingen (bewusste Abweichung: der echte Client überschwingt, wir nicht -
+        P4-MOV-01-Glattheit). Ohne Angular-Limit feuert der Snap nie (dort gilt
+        |target|·dt ≤ |diff| konstruktionsbedingt)."""
         target = math.copysign(min(abs(diff / max(dt, 1e-6)), max_turn_rate), diff)
         ang_acc = self._accel_limits()[1]
         if ang_acc > 0.0:
             target = self._ramp_toward(self.ang_vel, target, ang_acc * dt)
+        if abs(target) * dt > abs(diff):
+            target = diff / max(dt, 1e-6)
         self.ang_vel = target
         self.azimuth = _wrap(
             self.azimuth + math.copysign(min(abs(target) * dt, abs(diff)), diff))
