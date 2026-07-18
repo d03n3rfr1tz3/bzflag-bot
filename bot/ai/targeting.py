@@ -211,7 +211,8 @@ class TargetingMixin(BZBotBase):
                     for fx, fy in via:
                         if nav:
                             seg = nav.plan_path(px, py, pz, fx, fy,
-                                                blocked_jump_wps=blocked)
+                                                blocked_jump_wps=blocked,
+                                                lin_accel_eff=self._eff_linear_accel())
                             if seg:
                                 all_wps.extend(seg)
                                 px, py, pz = seg[-1][0], seg[-1][1], seg[-1][2]
@@ -219,7 +220,8 @@ class TargetingMixin(BZBotBase):
                         seg = nav.plan_path(px, py, pz,
                                             best_pos[0], best_pos[1],
                                             blocked_jump_wps=blocked,
-                                            goal_z=best_pos[2])
+                                            goal_z=best_pos[2],
+                                            lin_accel_eff=self._eff_linear_accel())
                         if seg:
                             all_wps.extend(seg)
                     if all_wps:

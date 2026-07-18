@@ -977,6 +977,18 @@ class TestWpTimeoutScaling:
         expected = WP_TIMEOUT_BASE + 20.0 * WP_TIMEOUT_SCALE
         assert bot._wp_timeout == pytest.approx(expected)
 
+    def test_runup_leg_wp_timeout_scales_with_distance(self, bot):
+        """P4-MOV-02c: 16u-Anlauf-Leg (NAV_RUNUP_MAX) → _wp_timeout rein distanzskaliert.
+        WP_TIMEOUT_JUMP_BONUS wurde entfernt — kein Sprung-Fixaufschlag mehr nötig, die generische
+        Distanzformel deckt auch verlängerte Anlauf-WPs ab."""
+        from bot.constants import WP_TIMEOUT_BASE, WP_TIMEOUT_SCALE
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot._nav_path = [(0.0, 0.0, 0.0), (16.0, 0.0, 0.0)]
+        bot._wp_fail_count = 0
+        bot._advance_path()
+        expected = WP_TIMEOUT_BASE + 16.0 * WP_TIMEOUT_SCALE
+        assert bot._wp_timeout == pytest.approx(expected)
+
     def test_jump_infeasible_clears_path(self, bot):
         """Aufwärts-WP über Sprungmax (dz>18.4u) → disc<0 → Pfad verworfen."""
         dz = 19.0  # disc = 19²-2*9.8*19 < 0 → physikalisch unmöglich
@@ -1953,6 +1965,13 @@ class TestReverseToRunup:
         d = 5.0
         tx, ty = d * math.cos(math.radians(95)), d * math.sin(math.radians(95))
         self._setup(bot, (tx, ty), (tx + 10.0, ty, 15.0), azimuth=0.0)
+        assert bot._should_reverse_to_wp() is False
+
+    def test_no_reverse_when_runup_lengthened_beyond_gate(self, bot):
+        """P4-MOV-02c: ein M-verlängerter Anlauf (bis zu 15u) kann das Gate NAV_CELL_SIZE*2.5=10u
+        überschreiten → dann keine Rückwärtsanfahrt mehr (dokumentiertes Kurzstrecken-Feature,
+        kein Bug: über weite Strecken ist Vorwärtsfahren effizienter)."""
+        self._setup(bot, (-15.0, 0.0), (0.0, 0.0, 15.0), azimuth=0.0)
         assert bot._should_reverse_to_wp() is False
 
 

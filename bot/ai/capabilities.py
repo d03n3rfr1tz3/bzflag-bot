@@ -246,6 +246,15 @@ class CapabilityMixin(BZBotBase):
             return (self._momentum_lin_acc, self._momentum_ang_acc)
         return (self._linear_acceleration, self._angular_acceleration)
 
+    def _eff_linear_accel(self) -> float:
+        """Effektive lineare Beschleunigungsgrenze (bereits mit MOMENTUM_LIN_ACC_FACTOR gefaltet,
+        0.0 = unbegrenzt) — dieselbe Klemme wie _ramp_linear_speed. Für die Sprung-Anlauf-
+        Längenplanung (P4-MOV-02c, nav.plan_path(lin_accel_eff=…))."""
+        lin_acc = self._accel_limits()[0]
+        if lin_acc <= 0.0:
+            return 0.0
+        return MOMENTUM_LIN_ACC_FACTOR * lin_acc
+
     def _ramp_toward(self, current: float, target: float, max_delta: float) -> float:
         """Klemmt target auf [current-max_delta, current+max_delta]."""
         if target > current + max_delta:

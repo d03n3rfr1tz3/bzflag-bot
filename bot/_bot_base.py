@@ -389,6 +389,8 @@ class BZBotBase:
         raise NotImplementedError
     def _momentum_ramp_time(self, cycles: float) -> float:
         raise NotImplementedError
+    def _eff_linear_accel(self) -> float:
+        raise NotImplementedError
     def _move_to_target(self, dt: float, half: float) -> None:
         raise NotImplementedError
     def _muzzle_clear(self, az: float) -> bool:

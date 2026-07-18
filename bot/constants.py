@@ -122,7 +122,6 @@ TELEPORT_TIME: Final = 1.0    # BZDB_TELEPORTTIME-Default: PS_TELEPORTING-Dauer 
 # ── Navigation & A* ───────────────────────────────────────────────────────
 WP_TIMEOUT_BASE: Final = 3.0             # Basiszeit für Drehen/Anfahren/Sicherheit
 WP_TIMEOUT_SCALE: Final = 0.3             # s pro Einheit Distanz (≈3.3 u/s effektiv)
-WP_TIMEOUT_JUMP_BONUS: Final = 2.0             # Aufschlag für NAV_JUMP-Anfahrt-WPs
 
 # ── Trägheitsmodell (P4-MOV-02a/b): Beschleunigungsgrenzen (LocalPlayer::doMomentum) ──
 MOMENTUM_LIN_ACC_FACTOR: Final = 20.0    # linearer Clamp = 20×linearAcceleration (verifiziert LocalPlayer.cxx)
@@ -334,7 +333,7 @@ __all__ = [
     'LASER_AD_RATE', 'LASER_AD_LIFE', 'UPDATE_RATE_HZ', 'SERVER_UPDATE_RATE_HZ', 'AI_RATE_HZ',
     'SHOOT_INTERVAL_RANDOM_MAX', 'MIN_BURST_INTERVAL', 'GM_BURST_INTERVAL',
     'LANDING_DOUBLE_SHOT_DELAY', 'RESPAWN_DELAY', 'EXPLODE_TIME', 'ROUND_END_LINGER',
-    'TELEPORT_TIME', 'WP_TIMEOUT_BASE', 'WP_TIMEOUT_SCALE', 'WP_TIMEOUT_JUMP_BONUS',
+    'TELEPORT_TIME', 'WP_TIMEOUT_BASE', 'WP_TIMEOUT_SCALE',
     'MOMENTUM_LIN_ACC_FACTOR', 'MOMENTUM_TIMEOUT_CYCLES',
     'MOMENTUM_LIN_ACC_DEFAULT', 'MOMENTUM_ANG_ACC_DEFAULT',
     'NAV_JUMP_Z_TOL', 'NAV_TELE_TIMEOUT', 'NAV_TELE_ENGAGE_DIST', 'NAV_TELE_COOLDOWN',
