@@ -1919,7 +1919,47 @@ instant bzw. selbstkonsistent. Ohne `-a`/M ist alles No-Op.
 | `_check_tactical_jump`/`_nav_jump_feasible`, LANDING_SHOT `t_rem/tof` | unverändert | selbstkonsistent bzw. live pro Tick ausgewertet |
 
 Nicht Teil von 02b: die Sprungkanten-Planung im Navigationsgraphen an die effektive Beschleunigung
-angleichen (→ **P4-MOV-02c**, offen).
+angleichen (→ **P4-MOV-02c**, umgesetzt, s.u.).
+
+**P4-MOV-02c — umgesetzt: adaptiver Sprung-Anlauf.** Der Nav-Graph fügte vor jeder Sprungkante
+einen fixen `CELL_SIZE`-Anlauf (4u) ein — unter aktivem Beschleunigungslimit zu kurz (M-Default
+20 u/s²: 0→25 u/s braucht v²/2a ≈ 15,6u). `_insert_jump_runups` (`bzflag/nav_graph.py`) bemisst
+die Anlauflänge jetzt adaptiv: Ziel-Speed mit derselben Ballistik-Formel wie `_initiate_nav_jump`
+(`calc = (jlen+2.5)/t_desc`, geklemmt auf `tank_speed`), Distanz `v²/(2·accel)`, gekappt auf
+`NAV_RUNUP_MAX` (16u = 4·CELL_SIZE; deckt den M-Default mit Marge — extrem niedriges `-a` wird
+gekappt statt Routen ausufern zu lassen, Unterschwingen fängt der Landing-Wrong-Layer-Replan).
+Passt die Ziel-Länge nicht, fällt eine Kandidaten-Leiter in `CELL_SIZE`-Schritten bis exakt
+`CELL_SIZE` zurück (= Alt-Verhalten als garantierter letzter Kandidat). Durchgereicht als
+`plan_path(lin_accel_eff=…)` von allen vier Callsites (Sync + Async-Worker als Plain-Value-
+Snapshot wie `tank_speed`, zwei targeting.py-Sites); Quelle ist `_eff_linear_accel()`
+(`bot/ai/capabilities.py`): `MOMENTUM_LIN_ACC_FACTOR × _accel_limits()[0]`, 0.0 = unbegrenzt →
+byte-identisches Alt-Verhalten ohne `-a`/M. Nebenbei geschlossene Alt-Lücke: die Run-up-
+Validierung prüfte nur Endpunkt-`get_floor_z` + Dünnwände — dicke Hindernisse/Layer-Grenzen
+rutschten durch (bei 16u real riskant); jetzt zusätzlich `contains_xy`/`is_walkable_xy` des
+Absprung-Layers, auch für den `CELL_SIZE`-Fallback. Zwei bewusste Scope-Cuts: (1) KEIN Umbau von
+`_vn_cache`/Sprungkanten-Feasibility auf die Beschleunigung (M ist transient ~shakeTimeout,
+Cache-Churn lohnt nicht — die Kantenzulassung bleibt `tank_speed`-basiert); (2) KEINE „ehrliche
+Launch-Geschwindigkeit" in `_initiate_nav_jump` (Klemme auf die real erreichte Anfahr-
+Geschwindigkeit): kollidiert mit dem 02b-Guard `TestLaunchEventsIgnoreRamp` (Launches bleiben
+per Design instant, doJump rampt nicht), und der adaptiv lange Anlauf löst das Problem an der
+Wurzel — der Bot kommt real schnell genug an der Absprungzelle an. Nicht neu anfassen, ohne
+diesen Guard-Konflikt zu kennen. Bekannte Folge: das `_should_reverse_to_wp`-Gate (10u) greift
+bei M-verlängerten Anläufen (>10u) nicht mehr → normale Vorwärtsanfahrt (dokumentiertes
+Kurzstrecken-Feature, per Test abgesichert). `WP_TIMEOUT_JUMP_BONUS` war toter Code und ist
+entfernt; die WP-Timeouts skalieren bereits generisch mit Distanz + `_momentum_ramp_time`.
+
+**Konstanten-Audit (2026-07-18).** Vier Laufzeitstellen nutzten Konstanten statt der
+nachgeführten Server-Variablen: ID-Flaggen-Zielwahl (`IDENTIFY_RANGE` → `self._identify_range`,
+4 Stellen), `_effective_hit_radius()` und SR-Überroll-Check (`TANK_RADIUS` →
+`_effective_tank_radius()`; die F7-Entscheidung — Modulkonstanten wie HIT_RADIUS/DODGE_DIST/
+MUZZLE_FRONT bleiben statisch — gilt weiter und ist davon unberührt) sowie der Flag-Grab-Radius:
+`_flag_grab_radius()` (`bot/ai/capabilities.py`) = `max(FLAG_GRAB_RADIUS,
+_effective_tank_radius() + _flag_radius + FLAG_GRAB_MARGIN)` — Parität auf Default-Servern,
+skaliert nur nach oben (Bot nie schlechter als zuvor). Verifizierter bzfs-Kontext
+(`bzfs.cxx:3674`, `grabFlag`): der Server toleriert Grabs bis `tankSpeed+tankRadius+flagRadius`
+(≈31,8u Default, `tankSpeed` als Lag-Puffer) und ignoriert zu weite Versuche stillschweigend
+(Kick auskommentiert) — der Bot reizt das bewusst NICHT aus (menschlich-plausibel bleiben;
+echter Client grabbt erst bei ~`tankRadius+flagRadius`).
 
 **F4-Notiz (`time_to_dodge`).** Der Zuschlag nutzt bewusst die volle 0→v_max-Rampenzeit
 (`_momentum_ramp_time(1.0)`) statt exakter Kinematik am aktuellen Geschwindigkeitspunkt — bei
