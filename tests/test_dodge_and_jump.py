@@ -2148,3 +2148,418 @@ class TestWingsFeint:
         assert bot.azimuth == pytest.approx(1.0 + 0.4 * 0.02)
         assert bot.vel_x == pytest.approx(7.0)
         assert bot.vel_y == pytest.approx(-3.0)
+
+
+# ── P4-MOV-03c: Bedrohungs-Ausweichen in der Luft via normaler EVADING-Logik (Commit C3) ────
+
+class TestWingsAirborneEvading:
+    """Mit WG kann der Bot in der Luft genauso lenken wie am Boden — deshalb greift die normale
+    Bedrohungs-/EVADING-Logik (_handle_threat_airborne, combat.py) auch airborne aus JUMPING/
+    DODGE_JUMP heraus (_tick_jumping), und der airborne-EVADING-Zweig in _tick_committed führt den
+    Dodge dann in der Luft weiter (_wings_air_steer statt Boden-Rampen), inkl. Extra-Flap als
+    Notausweg bei zu knapper Ausweichzeit. Muster: TestWingsAirControl/TestWingsFeint."""
+
+    def _threaten(self, bot, now, shooter_id=2, shot_id=1, pos=None,
+                  vel=(-100.0, 0.0, 0.0)):
+        """Registriert einen reaktionsbereiten Schuss (react-delay bereits verstrichen).
+        pos=None → Schuss auf Höhe des (airborne) Bots (_find_incoming_shot filtert Schüsse auf
+        anderer Etage über HIT_RADIUS*2 aus, s. perception.py)."""
+        if pos is None:
+            pos = (20.0, 0.0, bot.pos_z)
+        make_shot(bot, shooter_id=shooter_id, shot_id=shot_id, pos=pos, vel=vel, fire_time=now)
+        bot._last_threat_id = (shooter_id, shot_id)
+        bot._threat_detected_at = now - 1.0
+
+    # ── State-Wechsel: JUMPING + WG + Bedrohung → EVADING airborne ─────────────────────────
+
+    def test_airborne_threat_switches_to_evading_with_wg(self, bot):
+        """JUMPING + WG-aktiv + eingehender bedrohlicher Schuss → Wechsel nach EVADING, noch
+        in der Luft (_jumping bleibt True — keine Landung in diesem Tick)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.JUMPING
+        now = time.monotonic()
+        self._threaten(bot, now)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now, ai_tick=True)
+        assert bot._ai_state == AIState.EVADING
+        assert bot._jumping is True
+        assert bot._dodging is True
+
+    def test_airborne_threat_from_dodge_jump_switches_to_evading(self, bot):
+        """Auch aus DODGE_JUMP heraus (nicht nur JUMPING) löst eine neue Bedrohung airborne
+        EVADING aus — beide Zustände laufen über denselben _tick_jumping-Zweig."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 5.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 5.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.DODGE_JUMP
+        now = time.monotonic()
+        self._threaten(bot, now)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now, ai_tick=True)
+        assert bot._ai_state == AIState.EVADING
+
+    def test_airborne_threat_ignored_without_ai_tick(self, bot):
+        """Perf-Gate: die teure Bedrohungserkennung (_find_incoming_shot) läuft nur im 10-Hz-
+        KI-Raster (ai_tick=True) — auf reinen Physik-Ticks (ai_tick=False) bleibt der State
+        unverändert, selbst wenn eine reaktionsbereite Bedrohung vorliegt."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.JUMPING
+        now = time.monotonic()
+        self._threaten(bot, now)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now, ai_tick=False)
+        assert bot._ai_state == AIState.JUMPING
+
+    def test_airborne_threat_no_switch_without_wg(self, bot):
+        """Ohne WG bleibt es bei der bisherigen Ballistik — keine airborne-Bedrohungsreaktion
+        (LocalPlayer.cxx: keine Kontrolle in der Luft ohne Wings), exakt wie vor C3."""
+        bot.own_flag = ""
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jump_ang_vel = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.JUMPING
+        now = time.monotonic()
+        self._threaten(bot, now)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now, ai_tick=True)
+        assert bot._ai_state == AIState.JUMPING
+
+    # ── Airborne-EVADING-Bewegung: _wings_air_steer statt Boden-Rampen ──────────────────────
+
+    def test_airborne_evading_forward_dodge_instant_no_ramp(self, bot):
+        """Airborne-EVADING lenkt über _wings_air_steer — _linear_acceleration (Boden-Rampe)
+        hat KEINEN Einfluss (doMomentum läuft nicht airborne): der Speed-Wechsel ist instant
+        statt über mehrere Ticks anzufahren."""
+        bot.own_flag = "WG"
+        bot._linear_acceleration = 50.0   # Boden-Rampe aktiv — darf airborne nicht wirken
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_reverse = False
+        bot._dodge_until = time.monotonic() + 1.0
+        now = time.monotonic()
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_committed(0.02, now)
+        speed = math.hypot(bot.vel_x, bot.vel_y)
+        assert speed == pytest.approx(bot._effective_tank_speed())   # instant, kein Ramp-Anlauf
+        assert bot.azimuth == pytest.approx(0.0)   # dodge_forward: Heading halten, kein Turn
+
+    def test_airborne_evading_reverse_dodge_clamped_to_half_speed(self, bot):
+        """_dodge_reverse: Rückwärts wie am Boden, aber mit der Luft-Klemme 0,5×
+        _effective_tank_speed() aus _wings_air_steer."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = False
+        bot._dodge_reverse = True
+        bot._dodge_until = time.monotonic() + 1.0
+        now = time.monotonic()
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_committed(0.02, now)
+        speed = math.hypot(bot.vel_x, bot.vel_y)
+        assert speed == pytest.approx(0.5 * bot._effective_tank_speed())
+        assert bot.vel_x < 0.0   # tatsächlich rückwärts bei azimuth=0
+        assert bot.azimuth == pytest.approx(0.0)   # kein Turn (wie am Boden)
+
+    def test_airborne_evading_turning_dodge_couples_velocity_to_azimuth(self, bot):
+        """Turning-Dodge (weder forward noch reverse): Kurs auf _dodge_dir — Kopplungs-
+        Invariante gilt auch hier (vel parallel/antiparallel zu azimuth, kein Driften)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = False
+        bot._dodge_reverse = False
+        bot._dodge_dir = math.pi / 2
+        bot._dodge_until = time.monotonic() + 1.0
+        now = time.monotonic()
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_committed(0.02, now)
+        assert bot.azimuth > 0.0   # dreht Richtung dodge_dir (+90°)
+        vel_ang = math.atan2(bot.vel_y, bot.vel_x)
+        # Halbschritt-Winkeltoleranz wie bei _wings_air_steer üblich (s. TestWingsAirControl):
+        # vel wird mit dem HALBEN Winkelschritt berechnet, azimuth mit dem VOLLEN.
+        tol = 0.5 * 0.02 * bot._effective_turn_rate() + 1e-6
+        assert abs(_angle_diff(vel_ang, bot.azimuth)) < tol
+
+    def test_airborne_evading_dodge_timer_expired_holds_heading(self, bot):
+        """Dodge-Timer abgelaufen, aber noch in der Luft: Heading/Speed halten statt neuer
+        KI-Entscheidung (Muster: _tick_committed macht 'keine neuen KI-Entscheidungen')."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        az0 = 0.4
+        speed0 = 10.0
+        bot.vel_x = speed0 * math.cos(az0); bot.vel_y = speed0 * math.sin(az0); bot.vel_z = 0.0
+        bot.azimuth = az0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        now = time.monotonic()
+        bot._dodge_until = now - 0.1   # bereits abgelaufen
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_committed(0.02, now)
+        assert bot.azimuth == pytest.approx(az0)
+        assert math.hypot(bot.vel_x, bot.vel_y) == pytest.approx(speed0)
+
+    # ── Landung im airborne-EVADING → bleibt EVADING, Boden-Dodge übernimmt ────────────────
+
+    def test_airborne_evading_landing_stays_evading_and_resets(self, bot):
+        """Landung während airborne-EVADING: kein Hängenbleiben (kein FALLING, kein Zurück-
+        springen auf COMBAT/SEEKING/IDLE) — der State bleibt EVADING, der Boden-Dodge-Pfad
+        übernimmt ab dem nächsten Tick. Reset-Felder wie bei jeder anderen Landung; der
+        Dodge-Timer/_dodging bleibt UNVERÄNDERT (Seiteneffekt-Checkliste C3)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.05
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_until = time.monotonic() + 1.0
+        bot._wings_jumps_used = 1
+        bot._wings_steer_az = 1.0
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 1
+        now = time.monotonic()
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=0.0), \
+             patch.object(bot, "_is_landed", return_value=True):
+            bot._tick_committed(0.02, now)
+        assert bot._ai_state == AIState.EVADING   # kein Zurückspringen, kein FALLING
+        assert bot._jumping is False
+        assert bot._wings_jumps_used == 0
+        assert bot._wings_steer_az is None
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+        assert bot.pos_z == pytest.approx(0.0)
+        assert bot.vel_z == pytest.approx(0.0)
+        assert bot._dodging is True   # unverändert — Boden-Pfad führt den Dodge fort
+        assert bot._dodge_forward is True
+
+    def test_airborne_evading_landing_then_ground_path_continues_dodge(self, bot):
+        """Folge-Tick nach der Landung: _jumping ist jetzt False → _tick_committed läuft über
+        den normalen Boden-Dodge-Pfad weiter (kein Sonderfall mehr, keine Zusatz-Physik)."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = False   # Landung bereits erfolgt (voriger Tick)
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_until = time.monotonic() + 1.0
+        now = time.monotonic()
+        with patch.object(bot, "_get_floor_z", return_value=0.0), \
+             patch.object(bot, "_is_landed", return_value=True), \
+             patch.object(bot, "_any_incoming_threat", return_value=True):
+            bot._tick_committed(0.02, now)
+        # Boden-Dodge-Pfad: _tank_speed (nicht _effective_tank_speed) vorwärts, ramp-basiert.
+        assert bot._ai_state == AIState.EVADING
+        assert math.hypot(bot.vel_x, bot.vel_y) > 0.0
+
+    # ── FALLING-Umleitung im Dispatch greift NICHT während airborne-EVADING ────────────────
+
+    def test_falling_redirect_does_not_fire_during_airborne_evading(self, bot):
+        """_dispatch_movement: die FALLING-Erkennung (_GROUND_STATES inkl. EVADING) prüft
+        `not self._jumping` — airborne-EVADING hält _jumping bewusst True, daher greift die
+        Umleitung nicht, obwohl vel_z deutlich negativ ist."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = 5.0; bot.vel_y = 0.0; bot.vel_z = -5.0   # deutlich fallend
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_until = time.monotonic() + 1.0
+        now = time.monotonic()
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._dispatch_movement(0.02, now, ai_tick=True)
+        assert bot._ai_state == AIState.EVADING   # NICHT nach FALLING umgeleitet
+        assert bot._jumping is True
+
+    # ── Extra-Flap als Notausweg ─────────────────────────────────────────────────────────
+
+    def test_extra_flap_fires_when_falling_and_threat_tight(self, bot):
+        """Fallend + Bedrohung auf Kollisionskurs mit knapper Restzeit (< 0.4s) + Luftsprung
+        übrig → zusätzlicher Flap hebt vel_z an, _wings_jumps_used inkrementiert."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = -10.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_until = time.monotonic() + 1.0
+        bot._wings_jumps_used = 0
+        now = time.monotonic()
+        # Schuss knapp vor dem Bot (Höhe = Bot-Höhe, sonst filtert perception.py ihn als
+        # Schuss "auf anderer Etage" aus), sehr schnell → time_to_closest ≈ 0.05s (< 0.4s)
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(5.0, 0.0, 20.0),
+                  vel=(-100.0, 0.0, 0.0), fire_time=now)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False), \
+             patch.object(bot, "_can_jump", return_value=True):
+            bot._tick_committed(0.02, now)
+        expected_gravity_only = -10.0 + bot._effective_gravity() * 0.02
+        assert bot.vel_z > expected_gravity_only + 1.0   # spürbar angehoben (Flap zusätzlich)
+        assert bot._wings_jumps_used == 1
+
+    def test_extra_flap_skipped_without_remaining_jumps(self, bot):
+        """Keine Luftsprünge mehr übrig (_can_jump → False, entspricht
+        _wings_jumps_used >= _wings_jump_count - 1) → kein Flap trotz akuter Bedrohung."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = -10.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_until = time.monotonic() + 1.0
+        bot._wings_jumps_used = 0
+        now = time.monotonic()
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(5.0, 0.0, 20.0),
+                  vel=(-100.0, 0.0, 0.0), fire_time=now)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False), \
+             patch.object(bot, "_can_jump", return_value=False):
+            bot._tick_committed(0.02, now)
+        expected_vz = -10.0 + bot._effective_gravity() * 0.02
+        assert bot.vel_z == pytest.approx(expected_vz)
+        assert bot._wings_jumps_used == 0
+
+    def test_extra_flap_skipped_when_threat_not_tight(self, bot):
+        """Bedrohung vorhanden, aber Restzeit komfortabel (≥ 0.4s) → kein Flap, seitliches
+        Ausweichen reicht."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = -10.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_until = time.monotonic() + 1.0
+        bot._wings_jumps_used = 0
+        now = time.monotonic()
+        # Schuss weit weg, langsam → time_to_closest deutlich > 0.4s
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(300.0, 0.0, 20.0),
+                  vel=(-50.0, 0.0, 0.0), fire_time=now)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False), \
+             patch.object(bot, "_can_jump", return_value=True):
+            bot._tick_committed(0.02, now)
+        expected_vz = -10.0 + bot._effective_gravity() * 0.02
+        assert bot.vel_z == pytest.approx(expected_vz)
+        assert bot._wings_jumps_used == 0
+
+    def test_extra_flap_skipped_when_not_falling(self, bot):
+        """Noch steigend (vel_z >= 0) → kein Flap, auch bei akuter Bedrohung + freiem Sprung."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 3.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_until = time.monotonic() + 1.0
+        bot._wings_jumps_used = 0
+        now = time.monotonic()
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(5.0, 0.0, 20.0),
+                  vel=(-100.0, 0.0, 0.0), fire_time=now)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False), \
+             patch.object(bot, "_can_jump", return_value=True):
+            bot._tick_committed(0.02, now)
+        assert bot._wings_jumps_used == 0
+
+    # ── Finte + neue Bedrohung → Finte bricht ab, EVADING übernimmt ────────────────────────
+
+    def test_feint_aborts_for_real_threat_evading_takes_over(self, bot):
+        """Eine laufende WG-TactJump-Finte (C2) bricht für eine echte Bedrohung ab: der
+        Threat-Check läuft in _tick_jumping VOR der Finte (_handle_threat_airborne räumt
+        _wg_feint_* mit auf) — 'wer täuscht, bricht die Täuschung nur für echte Bedrohungen
+        ab'."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.JUMPING
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 0
+        now = time.monotonic()
+        # anderer Schütze als der Finte-Gegner — realistisches Bedrohungsszenario
+        self._threaten(bot, now, shooter_id=3, shot_id=1,
+                       pos=(0.0, 20.0, bot.pos_z), vel=(0.0, -100.0, 0.0))
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now, ai_tick=True)
+        assert bot._wg_feint_target is None
+        assert bot._wg_feint_phase == 0
+        assert bot._ai_state == AIState.EVADING
+        assert bot._dodging is True
+
+    def test_feint_phase1_also_aborts_for_real_threat(self, bot):
+        """Auch in der Rückwärtsphase (Phase 1, kein Blick-Check mehr fällig) bricht eine echte
+        Bedrohung die Finte ab."""
+        bot.own_flag = "WG"
+        bot.pos_x = 26.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = -12.5; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = math.pi
+        bot._jumping = True
+        bot._ai_state = AIState.JUMPING
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 1
+        now = time.monotonic()
+        self._threaten(bot, now, shooter_id=3, shot_id=1,
+                       pos=(26.0, 40.0, bot.pos_z), vel=(0.0, -100.0, 0.0))
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now, ai_tick=True)
+        assert bot._wg_feint_target is None
+        assert bot._ai_state == AIState.EVADING

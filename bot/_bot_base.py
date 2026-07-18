@@ -371,6 +371,8 @@ class BZBotBase:
         raise NotImplementedError
     def _handle_threat(self, now: float) -> bool:
         raise NotImplementedError
+    def _handle_threat_airborne(self, now: float) -> bool:
+        raise NotImplementedError
     def _has_los_to_enemy(self, target_pid: int) -> bool:
         raise NotImplementedError
     def _has_los_to_point(self, ex: float, ey: float, ez: float) -> bool:
