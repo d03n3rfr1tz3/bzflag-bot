@@ -1948,6 +1948,37 @@ bei M-verlängerten Anläufen (>10u) nicht mehr → normale Vorwärtsanfahrt (do
 Kurzstrecken-Feature, per Test abgesichert). `WP_TIMEOUT_JUMP_BONUS` war toter Code und ist
 entfernt; die WP-Timeouts skalieren bereits generisch mit Distanz + `_momentum_ramp_time`.
 
+**P4-MOV-03a–c — WG-Luftsteuerung (umgesetzt).** Verifizierte Client-Fakten (`LocalPlayer.cxx`
+2.4, `doUpdateMotion`, Airborne-Zweig `// can't control motion in air unless have wings`): mit
+WG volle Kontrolle in der Luft, `speed = desiredSpeed` **ohne doMomentum** (die Momentum-Klemme
+läuft NUR im Boden-Zweig — auch mit `-a`/M bleibt WG-Luftsteuerung instant); Richtung über
+Halbschritt-Winkelintegration (`angle = oldAzimuth + 0.5·dt·newAngVel`), `newVelocity`
+strikt entlang des Azimuth (Rückwärts wie am Boden 0,5×), Gravity `+= _wingsGravity·dt`; bei
+`_wingsSlideTime > 0` stattdessen `doSlideMotion` (Velocity-Blend). Kern-Invariante: **Bewegung
+ist strikt an ±Blickrichtung gekoppelt** — Drehen KRÜMMT die Flugbahn; Drehung bei geradeaus
+laufender Velocity (das alte `_jump_ang_vel`-Muster) ist mit WG physikalisch unmöglich. Genau
+das taten die früheren WG-Sonderfälle (DODGE_JUMP-Setup, Escape-Spin, Land-Spin-Fallback) —
+behoben. Umsetzung: `_wings_air_control_active()` (WG + `_wingsSlideTime == 0`; Slide wird
+NICHT modelliert → konservatives Downgrade auf die alte Ballistik) und
+`_wings_air_steer(dt, target_az, speed)` (`bot/ai/capabilities.py`, signierter Speed).
+Prioritätskette im WG-Zweig von `_tick_jumping`: Bedrohungs-Wechsel nach EVADING
+(`_handle_threat_airborne`, 10-Hz-Raster; bricht eine laufende Finte ab) > TactJump-Finte
+(`_wg_feint_tick`) > Steuerziel-Azimuth `_wings_steer_az` (Escape-/DODGE_JUMP-/Z-Attack-
+Drehwünsche) > Gegner-Verfolgung > Heading halten. `_tick_nav_jump` steuert auf den Lande-WP
+(Speed aus der Rest-Sinkzeit, KEIN Land-Spin — Nachdrehen macht die Bodensteuerung),
+`_tick_falling`/`_tick_z_attack` analog. **Finte (03b):** Phase 0 volle Speed über den Gegner,
+am Umschaltpunkt (Projektion ≥ TANK_LENGTH) GENAU EIN Blick-Check auf den Gegner-Azimuth
+(<45° auf den Bot = „hat mitgedreht"): gedreht → Phase 1 Rückwärtsflug mit Azimuth fest auf
+dem Gegner (Landung mit Feuerfenster auf seinen Rücken); nicht gedreht → Heading fixieren
+(`_wings_steer_az`, verhindert Zurückkrümmen durch die Verfolgungs-Priorität) und klassisch
+hinter ihm landen. **Airborne-EVADING (03c):** `_tick_committed`-Sonderzweig (EVADING +
+`_jumping`): Vertikalphysik wie `_tick_jumping`, Horizontalsteuerung nach committed
+Dodge-Semantik via `_wings_air_steer` — bewusst KEINE Boden-Rampen airborne; `_jumping` bleibt
+bis zur Landung True (verhindert Schwerkraft-Dopplung in `_run_physics` und die
+FALLING-Umleitung im Dispatch); Landung bleibt nahtlos in EVADING. Extra-Flap als Notausweg
+(fallend + `_can_jump` + Restzeit < 0,4s; teurer Schuss-Scan hinter den billigen Gates).
+Ohne WG bzw. mit Slide-Zeit ist JEDER neue Pfad ein No-Op (Regressionstests decken beides ab).
+
 **Konstanten-Audit (2026-07-18).** Vier Laufzeitstellen nutzten Konstanten statt der
 nachgeführten Server-Variablen: ID-Flaggen-Zielwahl (`IDENTIFY_RANGE` → `self._identify_range`,
 4 Stellen), `_effective_hit_radius()` und SR-Überroll-Check (`TANK_RADIUS` →

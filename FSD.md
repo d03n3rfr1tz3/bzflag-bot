@@ -368,6 +368,9 @@ Taktische und infrastrukturelle Verbesserungen ohne harte Produktionsrelevanz.
 | P4-MOV-02a | Trägheitsmodell: lineare/angulare Beschleunigungsgrenzen (Server-Vorgabe) im normalen Bodenfahren, inkl. nachgeführter Stuck-/Timeout-Erkennung | ✅ | — |
 | P4-MOV-02b | Trägheitsmodell: committed Zustände und Vorberechnungen (Sprünge, Z-Angriff, Landing-Shot) einzeln bewerten und ggf. nachführen | ✅ | P4-MOV-02a |
 | P4-MOV-02c | Trägheitsmodell: Sprungkanten-Planung im Navigationsgraphen an die effektive Beschleunigung angleichen | ✅ | P4-MOV-02b |
+| P4-MOV-03a | WG-Luftsteuerung Basis: Bewegung in der Luft strikt entlang ±Blickrichtung (faithful doUpdateMotion; kein Momentum airborne, Rückwärts 0,5×; `_wingsSlideTime`>0 → konservative Ballistik); NavJump-Kurskorrektur; FALLING steuerbar; Fix: entkoppelte WG-Luftdrehung | ✅ | — |
+| P4-MOV-03b | WG-TactJump-Finte: Übersprung antäuschen; dreht der Gegner mit → rückwärts zurückfliegen und mit Gegner im Visier landen, sonst klassisch hinter ihm landen | ✅ | P4-MOV-03a |
+| P4-MOV-03c | WG airborne ausweichen: normale EVADING-Logik (Lenken wie am Boden bzw. Extra-Sprünge) auch in der Luft, z. B. gegen gegnerische Landing-Shots | ✅ | P4-MOV-03a |
 
 **Flaggen (P4-FLG)**
 
