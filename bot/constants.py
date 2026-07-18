@@ -69,6 +69,9 @@ GM_LOCK_ON_ANGLE: Final = 0.15     # _lockOnAngle (rad; GM-Lock-on-Toleranz) ↔
 # ── Flaggen-Physik (via _on_set_var überschreibbar) ───────────────────────
 FLAG_RADIUS: Final = 2.5      # _flagRadius (Server-Aufnahme-Distanz) ↔ self._flag_radius
 FLAG_GRAB_RADIUS: Final = TANK_RADIUS * 2   # ~8.64 u (Bot-eigener Grab-Anfahrtsradius)
+FLAG_GRAB_MARGIN: Final = FLAG_GRAB_RADIUS - TANK_RADIUS - FLAG_RADIUS  # 1.82 u — Sicherheitsmarge
+                             # zwischen Default-Grab-Radius und tank+flag-Radius (Basis für
+                             # _flag_grab_radius(), skaliert mit der Server-Var _tankLength/_flagRadius)
 VELOCITY_AD: Final = 1.5      # _velocityAd   (× tankSpeed bei V-Flagge) ↔ self._velocity_ad
 AGILITY_AD_VEL: Final = 2.25     # _agilityAdVel (× tankSpeed bei A-Flagge) ↔ self._agility_ad_vel
 LG_GRAVITY: Final = 12.7     # _lgGravity (Schwerkraft bei LG-Flagge) ↔ self._lg_gravity
@@ -325,6 +328,7 @@ __all__ = [
     'MAX_SHOTS_DEFAULT', 'SHOT_RADIUS', 'RELOAD_TIME_DEFAULT', 'SHOCK_IN_RADIUS',
     'SHOCK_OUT_RADIUS', 'SHOCK_AD_LIFE', 'SW_EXPAND_SPEED', 'GM_TURN_RATE',
     'GM_ACTIVATION_TIME', 'GM_AD_LIFE', 'GM_LOCK_ON_ANGLE', 'FLAG_RADIUS', 'FLAG_GRAB_RADIUS',
+    'FLAG_GRAB_MARGIN',
     'VELOCITY_AD', 'AGILITY_AD_VEL', 'LG_GRAVITY', 'BURROW_DEPTH', 'BURROW_SPEED_AD',
     'BURROW_ANG_AD', 'ANGULAR_AD', 'SHIELD_FLIGHT', 'IDENTIFY_RANGE', 'OBESITY_FACTOR',
     '_TINY_FACTOR', 'THIEF_TINY_FACTOR', 'THIEF_VEL_AD', 'THIEF_AD_SHOT_VEL', 'THIEF_AD_LIFE',

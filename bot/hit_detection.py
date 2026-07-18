@@ -11,7 +11,6 @@ from bzflag.protocol import (
     MsgKilled,
 )
 from bot.constants import (
-    TANK_RADIUS,
     RESPAWN_DELAY,
     HIT_RADIUS,
     KILL_REASON_SHOT,
@@ -341,6 +340,7 @@ class HitDetectionMixin(BZBotBase):
         # list()-Snapshot: players wird im Recv-Thread mutiert (Join/Leave),
         # diese Iteration läuft im Game-Loop → ohne Kopie droht
         # "RuntimeError: dictionary changed size during iteration".
+        thr = self._effective_tank_radius() * (1.0 + self._sr_radius_mult)  # schleifeninvariant
         for pid, info in list(self.players.items()):
             if not info.alive: continue
             # BU wirkt nur eingegraben (pos[2] < 0), wie überall sonst im Code
@@ -352,7 +352,6 @@ class HitDetectionMixin(BZBotBase):
             dz = info.pos[2] - self.pos_z
             # quadrierter Vergleich statt sqrt (mathematisch identisch, spart die Wurzel pro Kandidat)
             dist_sq = dx*dx + dy*dy + 4.0*dz*dz
-            thr = TANK_RADIUS * (1.0 + self._sr_radius_mult)
             if dist_sq < thr * thr:
                 logger.info("[%s] Überrollt von Spieler %d (SR)", self.callsign, pid)
                 self._report_steamrolled(pid)

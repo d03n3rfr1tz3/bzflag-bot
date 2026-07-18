@@ -333,6 +333,8 @@ class BZBotBase:
         raise NotImplementedError
     def _effective_shot_speed(self) -> float:
         raise NotImplementedError
+    def _effective_tank_radius(self) -> float:
+        raise NotImplementedError
     def _effective_tank_speed(self) -> float:
         raise NotImplementedError
     def _effective_turn_rate(self) -> float:
@@ -354,6 +356,8 @@ class BZBotBase:
     def _find_ricochet_aim_angle(self, target_pid: int, predicted_pos: Optional[Tuple[float, float]]=None, aim_max_deg: int=45) -> Optional[float]:
         raise NotImplementedError
     def _find_target_player(self):
+        raise NotImplementedError
+    def _flag_grab_radius(self) -> float:
         raise NotImplementedError
     def _get_enemy_pos(self, pid: int):
         raise NotImplementedError

@@ -253,6 +253,17 @@ def test_normal_hit_radius_matches_bzflag(bot):
     assert eff_r == pytest.approx(TANK_RADIUS * 0.99, abs=0.01)
 
 
+def test_effective_hit_radius_follows_tank_length(bot):
+    """Konstanten-Audit: _effective_hit_radius() nutzt die nachgeführte Server-Var
+    _tank_length (via _effective_tank_radius()) statt der starren TANK_RADIUS-Konstante —
+    ein Custom-Server mit anderer _tankLength ändert den Trefferradius entsprechend."""
+    from bot.constants import TANK_RADIUS_FACTOR
+    bot.own_flag = ""
+    bot._tank_length = 9.0   # Custom-Server: größere Tanks als der 6.0-Default
+    eff_r = bot._effective_hit_radius()
+    assert eff_r == pytest.approx(TANK_RADIUS_FACTOR * 9.0 * 0.99, abs=0.01)
+
+
 def test_obesity_flag_increases_hit_radius(bot):
     """Obesity-OBB ist breiter als normal: Schuss 3.5u seitlich trifft O-Tank, nicht Normaltank."""
     bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
@@ -447,6 +458,18 @@ def test_sr_kills_when_close(bot):
     assert bot.client.send.called
     assert bot.client.send.call_args[0][0] == MsgKilled
     assert not bot.alive
+
+
+def test_sr_kill_radius_follows_tank_length(bot):
+    """Konstanten-Audit: SR-Überroll-Check nutzt _effective_tank_radius() (nachgeführte
+    _tank_length) statt der starren TANK_RADIUS-Konstante — kleinere Custom-_tankLength
+    verkleinert den Kill-Radius, ein zuvor tödlicher Abstand tötet dann nicht mehr."""
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    bot._tank_length = 1.0   # winziger Custom-Tank → eff. Radius weit unter 5u
+    make_player(bot, pid=3, pos=(5.0, 0.0, 0.0), flag="SR")
+    bot._check_steamroller(time.monotonic())
+    bot.client.send.assert_not_called()
+    assert bot.alive
 
 
 def test_sr_no_kill_without_sr_flag(bot):

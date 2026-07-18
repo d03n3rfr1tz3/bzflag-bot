@@ -1825,6 +1825,27 @@ class TestRecentFlagTargets:
 
         assert bot.target_pos == (60.0, 0.0)
 
+    def test_identify_range_follows_setvar(self, bot):
+        """Konstanten-Audit: Fall B (ID-Flagge) nutzt die nachgeführte Server-Var
+        self._identify_range statt der starren IDENTIFY_RANGE-Konstante (50u). Eine gute
+        Flagge bei 55u liegt außerhalb des Default-Radius, aber innerhalb eines vom
+        Server via _identifyRange auf 60u gesetzten Radius → Fall B1 erkennt sie als gut
+        und legt die ID-Flagge ab (MsgDropFlag)."""
+        from bot.models import FlagInfo
+        bot.own_flag = "ID"
+        bot._identify_range = 60.0   # Custom-Server: größerer Erkennungsradius als Default 50
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.good_flags = {"GM"}
+        bot._last_drop_attempt = 0.0
+        fi = FlagInfo(flag_id=0, abbr="GM", status=1, pos=[55.0, 0.0, 0.0])
+        bot.flags = {0: fi}
+        bot._recent_flag_targets = collections.deque(maxlen=10)
+        bot._nav_graph = None
+
+        bot._new_target()
+
+        bot.client.send.assert_called()   # _try_drop_flag → nur im B1-Zweig ausgelöst
+
     def test_degenerate_path_no_hot_loop(self, bot):
         """Degenerate-Pfad: Flag geht in deque → zweiter _new_target()-Aufruf wählt andere."""
         from bot.models import FlagInfo
