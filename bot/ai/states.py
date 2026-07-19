@@ -50,8 +50,10 @@ class StateMachineMixin(BZBotBase):
         """Realer Boden-State je nach Lage: COMBAT (Ziel + Mensch da), sonst SEEKING/IDLE.
 
         Dient als sicherer Return-State, damit NAV_JUMP/NAV_JUMP_ALIGN nie auf sich selbst
-        „aussteigen" (sonst No-Op-Transition in _transition_to → Endlosfalle)."""
-        if self.target_player is not None and self._has_presence():
+        „aussteigen" (sonst No-Op-Transition in _transition_to → Endlosfalle).
+        P4-FLG-03: aktives PZ-Manöver → SEEKING statt COMBAT (Flucht schlägt Kampf)."""
+        if (self.target_player is not None and self._has_presence()
+                and not self._pz_escape_active()):
             return AIState.COMBAT
         if self._has_presence():
             return AIState.SEEKING
@@ -943,6 +945,14 @@ class StateMachineMixin(BZBotBase):
                 self._new_target()
             self._last_pos_check_time = now
             self._last_pos_check = [self.pos_x, self.pos_y]
+        # P4-FLG-03: aktives PZ-Manöver — kein Ziel-Erwerb (Flucht schlägt Kampf), stattdessen
+        # das Zoning-Manöver treiben (Tor wählen/validieren/anfahren). Bedrohungs-Handling
+        # (_handle_threat oben) bleibt davor aktiv: EVADING unterbricht, _ground_state führt
+        # danach hierher zurück.
+        if self._pz_escape_active():
+            self._pz_maneuver_tick(now)
+            self._move_reverse = False
+            return
         self._check_opportunistic_grab(now)
         _prev = self.target_player
         self._validate_and_find_target()

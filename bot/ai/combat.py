@@ -57,6 +57,10 @@ class CombatMixin(BZBotBase):
         if not self._has_presence():
             self._transition_to(AIState.IDLE)
             return
+        # P4-FLG-03: aktives PZ-Manöver → Flucht schlägt Kampf; SEEKING treibt das Manöver.
+        if self._pz_escape_active():
+            self._transition_to(AIState.SEEKING)
+            return
         if self._handle_threat(now):
             return
         self._check_opportunistic_grab(now)

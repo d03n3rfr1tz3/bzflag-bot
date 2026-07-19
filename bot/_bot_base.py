@@ -146,6 +146,14 @@ class BZBotBase:
     _plan_gen: Any
     _pre_fall_state: Any
     _presence: bool
+    _pz_failed_gates: dict
+    _pz_rezone_block_until: Any
+    _pz_target_gate: Any
+    _pz_unreachable_until: Any
+    _pz_validate_deadline: Any
+    _pz_validate_goal: Any
+    _pz_validate_result: Any
+    _pz_zoned_gate: Any
     _recent_flag_targets: Any
     _reconnect_needed: bool
     _reload_time: Any
@@ -242,6 +250,7 @@ class BZBotBase:
     good_flags: set
     host: str
     human_count: int
+    is_phantom_zoned: bool
     managed: bool
     motto: Any
     observer_count: int
@@ -421,9 +430,17 @@ class BZBotBase:
         raise NotImplementedError
     def _phantom_shot_harmless(self, shot: Shot) -> bool:
         raise NotImplementedError
+    def _shot_harmless_to_zoned(self, shot: Shot) -> bool:
+        raise NotImplementedError
     def _plan_path(self, goal_x: float, goal_y: float, goal_z: float | None=None, *, cap_wps: int | None=None) -> None:
         raise NotImplementedError
     def _poll_async_plan(self) -> None:
+        raise NotImplementedError
+    def _pz_escape_active(self) -> bool:
+        raise NotImplementedError
+    def _pz_maneuver_tick(self, now: float) -> None:
+        raise NotImplementedError
+    def _pz_worth_keeping(self) -> bool:
         raise NotImplementedError
     def _ramp_azimuth_step(self, diff: float, dt: float, max_turn_rate: float) -> None:
         raise NotImplementedError

@@ -139,6 +139,11 @@ NAV_TELE_TIMEOUT: Final = 2.0             # max. Sekunden Direktanflug in die To
 NAV_TELE_ENGAGE_DIST: Final = NAV_CELL_SIZE * 5.0  # nur engagen, wenn Tor-Mitte so nah ist (~20u)
 NAV_TELE_COOLDOWN: Final = 8.0             # Sperre eines Tors nach fehlgeschlagener Querung
 NAV_TELE_OVERSHOOT: Final = 4.0             # u über die Mitte hinaus anzielen → Tor-Ebene sicher queren
+# P4-FLG-03 — PhantomZone-Manöver (zonen am Tor A, entzonen am Tor B)
+PZ_REZONE_COOLDOWN: Final = 60.0   # s nach dem Entzonen, bevor der Bot erneut zonen darf
+PZ_PLAN_TIMEOUT_S: Final = 5.0     # Async-Erreichbarkeits-Validierung: max. Wartezeit je Tor-Kandidat
+PZ_GATE_RETRY_S: Final = 30.0      # Tor mit gescheiterter Validierung: Sperrzeit bis zur Neu-Kandidatur
+PZ_UNREACH_DROP_S: Final = 30.0    # alle Tore unerreichbar → Keep-Gate gilt solange als gefallen (Drop)
 # P4-MOV-01: Early-Advance (glatte WP-Übergänge / Ecken-Glättung)
 EARLY_ADVANCE_LOOKAHEAD: Final = NAV_CELL_SIZE * 4.0  # ≈16u: nur nahe Ecken glätten — hält query_segment
                                                 # klein (≤2×2 Grid-Zellen) und die Plan-Abweichung begrenzt
@@ -280,7 +285,7 @@ KILL_REASON_GENOCIDED: Final = 3
 # ── Flaggen-Mengen & Namens-Tabelle ───────────────────────────────────────
 GOOD_FLAGS_DEFAULT = {"GM", "SW", "L", "SB", "MG", "V", "SE", "ID",
                       "A", "BU", "G", "IB", "N", "QT", "SH", "T", "F", "JP", "WG",
-                      "OO", "MQ", "TH", "R", "CL", "ST", "SR", "CS"}
+                      "OO", "MQ", "TH", "R", "CL", "ST", "SR", "CS", "PZ"}
 BAD_FLAGS_DEFAULT  = {"NJ", "B", "RC", "O", "JM", "BY",
                       "CB", "FO", "LT", "M", "RO", "RT", "TR", "WA"}
 
@@ -341,6 +346,7 @@ __all__ = [
     'MOMENTUM_LIN_ACC_FACTOR', 'MOMENTUM_TIMEOUT_CYCLES',
     'MOMENTUM_LIN_ACC_DEFAULT', 'MOMENTUM_ANG_ACC_DEFAULT',
     'NAV_JUMP_Z_TOL', 'NAV_TELE_TIMEOUT', 'NAV_TELE_ENGAGE_DIST', 'NAV_TELE_COOLDOWN',
+    'PZ_REZONE_COOLDOWN', 'PZ_PLAN_TIMEOUT_S', 'PZ_GATE_RETRY_S', 'PZ_UNREACH_DROP_S',
     'NAV_TELE_OVERSHOOT', 'NAV_ASYNC_TRIGGER_MS', 'NAV_ASYNC_MAX_EXPANSIONS',
     'NAV_ASYNC_MAX_MS', 'NAV_ASYNC_RESYNC_TOL', 'NAV_WALL_PROBE_DIST', 'NAV_WALL_STEEP_DEG',
     'STUCK_WINDOW', 'STUCK_MIN_DIST', 'COMBAT_STALL_WIN_MIN', 'COMBAT_STALL_WIN_MAX',

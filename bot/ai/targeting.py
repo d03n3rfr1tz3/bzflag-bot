@@ -54,6 +54,36 @@ class TargetingMixin(BZBotBase):
             team_alive[info.team] = team_alive.get(info.team, 0) + 1
         return any(c > 1 for c in team_alive.values())
 
+    def _pz_worth_keeping(self) -> bool:
+        """P4-FLG-03-Keep-Gate für die PZ-Flagge: behalten nur wenn (a) Teleporter existieren
+        (Erreichbarkeit prüft das Manöver per Async-Validierung — schlagen ALLE Tore fehl, setzt
+        es _pz_unreachable_until und das Gate fällt hier) und (b) mindestens ein Gegner in
+        Radar-Reichweite mehr Punkte (wins − losses, MsgScore) hat als der Bot. Defensive
+        Nutzung: vor dem stärkeren Gegner per Zoning in Sicherheit bringen."""
+        world_map = self._world_map
+        if world_map is None or not world_map.teleporters:
+            return False
+        _now = time.monotonic()
+        if _now < self._pz_unreachable_until:
+            return False
+        my_score = self._own_wins - self._own_losses
+        radar_r = self._effective_radar_range()
+        for pid, info in list(self.players.items()):
+            if pid == self.player_id or not info.alive or info.paused:
+                continue
+            if _now - info.last_seen > ENEMY_STALE_S:
+                continue
+            if info.wins - info.losses <= my_score:
+                continue
+            if not self._is_foe(info, False):
+                continue
+            if math.hypot(info.pos[0] - self.pos_x, info.pos[1] - self.pos_y) >= radar_r:
+                continue
+            if not self._enemy_visible_radar(info):
+                continue
+            return True
+        return False
+
     def _validate_and_find_target(self) -> None:
         """Validiert target_player (Reichweite/Sicht), sucht neues Ziel falls nötig."""
         if self.target_player is not None:
@@ -123,7 +153,12 @@ class TargetingMixin(BZBotBase):
                 continue
             if not self._is_foe(info, in_sight):
                 continue
-            pz_penalty = 5.0 if info.is_phantom_zoned and self.own_flag not in ("SB", "SW") else 1.0
+            # P4-FLG-03: gezoned invertiert sich die PZ-Abwertung — die eigenen (Phantom-)Schüsse
+            # treffen NUR gezonte Gegner, alle anderen sind praktisch untreffbar.
+            if self.is_phantom_zoned:
+                pz_penalty = 1.0 if info.is_phantom_zoned else 5.0
+            else:
+                pz_penalty = 5.0 if info.is_phantom_zoned and self.own_flag not in ("SB", "SW") else 1.0
             st_gm_penalty = ST_GM_PENALTY if self.own_flag == "GM" and info.flag == "ST" else 1.0
             # Aktuell als unerreichbar gemiedener Gegner: weich deprioritisieren (nicht hart
             # überspringen) — ein erreichbarer Feind wird bevorzugt, der gemiedene aber weiter
@@ -296,6 +331,19 @@ class TargetingMixin(BZBotBase):
                 if best_d > self._wp_reach_radius():
                     self._plan_path(best_pos[0], best_pos[1])
                 return
+
+        # ── Fall PZ: aktives Zoning-Manöver — Ziel bleibt das gewählte Tor ─
+        # (P4-FLG-03; sonst würde jeder _new_target-Aufruf — Pfad-Ende/Stuck — das Manöver mit
+        # einem Zufallsziel überschreiben und _pz_maneuver_tick müsste es zurückdrehen.)
+        elif self.own_flag == "PZ" and self._pz_escape_active():
+            ti = self._pz_target_gate
+            world_map = self._world_map
+            if (ti is not None and world_map is not None
+                    and ti < len(world_map.teleporters)):
+                tele = world_map.teleporters[ti]
+                self._plan_path(tele.cx, tele.cy)
+            # kein Tor gewählt → der nächste _pz_maneuver_tick (10 Hz) wählt eines
+            return
 
         # ── Fall C: Bot hat andere Flagge — zufälliger Wegpunkt ───────────
         h = self.world_half * 0.85

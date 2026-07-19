@@ -21,6 +21,10 @@ from bot.constants import (
     NAV_ASYNC_MAX_EXPANSIONS,
     NAV_ASYNC_MAX_MS,
     NAV_ASYNC_RESYNC_TOL,
+    PZ_REZONE_COOLDOWN,
+    PZ_PLAN_TIMEOUT_S,
+    PZ_GATE_RETRY_S,
+    PZ_UNREACH_DROP_S,
 )
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
@@ -303,8 +307,26 @@ class NavigationMixin(BZBotBase):
         world_map = self._world_map
         if world_map is None or not world_map.teleporters:
             return
-        # PhantomZone togglet zoned statt zu teleportieren (P4-FLG-03) → hier nicht teleportieren.
+        # PhantomZone: die Querung togglet „zoned" statt zu teleportieren (P4-FLG-03) — kein
+        # Positions-/Velocity-/Azimuth-Sprung, kein MsgTeleport; der Status läuft über
+        # PS_FLAG_ACTIVE in den eigenen Updates. Der Link ist egal (der Toggle passiert am Feld).
         if self.own_flag == "PZ":
+            if now < self._teleporting_until:
+                return  # Re-Trigger-Sperre: eine Querung = genau ein Toggle
+            ox, oy, oz = old
+            dx, dy, dz = self.pos_x - ox, self.pos_y - oy, self.pos_z - oz
+            if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+                return
+            pz_t, pz_ti = 2.0, -1
+            for ti, tele in enumerate(world_map.teleporters):
+                res = ray_teleporter_crossing(ox, oy, oz, dx, dy, dz, tele)
+                if res is None:
+                    continue
+                t, _face = res
+                if 0.0 <= t <= 1.0 and t < pz_t:
+                    pz_t, pz_ti = t, ti
+            if pz_ti >= 0:
+                self._pz_toggle_zoned(pz_ti, now)
             return
         if now < self._teleporting_until:
             return  # Re-Trigger-Sperre (mirror isTeleporting())
@@ -398,6 +420,174 @@ class NavigationMixin(BZBotBase):
             self._nav_goal = None
             self._wp_start_time = None
             self.target_pos = None
+
+    # ── P4-FLG-03: PhantomZone-Zoning-Manöver ────────────────────────────────
+
+    def _pz_toggle_zoned(self, ti: int, now: float) -> None:
+        """Vollzieht den Zoned-Toggle einer PZ-Tor-Querung (aus _check_teleport_crossing).
+
+        Kein Positionssprung — der geplante Pfad (inkl. evtl. Tele-Kanten) passt nicht mehr →
+        leeren und neu planen lassen. _teleporting_until dient wie beim echten Teleport als
+        Re-Trigger-Sperre UND als NAV_TELE-Erfolgssignal (_tick_nav_tele). Beim Entzonen:
+        Re-Zone-Cooldown; lief Zone UND Entzone über DASSELBE Tor, wird die Flagge direkt
+        abgegeben (User-Regel — deckt auch Ein-Teleporter-Karten ab; am Tor steht der Bot nie
+        im Gebäudeinneren, der Drop ist also sicher)."""
+        self.is_phantom_zoned = not self.is_phantom_zoned
+        self._teleporting_until = now + TELEPORT_TIME
+        self._nav_path = []
+        self._nav_goal = None
+        self.target_pos = None
+        self._pz_target_gate = None
+        if self.is_phantom_zoned:
+            self._pz_zoned_gate = ti
+            logger.info("[%s] PhantomZone: gezoned (Tor %d)", self.callsign, ti)
+        else:
+            same_gate = (ti == self._pz_zoned_gate)
+            self._pz_zoned_gate = None
+            self._pz_rezone_block_until = now + PZ_REZONE_COOLDOWN
+            logger.info("[%s] PhantomZone: entzont (Tor %d)%s", self.callsign, ti,
+                        " — gleiches Tor wie beim Zonen → Flagge abgeben" if same_gate else "")
+            if same_gate:
+                self._try_drop_flag()
+
+    def _pz_escape_active(self) -> bool:
+        """True, solange das PZ-Manöver das Verhalten bestimmt: gezoned (→ Phase 2 zum anderen
+        Tor) oder Keep-Gate wahr und Re-Zone-Cooldown abgelaufen (→ Phase 1 zum ersten Tor).
+        Pro Tick memoisiert (_tick_memo) — wird aus _ground_state/_tick_*/Zielwahl mehrfach
+        pro Tick abgefragt und _pz_worth_keeping scannt die Spielerliste."""
+        if self.own_flag != "PZ":
+            return False
+        if self.is_phantom_zoned:
+            return True
+        v = self._tick_memo.get("pz_escape")
+        if v is None:
+            v = (time.monotonic() >= self._pz_rezone_block_until) and self._pz_worth_keeping()
+            self._tick_memo["pz_escape"] = v
+        return v
+
+    def _pz_pick_gate(self, exclude, skip_failed: bool):
+        """Nächstgelegenes Tor (Index) als Manöver-Kandidat. exclude wird nur ausgeschlossen,
+        wenn es Alternativen gibt (Fallback aufs selbe Tor → Selbes-Tor-Drop-Regel greift
+        nach dem Entzonen). skip_failed übergeht Tore mit gescheiterter Validierung."""
+        world_map = self._world_map
+        if world_map is None:
+            return None
+        teles = world_map.teleporters
+        _now = time.monotonic()
+        best_ti, best_d = None, float("inf")
+        for ti, tele in enumerate(teles):
+            if exclude is not None and ti == exclude and len(teles) > 1:
+                continue
+            if skip_failed and self._pz_failed_gates.get(ti, 0.0) > _now:
+                continue
+            d = math.hypot(tele.cx - self.pos_x, tele.cy - self.pos_y)
+            if d < best_d:
+                best_ti, best_d = ti, d
+        return best_ti
+
+    def _pz_begin_validation(self, cx: float, cy: float) -> None:
+        """Startet die Async-Erreichbarkeits-Validierung fürs Phase-1-Tor (P4-INF-01-Infra,
+        Ergebnis-Abgriff in _poll_async_plan). Synchrones plan_path validiert größere Distanzen
+        wegen der Expansions-/Zeit-Limits kaum — daher Vollsuche im Hintergrund mit
+        PZ_PLAN_TIMEOUT_S-Fenster; solange fährt der Bot bereits greedy Richtung Tor."""
+        self._pz_validate_goal = (cx, cy)
+        self._pz_validate_result = None
+        self._pz_validate_deadline = time.monotonic() + PZ_PLAN_TIMEOUT_S
+        nav = self._nav_graph
+        if nav is None:
+            self._pz_validate_result = True   # kein Graph → Direktfahrt ist die einzige Wahrheit
+            return
+        blocked = {k for k, v in self._nav_jump_cooldowns.items() if v > time.monotonic()}
+        self._submit_async_plan(self.pos_x, self.pos_y, self.pos_z, cx, cy, None,
+                                blocked, None, self._plan_gen,
+                                tank_speed=self._travel_tank_speed(),
+                                lin_accel_eff=self._eff_linear_accel())
+
+    def _pz_detour_around_zone_gate(self, tx: float, ty: float):
+        """Phase 2: Führt die Gerade Bot → Ziel (tx, ty) durch das FELD des Zone-Tors, würde
+        die Querung sofort wieder togglen (Entzonen am selben Tor → ungewollter Drop). Dann
+        stattdessen um das Torende herumfahren: Ausweichpunkt seitlich neben dem Tor, auf der
+        aktuellen Seite des Bots (kein Ebenen-Crossing im Feldbereich). None = freie Fahrt."""
+        zg = self._pz_zoned_gate
+        world_map = self._world_map
+        if zg is None or world_map is None or zg >= len(world_map.teleporters):
+            return None
+        if zg == self._pz_target_gate:
+            return None   # Ein-Tor-Fallback: Re-Querung ist hier gewollt (Selbes-Tor-Drop)
+        tele = world_map.teleporters[zg]
+        dx, dy = tx - self.pos_x, ty - self.pos_y
+        res = ray_teleporter_crossing(self.pos_x, self.pos_y, self.pos_z,
+                                      dx, dy, 0.0, tele)
+        if res is None or not (0.0 <= res[0] <= 1.0):
+            return None
+        ca, sa = math.cos(tele.angle), math.sin(tele.angle)
+        rx, ry = self.pos_x - tele.cx, self.pos_y - tele.cy
+        lx = ca * rx + sa * ry          # lokal: x ⊥ Feld-Ebene, y entlang der Tor-Breite
+        ly = ca * ry - sa * rx
+        side_x = 1.0 if lx >= 0.0 else -1.0
+        side_y = 1.0 if ly >= 0.0 else -1.0
+        wx_l = side_x * max(6.0, abs(lx))            # auf der eigenen Seite bleiben
+        wy_l = side_y * (tele.half_d + 4.0)          # seitlich am Torende vorbei
+        return (tele.cx + ca * wx_l - sa * wy_l,
+                tele.cy + sa * wx_l + ca * wy_l)
+
+    def _pz_maneuver_tick(self, now: float) -> None:
+        """Treibt das PZ-Manöver im 10-Hz-KI-Tick (aus _tick_seeking, nur bei _pz_escape_active):
+        Phase 1 (unzoned): nächstes Tor wählen, async validieren (5 s), greedy anfahren, queren
+        → gezoned. Phase 2 (zoned): anderes Tor als das Zone-Tor per Direktfahrt (durch Gebäude,
+        _can_drive_through_obstacles) queren → entzont + Cooldown."""
+        world_map = self._world_map
+        if world_map is None or not world_map.teleporters:
+            return
+        teles = world_map.teleporters
+        zoned = self.is_phantom_zoned
+        ti = self._pz_target_gate
+        if (ti is None or ti >= len(teles)
+                or (zoned and ti == self._pz_zoned_gate and len(teles) > 1)):
+            ti = self._pz_pick_gate(exclude=self._pz_zoned_gate if zoned else None,
+                                    skip_failed=not zoned)
+            if ti is None:
+                # Unzoned: alle Kandidaten in der Fail-Sperre → Keep-Gate fällt (Drop im
+                # Core-Loop). Zoned kommt hier nie mit None heraus (skip_failed=False).
+                self._pz_unreachable_until = now + PZ_UNREACH_DROP_S
+                return
+            self._pz_target_gate = ti
+            tele = teles[ti]
+            self._plan_path(tele.cx, tele.cy)   # zoned: Direktziel (drive-through); sonst Schnellplan
+            if not zoned:
+                self._pz_begin_validation(tele.cx, tele.cy)
+            logger.info("[%s] PhantomZone: Manöver-Ziel Tor %d (%.0f, %.0f) [%s]",
+                        self.callsign, ti, tele.cx, tele.cy,
+                        "entzonen" if zoned else "zonen")
+        tele = teles[ti]
+        cx, cy = tele.cx, tele.cy
+        if not zoned and self._pz_validate_goal is not None:
+            res = self._pz_validate_result
+            if res is False or (res is None and now > self._pz_validate_deadline):
+                # Tor (vorerst) unerreichbar → sperren, nächsten Kandidaten im nächsten Tick
+                self._pz_failed_gates = {k: v for k, v in self._pz_failed_gates.items()
+                                         if v > time.monotonic()}
+                self._pz_failed_gates[ti] = time.monotonic() + PZ_GATE_RETRY_S
+                self._pz_target_gate = None
+                self._pz_validate_goal = None
+                self._pz_validate_result = None
+                logger.info("[%s] PhantomZone: Tor %d nicht validiert (%s) → nächster Kandidat",
+                            self.callsign, ti, "kein Pfad" if res is False else "Timeout")
+                return
+            if res is True:
+                self._pz_validate_goal = None   # Route (falls A* eine fand) hat _poll übernommen
+        # Phase 2: nicht sofort wieder durchs Zone-Tor fahren (die Gerade zum Ziel-Tor führt
+        # direkt nach der Zoning-Querung meist zurück durch dasselbe Feld → ungewollter
+        # Selbes-Tor-Unzone). Dann erst seitlich ums Torende, danach freie Fahrt.
+        aim = self._pz_detour_around_zone_gate(cx, cy) if zoned else None
+        ax, ay = aim if aim is not None else (cx, cy)
+        # Ziel gegen Fremd-Überschreiber absichern (Replan nur bei echter Abweichung)
+        goal = self._nav_goal
+        if goal is None or math.hypot(goal[0] - ax, goal[1] - ay) > 3.0:
+            self._plan_path(ax, ay)
+        # Endanflug: Overshoot-Fahrt durch die Tor-Ebene (Erfolg = _pz_toggle_zoned via Querung)
+        if aim is None and math.hypot(cx - self.pos_x, cy - self.pos_y) <= NAV_TELE_ENGAGE_DIST:
+            self._try_engage_nav_tele((cx, cy))
 
     def _plan_path(self, goal_x: float, goal_y: float,
                    goal_z: float | None = None, *, cap_wps: int | None = None) -> None:
@@ -572,6 +762,13 @@ class NavigationMixin(BZBotBase):
         if res is None:
             return
         gen, gx, gy, gz, cap_wps, sx, sy, path = res
+        # P4-FLG-03: Erreichbarkeits-Ergebnis fürs PZ-Manöver abgreifen, BEVOR die Relevanz-
+        # Checks unten das Resultat ggf. verwerfen. „Erreichbar" heißt: die (Best-Effort-)Route
+        # endet wirklich am Tor — A* liefert auch Partial-Pfade, ein nicht-leerer Pfad allein
+        # ist also KEIN Beleg.
+        if self._pz_validate_goal is not None and (gx, gy) == self._pz_validate_goal:
+            self._pz_validate_result = bool(path) and (
+                math.hypot(path[-1][0] - gx, path[-1][1] - gy) < 15.0)
         # ── Relevanz: nur übernehmen, wenn der Request noch aktuell und brauchbar ist ──
         if gen != self._plan_gen:
             return                                   # neuerer Plan-Request seither → verworfen
