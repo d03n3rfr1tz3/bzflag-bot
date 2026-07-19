@@ -993,10 +993,13 @@ die tatsächliche Tank-Form besser ab: lang (3.5u), schmal (1.0u), normalhohe (1
 - Wire-Flag „PZ" = der Schütze war beim Feuern **gezoned** (sein Client nullt das Flag sonst,
   `ShotPath.cxx:46`). Phantom-Schüsse phasen durch Wände, treffen aber **nur ebenfalls gezonede
   Ziele** (`LocalPlayer::checkHit`: „zoned shots only kill zoned tanks").
-- Der Bot zoned sich nie selbst (P4-FLG-03 offen) → `_phantom_shot_harmless()` filtert PZ-Schüsse
-  in `_resolve_incoming_shots` und `_find_incoming_shot` (direkt + Phase-Pfad-Cache): kein Treffer,
-  kein Ausweichen. Der Schuss bleibt bis zum Ablauf in `_shots` (MsgShotEnd-Buchhaltung). Bei einer
-  FLG-03-Umsetzung (Selbst-Zoning) muss der Filter den eigenen Zoned-Status prüfen.
+- Der Bot kann seit P4-FLG-03 selbst zonen → `_phantom_shot_harmless()` prüft den eigenen
+  Zoned-Status (`shot.flag_abbr == b"PZ" and not self.is_phantom_zoned`): ungezoned bleiben
+  Phantom-Schüsse wie zuvor harmlos, gezoned sind sie treffer- und ausweich-relevant. Umgekehrt
+  filtert `_shot_harmless_to_zoned()` für den gezonten Bot alle **normalen** Schüsse heraus
+  (tödlich bleiben nur SB, SW und PZ) — beide Filter laufen in `_resolve_incoming_shots` und
+  `_find_incoming_shot` (direkt + Phase-Pfad-Cache). Details zum Zoning-Manöver selbst: Abschnitt
+  „P4-FLG-03 — PhantomZone-Zoning" weiter unten.
 
 **Steamroller (SR) — `_check_steamroller()`:**
 - Proximity-Check, kein Segment; 3D-Abstand mit doppelter Z-Gewichtung:
@@ -1948,6 +1951,16 @@ bei M-verlängerten Anläufen (>10u) nicht mehr → normale Vorwärtsanfahrt (do
 Kurzstrecken-Feature, per Test abgesichert). `WP_TIMEOUT_JUMP_BONUS` war toter Code und ist
 entfernt; die WP-Timeouts skalieren bereits generisch mit Distanz + `_momentum_ramp_time`.
 
+**Bekannte Limitation (Audit-Finding):** Die `CELL_SIZE`-Kandidaten-Leiter in
+`_insert_jump_runups` kann bei beengter Geometrie (wenig Platz vor der Sprungkante) bis auf den
+letzten Kandidaten (`CELL_SIZE`, 4u) zurückfallen, ohne dass diese Länge für das aktuell aktive
+Beschleunigungslimit ausreicht (M-Default bräuchte ≈15,6u). `_initiate_nav_jump` setzt die
+Launch-Speed trotzdem instant (bewusstes Launch-Event, s. o. — `doJump` rampt im echten Client
+nicht) — der Bot springt dann mit weniger als der rechnerisch gewünschten Anlaufgeschwindigkeit
+ab. Ein sauberer Fix gehört in die Sprungkanten-Feasibility selbst (Kante bei zu wenig Anlaufraum
+gar nicht erst als springbar zulassen); Folgearbeit, kein Regressionsrisiko im aktuellen
+Verhalten (identisch zum Alt-Zustand ohne `-a`/M).
+
 **P4-MOV-03a–c — WG-Luftsteuerung (umgesetzt).** Verifizierte Client-Fakten (`LocalPlayer.cxx`
 2.4, `doUpdateMotion`, Airborne-Zweig `// can't control motion in air unless have wings`): mit
 WG volle Kontrolle in der Luft, `speed = desiredSpeed` **ohne doMomentum** (die Momentum-Klemme
@@ -1990,7 +2003,11 @@ skaliert nur nach oben (Bot nie schlechter als zuvor). Verifizierter bzfs-Kontex
 (`bzfs.cxx:3674`, `grabFlag`): der Server toleriert Grabs bis `tankSpeed+tankRadius+flagRadius`
 (≈31,8u Default, `tankSpeed` als Lag-Puffer) und ignoriert zu weite Versuche stillschweigend
 (Kick auskommentiert) — der Bot reizt das bewusst NICHT aus (menschlich-plausibel bleiben;
-echter Client grabbt erst bei ~`tankRadius+flagRadius`).
+echter Client grabbt erst bei ~`tankRadius+flagRadius`). Zusätzliche Audit-Notiz: `_momentumFriction`
+(BZDB-Default 0, s. o. bei P4-MOV-02 — gehört zur separaten `doFriction`) bleibt bewusst
+unmodelliert. Der Default ist folgenlos (Reibung 0 wirkt sich nicht aus); setzt ein Server sie
+per `MsgSetVar` jedoch ≠0, rechnet das Trägheitsmodell des Bots weiterhin ohne Reibung — eine
+mögliche Folgearbeit, falls solche Server relevant werden.
 
 **F4-Notiz (`time_to_dodge`).** Der Zuschlag nutzt bewusst die volle 0→v_max-Rampenzeit
 (`_momentum_ramp_time(1.0)`) statt exakter Kinematik am aktuellen Geschwindigkeitspunkt — bei
@@ -2060,10 +2077,94 @@ Flag-Wechsel. `_reload_time_for_flag` ist das aus `_effective_reload_time` extra
 flag-parametrisierte Pendant (MG/F beschleunigen; `_laser_ad_rate` wird — wie im Original bewusst —
 NICHT einbezogen, vorbestehende Lücke). Reload zählt **ab fire_time**, nicht ab Schuss-Ende
 (`MsgShotEnd` daher irrelevant, wie beim eigenen `_slot_reload_at`). `maxShots`/`_reloadTime` sind
-serverweit; kein Wahrnehmungs-Gate (TCP-zuverlässig). Konvention: leere Liste / fehlender Index =
+serverweit; kein Wahrnehmungs-Gate — bewusst so belassen, auch wenn `MsgShotBegin`/`MsgShotEnd`
+(Audit-Befund, Commit 4cca5de) NICHT zuverlässig per TCP kommen, sondern sobald der UDP-Link aktiv
+ist über UDP laufen (`bzflag/client.py` `_UDP_CODES`) und damit verlorengehen können: die Slot-
+Buchhaltung bleibt trotzdem korrekt, weil ein nie gesehener Slot konservativ als geladen gilt
+(nächster Absatz). Konvention: leere Liste / fehlender Index =
 Slot gilt **geladen** (konservativ — ein nie gesehener Schuss heißt nicht leerer Slot). Reset auf
 `[]` bei Tod (`_on_killed`) und Respawn (`_on_alive`). Konsum via `_enemy_slots_empty` /
 `_enemy_next_slot_ready_in` an drei Stellen: **Eingang** (`_should_hold_in_cover`: Gegner leer +
 Fenster ≥ `COVER_BREAKOUT_MIN_WINDOW_S` → gar nicht verstecken), **Ausgang** (`_tick_cover_hold`:
 zusätzlich eigener Slot bereit → früh raus, vor dem `COVER_HOLD_MAX_S`-Notausgang), **Peek-Gate**
 (leerer Gegner → kein Peek, der Ausbruchszweig übernimmt).
+
+**P4-FLG-03 — PhantomZone-Zoning (umgesetzt).** PZ ist jetzt eine **good**-Flagge mit
+bedingtem Halten, ausschließlich defensiv genutzt (kein taktisches Zonen zum Angreifen):
+- **Keep-Gate** (`_pz_worth_keeping`, `bot/ai/targeting.py`): behalten nur solange (a) die
+  Karte Teleporter hat und (b) mindestens ein Gegner mit mehr Punkten (`wins − losses`, aus
+  `MsgScore`/initial aus `MsgAddPlayer`, `_on_score`/`_on_add_player` in `bot/handlers.py`) in
+  Radar-Reichweite ist. Fällt das Gate (auch weil alle Tore als unerreichbar gelten, s. u.),
+  droppt der Core-Loop (`bot/core.py`) die Flagge — aber **nie solange gezoned**: erst regulär
+  am Tor entzonen, sonst bliebe der Wire-Zustand (`PS_FLAG_ACTIVE`) inkonsistent mit dem
+  tatsächlichen `is_phantom_zoned`.
+- **Manöver** (`_pz_maneuver_tick`, 10-Hz aus `_tick_seeking`, aktiv nur wenn
+  `_pz_escape_active()` — memoized im Tick, da es die Spielerliste scannt): **Phase 1**
+  (unzoned) wählt das nächste Tor (`_pz_pick_gate`) und validiert dessen Erreichbarkeit
+  **asynchron** über die P4-INF-01-Vollsuche (`_pz_begin_validation` → `_submit_async_plan`,
+  Ergebnis-Abgriff in `_poll_async_plan` BEVOR dessen Relevanz-Checks das Resultat verwerfen
+  können). Ein nicht-leerer Pfad allein zählt nicht als Erfolg — A* liefert auch Partial-Pfade
+  bei Zeit-/Expansions-Limit; „erreichbar" heißt konkret: Pfad-Ende < 15u vom Tor entfernt.
+  Solange die Validierung offen ist (`PZ_PLAN_TIMEOUT_S` = 5s), fährt der Bot bereits **greedy**
+  auf das Tor zu (kein Warten auf den A*-Worker). Scheitert ein Tor (kein Pfad oder Timeout),
+  wird es für `PZ_GATE_RETRY_S` (30s) gesperrt (`_pz_failed_gates`) und der nächste Kandidat
+  gewählt; sind alle Tore gesperrt, greift `PZ_UNREACH_DROP_S` (30s) und das Keep-Gate gilt
+  solange als gefallen. **Phase 2** (zoned) wählt ein ANDERES Tor als das Zone-Tor
+  (`_pz_zoned_gate`) und fährt es per **Direktfahrt durch Gebäude** an (keine A*-Planung nötig,
+  s. u.); führt die Gerade zurück durchs Feld des Zone-Tors, würde die Querung sofort wieder
+  togglen (Entzonen am selben Tor) — `_pz_detour_around_zone_gate` erkennt das per
+  `ray_teleporter_crossing` und zielt stattdessen auf einen Umfahrungs-Wegpunkt seitlich am
+  Torende (lokale Tor-Koordinaten, auf der aktuellen Seite des Bots, kein Ebenen-Crossing im
+  Feldbereich); danach erst freie Fahrt aufs Ziel-Tor. Beide Phasen queren über den bestehenden
+  NAV_TELE-Endanflug (`_try_engage_nav_tele`, `NAV_TELE_ENGAGE_DIST`).
+- **Querung togglet, statt zu teleportieren:** `_check_teleport_crossing` (`bot/ai/navigation.py`)
+  erkennt bei `own_flag == "PZ"` die Torebenen-Kreuzung wie beim echten Teleport
+  (`ray_teleporter_crossing` gegen den zurückgelegten Bewegungsvektor), löst aber **keinen**
+  Positions-/Velocity-/Azimuth-Sprung und **kein** `MsgTeleport` aus, sondern
+  `_pz_toggle_zoned(ti, now)`: invertiert `is_phantom_zoned`, verwirft den laufenden Nav-Plan
+  (passt nach dem Toggle nicht mehr) und setzt `_teleporting_until` — dient hier wie beim echten
+  Teleport als Re-Trigger-Sperre (eine Querung = genau ein Toggle) UND als Erfolgssignal für
+  `_tick_nav_tele`. Zonen merkt sich das Tor (`_pz_zoned_gate`); Entzonen startet den
+  `PZ_REZONE_COOLDOWN` (60s, `_pz_rezone_block_until` — `_pz_escape_active` liefert davor
+  `False`, das Manöver pausiert). **Selbes-Tor-Drop:** lief Zonen UND Entzonen über dasselbe Tor
+  (Ein-Teleporter-Karten, oder Rückfall auf den einzigen Kandidaten in `_pz_pick_gate`), gibt
+  `_pz_toggle_zoned` die Flagge sofort ab (`_try_drop_flag`) — am Tor steht der Bot nie im
+  Gebäudeinneren, der Drop ist also sicher, und das deckt Karten mit nur einem Teleporter ab.
+- **Flucht schlägt Kampf:** `_ground_state` liefert SEEKING statt COMBAT während
+  `_pz_escape_active()`; `_tick_combat`/`_tick_seeking` leiten aktiv nach SEEKING um und rufen
+  `_pz_maneuver_tick` statt Ziel-Erwerb; `_new_target` (Fall PZ in `bot/ai/targeting.py`) hält
+  das gewählte Tor als Ziel fest, statt es beim nächsten Aufruf (Pfad-Ende, Stuck-Recovery) mit
+  einem zufälligen Wegpunkt zu überschreiben. Bedrohungserkennung/Ausweichen bleiben davor aktiv
+  (EVADING unterbricht das Manöver, `_ground_state` führt danach zurück).
+- **Zoned-Status endet** bei Drop, Transfer (Thief-Diebstahl) und Spawn — jeweils robust
+  zurückgesetzt in `bot/handlers.py` (`MsgDropFlag`/`MsgTransferFlag`) und `bot/core.py`
+  (Spawn-Anfrage, deckt Pfade ohne vorheriges `MsgDropFlag` ab, z. B. Rundenende/Resync).
+- **Zoned-Wirkungsmatrix** (Details auch in Abschnitt 7, „PhantomZone (PZ) — Phantom-Schüsse"):
+  verwundbar nur durch SB, SW und Phantom-Schüsse (`_shot_harmless_to_zoned`,
+  `bot/hit_detection.py`, gefiltert in `_resolve_incoming_shots`, `_find_incoming_shot` und
+  beiden Threat-Scans in `bot/ai/perception.py` — kein Ausweichen vor Schüssen, die ohnehin
+  nicht treffen); Laser/Thief-Instantmodell (`_instant_shot_hits`), der GM-Direkttreffer-Check
+  (`_on_gm_update`) und der Steamroller-Check (`_check_steamroller`) ignorieren den gezonten Bot
+  vollständig. Eigene Schüsse tragen das Wire-Flag `PZ` nur, wenn beim Feuern gezoned
+  (`_own_flag_bytes`, sonst genullt wie beim echten Client, `ShotPath.cxx:46`); gezoned zielt
+  der Bot nur auf gezonte Gegner (`_new_target`-Scoring: `pz_penalty` invertiert sich —
+  ungezonte Ziele werden stark abgewertet, da praktisch untreffbar) und das
+  Mündungs-Occlusion-Gate entfällt gezoned (`bot/ai/shooting.py`, Phantom-Schüsse phasen durch
+  Wände wie beim echten Client). `PS_FLAG_ACTIVE` wird bei PZ nur gesendet, wenn wirklich
+  gezoned (`bot/core.py`, `_flag_active`-Berechnung) — Gegner-Clients lesen exakt dieses Bit als
+  „zoned", ein ungezont gesetztes Bit würde den Bot fälschlich unverwundbar broadcasten.
+- **Direktfahrt statt A* im zoned-Zustand:** `_can_drive_through_obstacles()`
+  (`bot/ai/capabilities.py`) liefert `True` auch bei `is_phantom_zoned` (wie OO) — `_plan_path`
+  fährt dann das Direktziel statt A* zu bemühen (die Wand ist ohnehin kein Hindernis).
+  Entzonen passiert ausschließlich an Teleporter-Feldern, nie im Gebäudeinneren, und der Drop
+  ist solange gezoned gesperrt (Keep-Gate-Zweig im Core-Loop) — der Bot kann so nicht mit der
+  Flagge im Gebäude feststecken.
+
+Bewusste Entscheidungen: **keine taktische PZ-Nutzung** — das Manöver dient ausschließlich der
+Flucht vor einem punktstärkeren Gegner (Keep-Gate), nicht dem offensiven Umgehen von Deckung
+oder Verfolgen durch Wände; ein aggressiver PZ-Einsatz (z. B. gezielt zonen, um durch eine Wand
+anzugreifen) ist bewusst nicht implementiert. **Entzonen nur an Tor-Feldern** ist die zentrale
+Sicherheitsinvariante: da `_can_drive_through_obstacles` gezoned Geradeausfahrt durch Gebäude
+erlaubt, hält ausschließlich diese Regel den Bot davor, mit auslaufendem Zoned-Status im
+Gebäudeinneren hängenzubleiben — der Zustand endet immer an einem Punkt, an dem normale
+Navigation (und ein etwaiger Drop) wieder sicher ist.
