@@ -693,7 +693,13 @@ class CombatMixin(BZBotBase):
             self._dodge_forward, self._dodge_reverse = False, True
         else:
             self._dodge_forward, self._dodge_reverse = False, False
-        dodge_duration = max(0.15, min(time_to_impact * 1.5, 0.8))
+        # Kappung um die Anfahr-Rampe erweitern (Audit-Fix): die 0,8 s stammen aus der Zeit vor
+        # dem Trägheitsmodell (instant volle Speed → 0,8 s reichten immer für die Sicherheits-
+        # distanz). Mit -a/M beschleunigt der Dodge erst über _momentum_ramp_time — ohne die
+        # Erweiterung bricht er ab, bevor die in _handle_threat angenommene Distanz erreicht ist
+        # (und die EV2-Grace unterdrückt denselben Schuss danach noch 1 s). Ohne -a/M: +0 → wie bisher.
+        dodge_duration = max(0.15, min(time_to_impact * 1.5,
+                                       0.8 + self._momentum_ramp_time(1.0)))
         self._dodge_until = now + dodge_duration
         self._dodging = True
         if self._debug_log_dodge:
