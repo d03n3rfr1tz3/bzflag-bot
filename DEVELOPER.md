@@ -2014,15 +2014,49 @@ mögliche Folgearbeit, falls solche Server relevant werden.
 extremer Trägheit (M) liegt der Fehler konservativ Richtung DODGE_JUMP (sichere Seite), nicht
 Richtung zu später Erkennung.
 
-**P4-FLG-04/05 — Best-Flags-Wissen: Wahrnehmungs-Gate.** Protokoll-seitig wäre der Bot
-allwissend: die `flag_id` ist über Drops stabil, `MsgFlagUpdate` liefert die exakte
+**P4-FLG-04/05 — Best-Flags-Wissen: Wahrnehmungs-Gate (umgesetzt).** Protokoll-seitig wäre
+der Bot allwissend: die `flag_id` ist über Drops stabil, `MsgFlagUpdate` liefert die exakte
 Bodenposition, und getragene Flaggen kommen mit echtem Kürzel durch (nur liegende sind
-„PZ"-Platzhalter → `""`). Damit er menschlich bleibt: Typ-Wissen `flag_id → abbr` nur
-übernehmen, wenn Träger/Drop wahrnehmbar war — Sicht (`_enemy_visible_window`) unverändert,
-der Radar-Pfad (`_enemy_visible_radar`) **zusätzlich distanz-begrenzt** (Radar-Reichweite =
-halbe Weltgröße wäre zu großzügig; Wert beim Umsetzen festlegen) — oder per ID-Flag
-(`MsgNearFlag`) bzw. eigenem Grab/Drop. Einmal Gewusstes bleibt gemerkt; Invalidierung bei
-Flag-Reset (Status 0; via `_maxFlagGrabs` kann die Flagge Ort und Typ wechseln).
+„PZ"-Platzhalter → `""`). Damit er menschlich bleibt, wird **nur der Typ gegated, nicht die
+Position** (`FlagInfo.pos` bleibt omniszient wie bisher).
+
+- **Wissensspeicher.** `self._flag_knowledge: Dict[flag_id → abbr]` (`_init_flags`, `core.py`)
+  hält gelernte Typen. Überlebt Tod/Respawn; kein TTL. Ein Reconnect erzeugt ohnehin eine
+  frische `BZBot`-Instanz (`bzbot.py`), daher kein expliziter Reset. `_on_near_flag` schrieb
+  die ID-Identifikation früher nur in die (beim nächsten `MsgFlagUpdate` ersetzte)
+  `FlagInfo`-Instanz — das Dict macht dieses Wissen erstmals persistent.
+- **Wahrnehmungs-Gate.** `_flag_carrier_perceptible(pid)` (`perception.py`): Fenster-Sicht
+  (`_sees_in_window`, exakt ohne `now`/Cache — Handler-Pfad) ODER Radar
+  (`_enemy_visible_radar`) **zusätzlich distanz-begrenzt** auf
+  `min(FLAG_KNOW_RADAR_RANGE, _effective_radar_range())`. `FLAG_KNOW_RADAR_RANGE = 150.0`
+  (`constants.py`): absoluter Wert analog `IDENTIFY_RANGE` statt Bruchteil der (variablen)
+  halben Weltgröße — die volle Radarreichweite wäre für Typ-Wissen zu großzügig; die
+  `min`-Kappung respektiert z. B. die BU-Burrow-25%-Reduktion.
+- **Lernquellen** (`handlers.py`, alle über `_learn_flag_type`): eigener Grab/Transfer-Erhalt
+  und ID-Flag (`MsgNearFlag`) lernen **immer**; fremder Grab/Transfer/Drop und der
+  Owner-Sync im Full-Dump lernen **nur bei wahrnehmbarem Träger**. Bewusst **event-getrieben,
+  kein periodischer Träger-Scan** (Performance + konservativer: einen nur kurz
+  vorbeifahrenden Träger liest man nicht zuverlässig ab). Weil `MsgDropFlag` nur die `pid`
+  trägt, korreliert `self._carried_flag_id: Dict[pid → flag_id]` (ungegated, reine
+  Buchhaltung; Hygiene-Cleanup in `_on_remove_player`/`_on_capture_flag` gegen pid-Reuse) den
+  Drop mit der zuvor gegriffenen `flag_id`.
+- **Invalidierung** bei Flag-Reset: `_on_flag_update` löscht das Wissen nur bei `status == 0`
+  (FlagNoExist). Bei `status == 2` (getragen) bleibt es erhalten. Restrisiko eines Re-Typings
+  ohne sauberes `status == 0` ist selbstheilend, da jeder eigene/wahrgenommene Grab das
+  Wissen überschreibt.
+
+**FLG-05 — Zielpriorität.** `_effective_flag_abbr(fi)` (`targeting.py`) liefert `fi.abbr`
+(live, z. B. per ID identifiziert) oder ersatzweise den gemerkten Typ. `_new_target` Fall A
+(kein eigenes Flag) wählt **dreistufig: bekannt-best > bekannt-gut > nächste-unbekannte**
+(jeweils die nächste ihrer Klasse); bekannt **nicht-gute** (schlechte ODER neutrale) Flaggen
+werden gar nicht angesteuert. `_check_opportunistic_grab` überspringt zusätzlich bekannt
+**schlechte** Flaggen (kein Grab-dann-sofort-Drop), greift neutrale/gute/unbekannte weiter
+opportunistisch. `best_flags` (Default `{GM,L,SW}`, CLI `--best-flags`, auch im
+`bot_manager`) ist eine Priorisierungs-Untermenge von `good_flags` und beeinflusst **nur** die
+Zielwahl — Grab/Drop/Keep laufen weiter über `good_flags`/`bad_flags`. Damit `best ⊆ good`
+gilt, ohne eine eingeschränkte `--good-flags`-Liste ungewollt zu erweitern: **explizite**
+`--best-flags` werden in good gemergt (`good |= best`), die **Default**-Liste wird mit good
+**geschnitten** (`best = BEST_FLAGS_DEFAULT & good`).
 
 **P4-TAC-02 — Deckung hinter Gebäuden (umgesetzt).** Bewusst schlank: KEIN aktives
 Deckung-Anfahren, KEINE Pfadplanung (Kämpfe laufen zumeist im Direktmodus). Der Bot erkennt

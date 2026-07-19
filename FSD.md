@@ -378,8 +378,8 @@ Taktische und infrastrukturelle Verbesserungen ohne harte Produktionsrelevanz.
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
 | P4-FLG-03 | PhantomZone regelkonform nutzen (Keep-Gate: Teleporter erreichbar + punktstärkerer Gegner in Radar-Reichweite; Zonen an Tor A, Entzonen an anderem Tor B, 60-s-Re-Zone-Cooldown, Selbes-Tor-Drop) | ✅ | P3-NAV-02 |
-| P4-FLG-04 | Best-Flags-Wissen aus Beobachtung: Typ und Ablageort begehrter Flaggen (z. B. GM/L/SW) merken — nur bei wahrnehmbarem Träger/Drop (Sicht; Radar zusätzlich distanz-begrenzt) oder ID-Identifikation; Vergessen bei Flag-Reset | 📋 | — |
-| P4-FLG-05 | Bekannte gute Flaggen (insbes. vom Gegner fallengelassene) gezielt bevorzugt ansteuern und aufsammeln (statt nur opportunistisch) | 📋 | P4-FLG-04 |
+| P4-FLG-04 | Best-Flags-Wissen aus Beobachtung: Typ und Ablageort begehrter Flaggen (z. B. GM/L/SW) merken — nur bei wahrnehmbarem Träger/Drop (Sicht; Radar zusätzlich distanz-begrenzt) oder ID-Identifikation; Vergessen bei Flag-Reset | ✅ | — |
+| P4-FLG-05 | Bekannte gute Flaggen (insbes. vom Gegner fallengelassene) gezielt bevorzugt ansteuern und aufsammeln (statt nur opportunistisch); Best-Flaggen (GM/L/SW, konfigurierbar) priorisiert über normale gute | ✅ | P4-FLG-04 |
 
 **Taktik (P4-TAC)**
 
