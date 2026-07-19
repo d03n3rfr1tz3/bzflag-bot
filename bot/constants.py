@@ -294,6 +294,10 @@ GOOD_FLAGS_DEFAULT = {"GM", "SW", "L", "SB", "MG", "V", "SE", "ID",
                       "OO", "MQ", "TH", "R", "CL", "ST", "SR", "CS", "PZ"}
 BAD_FLAGS_DEFAULT  = {"NJ", "B", "RC", "O", "JM", "BY",
                       "CB", "FO", "LT", "M", "RO", "RT", "TR", "WA"}
+# P4-FLG-05: "Best" ist eine Priorisierungs-Untermenge von "Good" — besonders begehrte
+# Flaggen, die bei bekanntem Typ VOR normalen guten Flaggen angesteuert werden. Beeinflusst
+# NUR die Zielwahl (_new_target), nicht die Grab-/Drop-/Keep-Logik (die läuft über good/bad).
+BEST_FLAGS_DEFAULT = {"GM", "L", "SW"}
 
 # Vollname → Abkürzung (aus BZFlag Flag.cxx); für MsgNearFlag-Auswertung
 FLAG_NAME_TO_ABBR: dict[str, str] = {
@@ -373,5 +377,5 @@ __all__ = [
     'FLAG_KNOW_RADAR_RANGE',
     'TARGET_FOV', 'WIDE_ANGLE_ANG', 'SMALL_SCALE', 'SMALL_MAX_DIST', 'SMALL_MAX_VEL',
     'SMALL_MAX_ANGV', 'KILL_REASON_SHOT', 'KILL_REASON_RUNOVER', 'KILL_REASON_GENOCIDED',
-    'GOOD_FLAGS_DEFAULT', 'BAD_FLAGS_DEFAULT', 'FLAG_NAME_TO_ABBR',
+    'GOOD_FLAGS_DEFAULT', 'BAD_FLAGS_DEFAULT', 'BEST_FLAGS_DEFAULT', 'FLAG_NAME_TO_ABBR',
 ]

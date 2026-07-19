@@ -207,17 +207,28 @@ class TargetingMixin(BZBotBase):
         result.sort()
         return [(fx, fy) for _, fx, fy in result]
 
+    def _effective_flag_abbr(self, fi) -> str:
+        """P4-FLG-05: Typ einer Boden-Flagge — live (fi.abbr, z.B. bereits per ID
+        identifiziert) ODER aus dem Gedächtnis (_flag_knowledge), falls fi.abbr noch
+        maskiert ('' — PZ-Platzhalter für unidentifizierte Flaggen) ist."""
+        return fi.abbr or self._flag_knowledge.get(fi.flag_id, "")
+
     def _new_target(self) -> None:
         """Setzt Navigationsziel abhängig vom eigenen Flag-Zustand.
-        Kein Flag: nächste on-ground Flag (Typ unbekannt).
+        Kein Flag: bekannt-beste > bekannt-gute > nächste on-ground Flag (P4-FLG-05).
         ID-Flag: gute Flags in _identify_range bevorzugen, ID ggf. ablegen.
         Andere Flag: zufälliger Wegpunkt."""
         self.target_player = None
 
         # ── Fall A: Bot hat keine Flagge ─────────────────────────────────
         if self.own_flag == "":
+            # P4-FLG-05: dreistufige Priorität — bekannt-best > bekannt-gut > nächste-unbekannt.
             best_d: float = float("inf")
-            best_pos: tuple[float, ...] | None = None
+            best_pos: tuple[float, ...] | None = None        # nächste beliebige (unbekannt)
+            pri_good_d: float = float("inf")
+            pri_good_pos: tuple[float, ...] | None = None     # nächste bekannt-gute (nicht best)
+            pri_best_d: float = float("inf")
+            pri_best_pos: tuple[float, ...] | None = None     # nächste bekannt-beste
             _dropped = self._dropped_neutrals
             _recent  = self._recent_flag_targets
             for fi in list(self.flags.values()):
@@ -225,13 +236,29 @@ class TargetingMixin(BZBotBase):
                     continue
                 if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
                     continue
-                if any(fi.abbr == a and math.hypot(fi.pos[0]-dx, fi.pos[1]-dy) < 20.0
+                abbr = self._effective_flag_abbr(fi)
+                if any(abbr == a and math.hypot(fi.pos[0]-dx, fi.pos[1]-dy) < 20.0
                        for a, dx, dy in _dropped):
                     continue
+                # P4-FLG-05: bekannt nicht-gut (schlecht ODER neutral) gar nicht ansteuern.
+                if abbr and abbr not in self.good_flags:
+                    continue
                 d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
+                if abbr and abbr in self.best_flags:
+                    if d < pri_best_d:
+                        pri_best_d = d
+                        pri_best_pos = (fi.pos[0], fi.pos[1], fi.pos[2])
+                elif abbr and abbr in self.good_flags:
+                    if d < pri_good_d:
+                        pri_good_d = d
+                        pri_good_pos = (fi.pos[0], fi.pos[1], fi.pos[2])
                 if d < best_d:
                     best_d = d
                     best_pos = (fi.pos[0], fi.pos[1], fi.pos[2])
+            if pri_best_pos is not None:
+                best_pos = pri_best_pos          # best schlägt alles
+            elif pri_good_pos is not None:
+                best_pos = pri_good_pos          # gut schlägt unbekannt
             if best_pos is not None:
                 self._recent_flag_targets.append((round(best_pos[0]), round(best_pos[1])))
                 via = self._flags_on_route_all(best_pos[0], best_pos[1], detour=40.0)
@@ -281,17 +308,18 @@ class TargetingMixin(BZBotBase):
             for fi in list(self.flags.values()):
                 if fi.status != 1:
                     continue
+                abbr = self._effective_flag_abbr(fi)   # P4-FLG-05: Live-Typ oder Gedächtnis
                 d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
-                if d < self._identify_range and fi.abbr in self.good_flags and d < best_d_good:
+                if d < self._identify_range and abbr in self.good_flags and d < best_d_good:
                     if self._debug_log_flag:
                         logger.debug("[%s] Flagge: ID-B1 – gute Flagge %r d=%.1fu (< %.0fu)",
-                                     self.callsign, fi.abbr, d, self._identify_range)
+                                     self.callsign, abbr, d, self._identify_range)
                     best_d_good = d
                     best_pos_good = (fi.pos[0], fi.pos[1])
-                elif fi.abbr:
+                elif abbr:
                     if self._debug_log_flag:
                         logger.debug("[%s] Flagge: ID-B1 – keine gute Flagge %r d=%.1fu",
-                                     self.callsign, fi.abbr, d)
+                                     self.callsign, abbr, d)
             if best_pos_good is not None:
                 d_to_good = math.hypot(best_pos_good[0] - self.pos_x,
                                        best_pos_good[1] - self.pos_y)
@@ -317,8 +345,9 @@ class TargetingMixin(BZBotBase):
                 if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
                     continue
                 d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
+                abbr = self._effective_flag_abbr(fi)   # P4-FLG-05: Live-Typ oder Gedächtnis
                 # Innerhalb _identify_range bereits als nicht-gut erkannte Flags überspringen
-                if d < self._identify_range and fi.abbr and fi.abbr not in self.good_flags:
+                if d < self._identify_range and abbr and abbr not in self.good_flags:
                     continue
                 if d < best_d:
                     best_d = d
@@ -367,6 +396,9 @@ class TargetingMixin(BZBotBase):
         for fi in list(self.flags.values()):
             if fi.status != 1: continue
             if abs(fi.pos[2] - self.pos_z) > 0.5: continue
+            # P4-FLG-05: bekannt schlechte Flagge nicht greifen (kein Grab-dann-sofort-Drop).
+            abbr = self._effective_flag_abbr(fi)
+            if abbr and abbr in self.bad_flags: continue
             d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
             if d >= grab_r: continue
             if d > ahead_r and not self._is_ahead(fi.pos[0], fi.pos[1]): continue

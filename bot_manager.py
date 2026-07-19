@@ -80,6 +80,7 @@ class Config:
         self.idle_cleanup_delay   = 300.0  # Sekunden (5 min)
         self.good_flags: Optional[List[str]] = None   # None = Standardliste aus bzbot.py
         self.bad_flags:  Optional[List[str]] = None   # None = Standardliste aus bzbot.py
+        self.best_flags: Optional[List[str]] = None   # None = Standardliste (GM,L,SW) aus bzbot.py
         # cProfile-Instrumentierung: profile=True startet jeden Bot als
         # `python -m cProfile -o <profile_dir>/bzbot_<name>_<id>_<zeit>.prof bzbot.py …`.
         # Das Profil wird beim regulären Prozessende geschrieben — stop() sendet dafür
@@ -302,6 +303,8 @@ class BotProcess:
             cmd += ["--good-flags", ",".join(self.config.good_flags)]
         if self.config.bad_flags is not None:
             cmd += ["--bad-flags", ",".join(self.config.bad_flags)]
+        if self.config.best_flags is not None:
+            cmd += ["--best-flags", ",".join(self.config.best_flags)]
 
         try:
             self.process = subprocess.Popen(
@@ -953,6 +956,7 @@ def parse_args():
                    help="Sekunden ohne echte Menschen bis Abräumen auf min_bots (0 = sofort)")
     p.add_argument("--good_flags", help="Kommagetrennte Liste zu behaltender Flags")
     p.add_argument("--bad_flags",  help="Kommagetrennte Liste sofort abzulegender Flags")
+    p.add_argument("--best_flags", help="Kommagetrennte Liste besonders begehrter Flags (bevorzugt angesteuert)")
     p.add_argument("--log_level", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                    help="Log-Level")
     return p.parse_args()
@@ -972,13 +976,15 @@ def main():
         if cli_val is not None:
             setattr(config, attr, cli_val)
 
-    # bot_callsigns / good_flags / bad_flags: Komma-String aus CLI → Liste
+    # bot_callsigns / good_flags / bad_flags / best_flags: Komma-String aus CLI → Liste
     if getattr(args, "bot_callsigns", None):
         config.bot_callsigns = [s.strip() for s in args.bot_callsigns.split(",") if s.strip()]
     if getattr(args, "good_flags", None):
         config.good_flags = [s.strip() for s in args.good_flags.split(",") if s.strip()]
     if getattr(args, "bad_flags", None):
         config.bad_flags = [s.strip() for s in args.bad_flags.split(",") if s.strip()]
+    if getattr(args, "best_flags", None):
+        config.best_flags = [s.strip() for s in args.best_flags.split(",") if s.strip()]
 
     logging.basicConfig(
         level   = getattr(logging, config.log_level, logging.INFO),

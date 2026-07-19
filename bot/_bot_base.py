@@ -243,6 +243,7 @@ class BZBotBase:
     ang_vel: Any
     azimuth: Any
     bad_flags: set
+    best_flags: set       # P4-FLG-05: Priorisierungs-Untermenge von good_flags
     bot_callsigns: set
     bot_name_prefix: Any
     callsign: str
