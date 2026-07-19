@@ -141,6 +141,8 @@ class BZBotBase:
     _obese_factor: Any
     _order: int
     _own_flag_since: Any
+    _own_losses: int
+    _own_wins: int
     _plan_gen: Any
     _pre_fall_state: Any
     _presence: bool

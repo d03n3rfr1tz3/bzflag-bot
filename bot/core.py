@@ -415,6 +415,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
             if self._debug_log_flag:
                 logger.debug("[%s] Flagge: Ziel-Flag: %s", self.callsign, debug_target_flag)
         self._own_flag_since = 0.0
+        self._own_wins = 0      # aus MsgScore; P4-FLG-03-Gate
+        self._own_losses = 0    # aus MsgScore; P4-FLG-03-Gate
         self._last_drop_attempt = 0.0
         self._drop_bad_flag_delay = 1.0
 
@@ -507,6 +509,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self.client.add_handler(MsgSetVar,          self._on_set_var)
         self.client.add_handler(MsgSuperKill,             self._on_disconnect)
         self.client.add_handler(MsgScoreOver,             self._on_score_over)
+        self.client.add_handler(MsgScore,                 self._on_score)
         self.client.add_handler(MSG_INTERNAL_DISCONNECT, self._on_disconnect)
         self.client.add_handler(MsgGrabFlag,      self._on_grab_flag)
         self.client.add_handler(MsgDropFlag,      self._on_drop_flag)
@@ -518,7 +521,6 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self.client.add_handler(MsgTimeUpdate,    self._on_time_update)
         self.client.add_handler(MsgNewRabbit,     self._on_new_rabbit)
         for code in (MsgPlayerInfo, MsgTeamUpdate,
-                     MsgScore,
                      MsgHandicap, MsgLagState):
             self.client.add_handler(code, self._ignored)
         self.client.add_handler(MsgMessage, self._on_message)

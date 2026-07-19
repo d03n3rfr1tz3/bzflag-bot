@@ -81,6 +81,8 @@ class PlayerInfo:
     # Befüllt in _on_shot_begin, Reset auf [] bei Tod/Respawn. Konvention: leere Liste bzw. ein
     # fehlender Index = Slot gilt als GELADEN (konservativ — ein nie gesehener Schuss heißt nicht,
     # dass der Slot leer ist).
+    wins:   int = 0  # aus MsgScore; Score = wins − losses (P4-FLG-03-Gate)
+    losses: int = 0  # aus MsgScore; Score = wins − losses (P4-FLG-03-Gate)
 
 
 @dataclass

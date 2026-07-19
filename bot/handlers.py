@@ -900,6 +900,30 @@ class HandlersMixin(BZBotBase):
         winner_id = payload[0] if payload else 255
         self._begin_round_over("MsgScoreOver (winner=%d)" % winner_id)
 
+    def _on_score(self, code: int, payload: bytes) -> None:
+        """Aktualisiert wins/losses aus MsgScore (bzfs sendPlayerScores). Wire-Format: u8 count,
+        dann je Eintrag 7 Byte: u8 playerId, u16 wins, u16 losses, u16 tks (P4-FLG-03-Gate:
+        Score = wins − losses)."""
+        if len(payload) < 1:
+            return
+        off = 0
+        count = unpack_uint8(payload, off); off += 1
+        for _ in range(count):
+            if off + 7 > len(payload):
+                break
+            pid    = unpack_uint8(payload, off);      off += 1
+            wins   = unpack_uint16(payload, off);     off += 2
+            losses = unpack_uint16(payload, off);     off += 2
+            off += 2                                  # tks überspringen
+            if pid == self.player_id:
+                self._own_wins = wins
+                self._own_losses = losses
+            else:
+                info = self.players.get(pid)
+                if info is not None:
+                    info.wins = wins
+                    info.losses = losses
+
     # ── _on_set_var: Dispatch-Tabellen (Track 4/W3) ───────────────────────
     #
     # Die Mehrheit der Server-Variablen folgt dem Muster »Float → Attribut mit

@@ -79,10 +79,11 @@ Danach: [uint16 length][uint16 code][payload]
 | `0x6366` | MsgCaptureFlag | ← Server | Flag erobert |
 | `0x746f` | MsgTimeUpdate | ← Server | Verbleibende Rundenzeit; ≤ 0 → Reconnect |
 | `0x736f` | MsgScoreOver | ← Server | Rundenende durch Score-Limit/gameover → Reconnect |
+| `0x7363` | MsgScore | ← Server | wins/losses je Spieler (Score = wins − losses, P4-FLG-03-Gate) |
 | `0x6d67` | MsgMessage | ← Server | Chat/Server-Text; daraus wird u. a. das Schuss-Limit erkannt |
 | `0x736b` | MsgSuperKill | ← Server | Server-Kick/Disconnect → Spielschleife beenden |
 
-Bekannt, aber bewusst ignoriert: MsgPlayerInfo, MsgTeamUpdate, MsgScore, MsgHandicap, MsgLagState.
+Bekannt, aber bewusst ignoriert: MsgPlayerInfo, MsgTeamUpdate, MsgHandicap, MsgLagState.
 
 **Player-Status-Bits** (in den Positions-Updates): lebt, springt/fällt (airborne), Flag aktiv
 (zusammen mit PhantomZone-Flag → „zoned").
