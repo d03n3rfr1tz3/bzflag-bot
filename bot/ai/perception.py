@@ -144,6 +144,8 @@ class PerceptionMixin(BZBotBase):
                 if shot.shooter_id == self.player_id: continue
                 # Phantom-Schüsse (Wire-Flag PZ) treffen nur gezonede Ziele → keine Bedrohung
                 if self._phantom_shot_harmless(shot): continue
+                # Gezonter Bot (P4-FLG-03): normale Schüsse sind keine Bedrohung (nur SB/SW/PZ)
+                if self._shot_harmless_to_zoned(shot): continue
                 # Ricochet-Schüsse: Richtung nach Bounce unklar → nur Segment-Cache prüfen
                 if (shot.shooter_id, shot.shot_id) in self._ricochet_paths:
                     continue
@@ -203,6 +205,9 @@ class PerceptionMixin(BZBotBase):
                 # Phantom-Schüsse: auch der Phase-Pfad-Cache ist keine Bedrohung
                 if self._phantom_shot_harmless(rico_shot):
                     continue
+                # Gezonter Bot (P4-FLG-03): normale Schüsse sind keine Bedrohung (nur SB/SW/PZ)
+                if self._shot_harmless_to_zoned(rico_shot):
+                    continue
                 if self.own_flag == "BU" and self.pos_z < 0.0:
                     continue
                 for seg in segs:
@@ -258,6 +263,8 @@ class PerceptionMixin(BZBotBase):
                 if shot.shooter_id == self.player_id: continue
                 # Phantom-Schüsse (Wire-Flag PZ) treffen nur gezonede Ziele → keine Bedrohung
                 if self._phantom_shot_harmless(shot): continue
+                # Gezonter Bot (P4-FLG-03): normale Schüsse sind keine Bedrohung (nur SB/SW/PZ)
+                if self._shot_harmless_to_zoned(shot): continue
                 # Ricochet-Schüsse: Richtung nach Bounce unklar → nur Segment-Cache prüfen (unten)
                 if (shot.shooter_id, shot.shot_id) in self._ricochet_paths:
                     continue
@@ -300,6 +307,9 @@ class PerceptionMixin(BZBotBase):
                     continue
                 # Phantom-Schüsse: auch der Phase-Pfad-Cache ist keine Bedrohung
                 if self._phantom_shot_harmless(rico_shot):
+                    continue
+                # Gezonter Bot (P4-FLG-03): normale Schüsse sind keine Bedrohung (nur SB/SW/PZ)
+                if self._shot_harmless_to_zoned(rico_shot):
                     continue
                 if self.own_flag == "BU" and self.pos_z < 0.0:
                     continue

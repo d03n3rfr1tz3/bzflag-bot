@@ -151,7 +151,11 @@ class CapabilityMixin(BZBotBase):
     def _own_flag_bytes(self) -> bytes:
         """2-Byte-Wire-Encoding der eigenen Flagge (Protokoll-FlagAbbr mit
         Null-Padding; keine Flagge → b'\\x00\\x00'). F9: einzige Quelle —
-        vorher 6× inline dupliziert."""
+        vorher 6× inline dupliziert. PZ nur wenn gezoned: der echte Client
+        nullt das Flag im Schuss sonst (ShotPath.cxx:46) — das Wire-Flag „PZ"
+        BEDEUTET „Schütze war beim Feuern gezoned" (P4-FLG-03)."""
+        if self.own_flag == "PZ" and not self.is_phantom_zoned:
+            return b'\x00\x00'
         return (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
 
     def _effective_shot_speed(self) -> float:
@@ -364,8 +368,11 @@ class CapabilityMixin(BZBotBase):
         return self._presence
 
     def _can_drive_through_obstacles(self) -> bool:
-        """True wenn Bot mit aktueller Flagge durch Hindernisse fahren darf (OO u.a.)."""
-        return self.own_flag in ("OO",)
+        """True wenn Bot mit aktueller Flagge durch Hindernisse fahren darf: OO — oder gezoned
+        (PZ + P4-FLG-03): der gezonte Tank phast durch Gebäude; die Navigation nutzt dann den
+        Direktziel-Pfad (_plan_path) statt A*. Entzont wird ausschließlich an Teleporter-Feldern
+        (nie im Gebäudeinneren), ein Drop ist solange zoned gesperrt — kein Feststecken."""
+        return self.own_flag == "OO" or (self.own_flag == "PZ" and self.is_phantom_zoned)
 
     def _has_teleporters(self) -> bool:
         """True wenn die Karte Teleporter hat (→ indirekte Schüsse auch ohne Ricochet möglich)."""

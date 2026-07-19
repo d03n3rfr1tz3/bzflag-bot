@@ -612,14 +612,21 @@ class ShootingMixin(BZBotBase):
                 info = self.players.get(self.target_player)
                 if info is not None and info.paused:
                     return  # pausiertes Ziel ist unverwundbar → Schüsse sparen (Slots bereithalten)
-                pz_active = bool(info and info.is_phantom_zoned
-                                 and self.own_flag not in ("SW", "SB"))
+                # P4-FLG-03: gezoned feuert der Bot Phantom-Schüsse — die treffen NUR gezonte
+                # Ziele; ungezoned treffen Gezonte umgekehrt nur mit eigenem SW/SB (P3-SHT-04).
+                if self.is_phantom_zoned:
+                    pz_active = not bool(info and info.is_phantom_zoned)
+                else:
+                    pz_active = bool(info and info.is_phantom_zoned
+                                     and self.own_flag not in ("SW", "SB"))
                 if not pz_active:
                     # Mündungs-Occlusion-Gate: der reale Schuss spawnt an der Mündung (4.42u
                     # voraus). Steckt die zwischen Tank-Mitte und sich selbst hinter einer dünnen
                     # Wand, würde bzfs ihn fressen bzw. er ginge unfair durch die Wand → nicht
-                    # feuern. SW (radial) und SB (durchschlägt Wände) sind ausgenommen.
-                    if self.own_flag not in ("SW", "SB") and not self._muzzle_clear(self.azimuth):
+                    # feuern. SW (radial), SB (durchschlägt Wände) und gezonte Phantom-Schüsse
+                    # (phasen ebenfalls durch Wände) sind ausgenommen.
+                    if (self.own_flag not in ("SW", "SB") and not self.is_phantom_zoned
+                            and not self._muzzle_clear(self.azimuth)):
                         return
                     dx, dy = ep[0] - self.pos_x, ep[1] - self.pos_y
                     dist = math.hypot(dx, dy)
