@@ -279,6 +279,8 @@ class BZBotBase:
         raise NotImplementedError
     def _can_drive_through_obstacles(self) -> bool:
         raise NotImplementedError
+    def _can_air_jump(self) -> bool:
+        raise NotImplementedError
     def _can_jump(self, now: float) -> bool:
         raise NotImplementedError
     def _can_move_backward(self) -> bool:

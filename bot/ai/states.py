@@ -136,7 +136,7 @@ class StateMachineMixin(BZBotBase):
             return
 
         if self._ai_state in (AIState.EVADING, AIState.JUMP_WINDUP):
-            self._tick_committed(dt, now)
+            self._tick_committed(dt, now, ai_tick)
             return
 
         if self._ai_state == AIState.LANDING_SHOT:
@@ -631,7 +631,7 @@ class StateMachineMixin(BZBotBase):
             self.ang_vel = 0.0
             self._transition_to(self._pre_fall_state)
 
-    def _tick_committed(self, dt: float, now: float) -> None:
+    def _tick_committed(self, dt: float, now: float, ai_tick: bool = True) -> None:
         """Führt aktiven Dodge aus. Keine neuen KI-Entscheidungen.
 
         JUMP_WINDUP: kein Abbruch bei Bedrohung. Nur Notschuss möglich,
@@ -674,9 +674,11 @@ class StateMachineMixin(BZBotBase):
                 # Extra-Flap-Notausweg (Plan-Punkt 3, C3): fallend + Luftsprung übrig + Bedrohung
                 # weiterhin akut (vereinfachte time_to_dodge-Analogie aus _handle_threat: statt
                 # der vollen Fahrweg-/Drehzeit-Rechnung genügt ein knapper Restzeit-Schwellwert,
-                # da hier ohnehin schon aktiv gesteuert/gedodged wird). Teurer
-                # _find_incoming_shot-Scan daher erst NACH den billigen vel_z/_can_jump-Gates.
-                if self.vel_z < 0.0 and self._can_jump(now):
+                # da hier ohnehin schon aktiv gesteuert/gedodged wird). Audit-Fix: _can_air_jump
+                # statt _can_jump — dessen _dodging-Gate machte den Notausweg unerreichbar
+                # (_dodging ist im airborne-EVADING immer gesetzt). Teurer _find_incoming_shot-
+                # Scan nur im 10-Hz-KI-Raster (ai_tick) und erst NACH den billigen Gates.
+                if ai_tick and self.vel_z < 0.0 and self._can_air_jump():
                     _threat, _threat_t = self._find_incoming_shot(now)
                     if _threat is not None:
                         _elapsed = 0.0 if _threat.is_gm else max(0.0, now - _threat.fire_time)

@@ -88,14 +88,24 @@ class CapabilityMixin(BZBotBase):
         if self._debug_no_jump:   return False
         if self._dodging:                             return False
         if self._jumping:
-            if self.own_flag != "WG":                return False
-            return self._wings_jumps_used < self._wings_jump_count - 1
+            return self._can_air_jump()
         if not self._is_landed():                     return False
         if self.own_flag in ("NJ", "BU"):            return False
         if not self._server_jumping and self.own_flag not in ("WG", "BY", "JP"):
             return False
         if now - self._last_jump_at < JUMP_COOLDOWN: return False
         return True
+
+    def _can_air_jump(self) -> bool:
+        """WG-Luftsprung (Extra-Flap) verfügbar? Bewusst OHNE das _dodging-Gate von _can_jump:
+        der EVADING-Notausweg (P4-MOV-03c) läuft mitten im Dodge — _setup_dodge setzt _dodging,
+        der Reset kommt erst im Boden-Pfad von _tick_committed, also wäre der Extra-Flap über
+        _can_jump nie erreichbar. Kein JUMP_COOLDOWN airborne (deckungsgleich zum bisherigen
+        _jumping-Zweig von _can_jump; doJump zählt airborne nur wingsFlapCount)."""
+        if self._debug_no_jump:   return False
+        if not self._jumping:     return False
+        if self.own_flag != "WG": return False
+        return self._wings_jumps_used < self._wings_jump_count - 1
 
     def _can_move_forward(self)  -> bool: return self.own_flag != "RO"
 
