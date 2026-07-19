@@ -349,6 +349,10 @@ class NavigationMixin(BZBotBase):
         radians1 = src_tele.angle + (0.0 if best_face == 0 else math.pi)
         radians2 = dst_tele.angle + (0.0 if exit_face == 1 else math.pi)
         self.azimuth = _wrap(self.azimuth + (radians2 - radians1))
+        # Absoluter Steuerziel-Winkel (P4-MOV-03a) muss den Portal-Warp mitmachen — sonst würde
+        # die WG-Luftsteuerung nach der Querung auf den alten (Vor-Warp-)Winkel zusteuern.
+        if self._wings_steer_az is not None:
+            self._wings_steer_az = _wrap(self._wings_steer_az + (radians2 - radians1))
         self._teleporting_until = now + TELEPORT_TIME
         self._resync_path_after_teleport(ox, oy, npx, npy)
         self._send_teleport(2 * best_ti + best_face, target)

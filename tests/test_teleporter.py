@@ -520,6 +520,40 @@ def test_check_teleport_crossing_pz_skips(bot):
     assert (bot.pos_x, bot.pos_y, bot.pos_z) == (2.0, 0.0, 3.0)
 
 
+def test_check_teleport_crossing_rotates_wings_steer_az(bot):
+    """Audit-Fix (P4-MOV-03a-Steuerziel): das absolute Steuerziel _wings_steer_az muss den
+    Portal-Warp mitmachen — sonst würde die WG-Luftsteuerung nach der Querung noch auf den
+    alten (Vor-Warp-)Winkel zusteuern. Torpaar mit unterschiedlicher Ausrichtung (angle=π/2 bei
+    t1) erzeugt eine echte Winkeldifferenz, die auf _wings_steer_az genauso wie auf azimuth
+    angewandt werden muss."""
+    from bot.util import _wrap
+    teles = [_tele("t0", 0.0, 0.0, angle=0.0), _tele("t1", 50.0, 0.0, angle=math.pi / 2)]
+    lmap = build_link_map([(0, 3), (3, 0), (1, 2), (2, 1)])
+    _bot_world(bot, teles, lmap)
+    bot.own_flag = "WG"
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+    bot.azimuth = 0.0
+    bot._wings_steer_az = 0.0                  # Steuerziel vor der Querung: geradeaus
+    bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
+    portal_delta = _wrap(bot.azimuth - 0.0)     # tatsächliche Winkeldifferenz dieses Torpaars
+    assert portal_delta != pytest.approx(0.0), "Testaufbau muss eine echte Drehung erzeugen"
+    assert bot._wings_steer_az == pytest.approx(portal_delta)
+
+
+def test_check_teleport_crossing_leaves_wings_steer_az_none(bot):
+    """Gegenprobe: ist kein Steuerziel gesetzt (_wings_steer_az is None, z.B. ohne WG-Finte/
+    -Escape), bleibt es nach der Querung unangetastet (kein versehentliches Setzen)."""
+    teles, lmap = _pair()
+    _bot_world(bot, teles, lmap)
+    bot.own_flag = ""
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+    bot._wings_steer_az = None
+    bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
+    assert bot._wings_steer_az is None
+
+
 def test_update_movement_invokes_crossing_check(bot):
     """Zentraler Hook: _update_movement ruft den Crossing-Check auch dann, wenn _dispatch_movement
     früh zurückkehrt (Direktpfad/Sprung) — Teleport pathing-unabhängig."""
