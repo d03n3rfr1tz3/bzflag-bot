@@ -451,8 +451,8 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # BZBot-Instanz (bzbot.py), daher kein expliziter Reset nötig. _carried_flag_id ist
         # reine pid→flag_id-Korrelation (kein Typ-Wissen), nötig für „wahrnehmbarer Drop"
         # (MsgDropFlag enthält nur die pid).
-        self._flag_knowledge: Dict[int, str] = {}
-        self._carried_flag_id: Dict[int, int] = {}
+        self._flag_knowledge = {}   # Typ deklariert in _bot_base.BZBotBase (mypyc-Direktzugriff)
+        self._carried_flag_id = {}
 
     def _init_runtime_state(self):
         """GM-Tracking, State Machine, Sende-Kadenz, Tick-Memo, Lebenszyklus-Flags."""
