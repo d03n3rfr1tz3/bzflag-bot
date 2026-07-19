@@ -665,7 +665,9 @@ class HandlersMixin(BZBotBase):
         _shooter_info = self.players.get(shooter)
         # P4-TAC-05: Gegner-Schuss-Slot als belegt vormerken (Ready = fire_time + Reload für das
         # Schützen-Flag AUS DEM PAYLOAD, nicht players[..].flag → kein Race mit späterem Flag-Wechsel).
-        # Kein Wahrnehmungs-Gate: MsgShotBegin kommt zuverlässig per TCP. Eigene Schüsse zählt
+        # Kein Wahrnehmungs-Gate: MsgShotBegin läuft (sobald der UDP-Link aktiv ist) über UDP und
+        # kann verlorengehen — die Slot-Buchhaltung bleibt trotzdem korrekt, weil ein nie gesehener
+        # Slot konservativ als geladen gilt (_enemy_slots_empty). Eigene Schüsse zählt
         # _slot_reload_at separat.
         if _shooter_info is not None and shooter != self.player_id:
             _slot = shot_id & 0xFF
