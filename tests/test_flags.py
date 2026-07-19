@@ -554,3 +554,271 @@ class TestPhantomZoneKeepGate:
                 if now - bot._last_drop_attempt > 2.0:
                     bot._try_drop_flag()
         drop.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# P4-FLG-04: Flag-Typ-Wissen (_flag_knowledge / _carried_flag_id)
+# ---------------------------------------------------------------------------
+
+def _build_flag_update_payload(flags, owner=255):
+    """Standalone-Vorlage von TestFlagUpdate._build_flag_update (57 Bytes/Eintrag),
+    ohne die bestehende Klasse anzufassen. flags: Liste von (flag_id, abbr, status, x, y, z)."""
+    buf = struct.pack(">H", len(flags))
+    for flag_id, abbr, status, x, y, z in flags:
+        abbr_b = (abbr.encode('ascii') + b'\x00\x00')[:2]
+        entry = (
+            struct.pack(">H", flag_id)
+            + abbr_b
+            + struct.pack(">H", status)
+            + struct.pack(">H", 0)
+            + struct.pack(">B", owner)
+            + struct.pack(">fff", x, y, z)
+            + struct.pack(">fff", 0, 0, 0)
+            + struct.pack(">fff", 0, 0, 0)
+            + struct.pack(">f", 0.0)
+            + struct.pack(">f", 0.0)
+            + struct.pack(">f", 0.0)
+        )
+        assert len(entry) == 57
+        buf += entry
+    return buf
+
+
+class TestFlagKnowledge:
+    """P4-FLG-04: _flag_knowledge (flag_id→abbr) und _carried_flag_id (pid→flag_id) —
+    Wahrnehmungs-Gate über _flag_carrier_perceptible (Fenster: FoV+LoS, oder Radar
+    innerhalb min(FLAG_KNOW_RADAR_RANGE=150, effektive Radar-Reichweite))."""
+
+    FOREIGN_PID = 2
+
+    def _grab_payload(self, pid, flag_index, abbr):
+        abbr2 = (abbr.encode('ascii') + b'\x00\x00')[:2]
+        return struct.pack(">BH", pid, flag_index) + abbr2
+
+    def _transfer_payload(self, from_id, to_id, flag_index, abbr):
+        abbr2 = (abbr.encode('ascii') + b'\x00\x00')[:2]
+        return struct.pack(">BBH", from_id, to_id, flag_index) + abbr2
+
+    # -- Grab ------------------------------------------------------------
+
+    def test_own_grab_always_learned(self, bot):
+        from bzflag.protocol import MsgGrabFlag
+        payload = self._grab_payload(bot.player_id, 5, "GM")
+        bot._on_grab_flag(MsgGrabFlag, payload)
+        assert bot._flag_knowledge[5] == "GM"
+
+    def test_foreign_grab_learned_when_in_window(self, bot):
+        """Spieler +x, nah → im FoV, Fenster-Sicht greift."""
+        from bzflag.protocol import MsgGrabFlag
+        bot.azimuth = 0.0
+        make_player(bot, self.FOREIGN_PID, pos=(6.0, 0.0, 0.0))
+        payload = self._grab_payload(self.FOREIGN_PID, 7, "GM")
+        bot._on_grab_flag(MsgGrabFlag, payload)
+        assert bot._flag_knowledge[7] == "GM"
+        assert bot._carried_flag_id[self.FOREIGN_PID] == 7
+
+    def test_foreign_grab_not_learned_out_of_window_and_far(self, bot):
+        """Spieler bei -x → nicht im FoV; Distanz > 150 → auch Radar-Pfad versagt."""
+        from bzflag.protocol import MsgGrabFlag
+        bot.azimuth = 0.0
+        make_player(bot, self.FOREIGN_PID, pos=(-200.0, 0.0, 0.0))
+        payload = self._grab_payload(self.FOREIGN_PID, 8, "GM")
+        bot._on_grab_flag(MsgGrabFlag, payload)
+        assert 8 not in bot._flag_knowledge
+        # Bookkeeping ist ungegated und wird trotzdem gesetzt:
+        assert bot._carried_flag_id[self.FOREIGN_PID] == 8
+
+    def test_foreign_grab_learned_via_radar_within_range(self, bot):
+        """Spieler bei -x, aber Distanz < 150 → Radar-Pfad greift."""
+        from bzflag.protocol import MsgGrabFlag
+        bot.azimuth = 0.0
+        make_player(bot, self.FOREIGN_PID, pos=(-100.0, 0.0, 0.0))
+        payload = self._grab_payload(self.FOREIGN_PID, 9, "GM")
+        bot._on_grab_flag(MsgGrabFlag, payload)
+        assert bot._flag_knowledge[9] == "GM"
+
+    def test_foreign_grab_not_learned_stealth_on_radar(self, bot):
+        """Träger ist bereits als Stealth-Träger (flag='ST') bekannt → Radar sieht ihn nicht.
+        Das Gate wertet den Spieler-Zustand VOR dem Setzen von players[pid].flag aus."""
+        from bzflag.protocol import MsgGrabFlag
+        bot.azimuth = 0.0
+        make_player(bot, self.FOREIGN_PID, pos=(-100.0, 0.0, 0.0), flag="ST")
+        payload = self._grab_payload(self.FOREIGN_PID, 10, "GM")
+        bot._on_grab_flag(MsgGrabFlag, payload)
+        assert 10 not in bot._flag_knowledge
+
+    def test_foreign_grab_not_learned_radar_jammed(self, bot):
+        """Eigenes JM stört das eigene Radar komplett; Spieler außerhalb FoV → nichts wahrgenommen."""
+        from bzflag.protocol import MsgGrabFlag
+        bot.azimuth = 0.0
+        bot.own_flag = "JM"
+        make_player(bot, self.FOREIGN_PID, pos=(-100.0, 0.0, 0.0))
+        payload = self._grab_payload(self.FOREIGN_PID, 11, "GM")
+        bot._on_grab_flag(MsgGrabFlag, payload)
+        assert 11 not in bot._flag_knowledge
+
+    # -- Transfer ----------------------------------------------------------
+
+    def test_transfer_learned_when_receiver_visible(self, bot):
+        from bzflag.protocol import MsgTransferFlag
+        bot.azimuth = 0.0
+        victim_id, receiver_id = 3, self.FOREIGN_PID
+        make_player(bot, victim_id, pos=(-200.0, 0.0, 0.0))    # unsichtbar
+        make_player(bot, receiver_id, pos=(6.0, 0.0, 0.0))     # sichtbar (Fenster)
+        payload = self._transfer_payload(victim_id, receiver_id, 20, "GM")
+        bot._on_transfer_flag(MsgTransferFlag, payload)
+        assert bot._flag_knowledge[20] == "GM"
+        assert bot._carried_flag_id[receiver_id] == 20
+
+    def test_transfer_learned_when_victim_visible(self, bot):
+        from bzflag.protocol import MsgTransferFlag
+        bot.azimuth = 0.0
+        victim_id, receiver_id = self.FOREIGN_PID, 3
+        make_player(bot, victim_id, pos=(6.0, 0.0, 0.0))       # sichtbar (Fenster)
+        make_player(bot, receiver_id, pos=(-200.0, 0.0, 0.0))  # unsichtbar
+        payload = self._transfer_payload(victim_id, receiver_id, 21, "SW")
+        bot._on_transfer_flag(MsgTransferFlag, payload)
+        assert bot._flag_knowledge[21] == "SW"
+
+    def test_transfer_not_learned_when_neither_visible(self, bot):
+        from bzflag.protocol import MsgTransferFlag
+        bot.azimuth = 0.0
+        victim_id, receiver_id = 3, 4
+        make_player(bot, victim_id, pos=(-200.0, 0.0, 0.0))
+        make_player(bot, receiver_id, pos=(-200.0, 0.0, 0.0))
+        payload = self._transfer_payload(victim_id, receiver_id, 22, "L")
+        bot._on_transfer_flag(MsgTransferFlag, payload)
+        assert 22 not in bot._flag_knowledge
+
+    def test_own_transfer_receive_always_learned(self, bot):
+        """Eigener Erhalt (to_id == bot.player_id) wird immer gelernt, auch wenn der
+        Bestohlene (from_id) unsichtbar ist."""
+        from bzflag.protocol import MsgTransferFlag
+        bot.azimuth = 0.0
+        victim_id = 3
+        make_player(bot, victim_id, pos=(-200.0, 0.0, 0.0))
+        payload = self._transfer_payload(victim_id, bot.player_id, 23, "TH")
+        bot._on_transfer_flag(MsgTransferFlag, payload)
+        assert bot._flag_knowledge[23] == "TH"
+        assert bot.own_flag == "TH"
+
+    # -- Near-Flag (ID) ------------------------------------------------------
+
+    def test_near_flag_id_always_learns(self, bot):
+        from bzflag.protocol import MsgNearFlag
+        from bot.models import FlagInfo
+        bot.own_flag = "ID"
+        fid = 30
+        bot.flags[fid] = FlagInfo(fid, "", 1, [10.0, 20.0, 0.0])
+        name = b"Laser"
+        payload = (struct.pack(">fff", 10.0, 20.0, 0.0)
+                   + struct.pack(">I", len(name)) + name)
+        bot._on_near_flag(MsgNearFlag, payload)
+        assert bot._flag_knowledge[fid] == "L"
+
+    # -- Drop ------------------------------------------------------------
+
+    def test_drop_learned_when_carrier_visible_and_bookkept(self, bot):
+        from bzflag.protocol import MsgDropFlag
+        bot.azimuth = 0.0
+        make_player(bot, self.FOREIGN_PID, pos=(6.0, 0.0, 0.0), flag="GM")
+        bot._carried_flag_id[self.FOREIGN_PID] = 40
+        payload = struct.pack(">B", self.FOREIGN_PID)
+        bot._on_drop_flag(MsgDropFlag, payload)
+        assert bot._flag_knowledge[40] == "GM"
+        assert bot.players[self.FOREIGN_PID].flag == ""
+        assert self.FOREIGN_PID not in bot._carried_flag_id
+
+    def test_drop_not_learned_when_carrier_not_visible(self, bot):
+        from bzflag.protocol import MsgDropFlag
+        bot.azimuth = 0.0
+        make_player(bot, self.FOREIGN_PID, pos=(-200.0, 0.0, 0.0), flag="GM")
+        bot._carried_flag_id[self.FOREIGN_PID] = 41
+        payload = struct.pack(">B", self.FOREIGN_PID)
+        bot._on_drop_flag(MsgDropFlag, payload)
+        assert 41 not in bot._flag_knowledge
+        assert bot.players[self.FOREIGN_PID].flag == ""
+
+    def test_drop_no_bookkeeping_no_learn(self, bot):
+        """Sichtbarer Drop, aber ohne vorherigen _carried_flag_id-Eintrag → kein Lernen."""
+        from bzflag.protocol import MsgDropFlag
+        bot.azimuth = 0.0
+        make_player(bot, self.FOREIGN_PID, pos=(6.0, 0.0, 0.0), flag="GM")
+        payload = struct.pack(">B", self.FOREIGN_PID)
+        bot._on_drop_flag(MsgDropFlag, payload)
+        assert bot._flag_knowledge == {}
+        assert bot.players[self.FOREIGN_PID].flag == ""
+
+    # -- Flag-Update (Reset / onTank / Owner-Sync) ------------------------
+
+    def test_flag_reset_status0_forgets(self, bot):
+        from bzflag.protocol import MsgFlagUpdate
+        from bot.models import FlagInfo
+        bot.flags[1] = FlagInfo(1, "GM", 1, [50.0, 30.0, 0.0])
+        bot._flag_knowledge[1] = "GM"
+        payload = _build_flag_update_payload([(1, "GM", 0, 50.0, 30.0, 0.0)])
+        bot._on_flag_update(MsgFlagUpdate, payload)
+        assert 1 not in bot._flag_knowledge
+        assert 1 not in bot.flags
+
+    def test_flag_status2_ontank_keeps_knowledge(self, bot):
+        from bzflag.protocol import MsgFlagUpdate
+        from bot.models import FlagInfo
+        bot.flags[1] = FlagInfo(1, "GM", 1, [50.0, 30.0, 0.0])
+        bot._flag_knowledge[1] = "GM"
+        payload = _build_flag_update_payload([(1, "GM", 2, 50.0, 30.0, 0.0)], owner=255)
+        bot._on_flag_update(MsgFlagUpdate, payload)
+        assert 1 not in bot.flags
+        assert bot._flag_knowledge[1] == "GM"
+
+    def test_flag_update_owner_sync_learns_when_perceptible(self, bot):
+        from bzflag.protocol import MsgFlagUpdate
+        bot.azimuth = 0.0
+        make_player(bot, self.FOREIGN_PID, pos=(6.0, 0.0, 0.0))
+        payload = _build_flag_update_payload([(1, "GM", 2, 0.0, 0.0, 0.0)], owner=self.FOREIGN_PID)
+        bot._on_flag_update(MsgFlagUpdate, payload)
+        assert bot.players[self.FOREIGN_PID].flag == "GM"
+        assert bot._carried_flag_id[self.FOREIGN_PID] == 1
+        assert bot._flag_knowledge[1] == "GM"
+
+    def test_flag_update_owner_sync_not_learned_when_owner_far(self, bot):
+        """Owner fern/hinten → Bookkeeping wird trotzdem gesetzt (ungegated), Typ-Wissen bleibt aus."""
+        from bzflag.protocol import MsgFlagUpdate
+        bot.azimuth = 0.0
+        make_player(bot, self.FOREIGN_PID, pos=(-200.0, 0.0, 0.0))
+        payload = _build_flag_update_payload([(1, "GM", 2, 0.0, 0.0, 0.0)], owner=self.FOREIGN_PID)
+        bot._on_flag_update(MsgFlagUpdate, payload)
+        assert bot.players[self.FOREIGN_PID].flag == "GM"
+        assert bot._carried_flag_id[self.FOREIGN_PID] == 1
+        assert 1 not in bot._flag_knowledge
+
+    # -- Bookkeeping-Hygiene (Remove/Capture) ------------------------------
+
+    def test_remove_player_clears_bookkeeping(self, bot):
+        from bzflag.protocol import MsgRemovePlayer
+        make_player(bot, self.FOREIGN_PID)
+        bot._carried_flag_id[self.FOREIGN_PID] = 50
+        payload = struct.pack(">B", self.FOREIGN_PID)
+        bot._on_remove_player(MsgRemovePlayer, payload)
+        assert self.FOREIGN_PID not in bot._carried_flag_id
+
+    def test_capture_clears_bookkeeping(self, bot):
+        from bzflag.protocol import MsgCaptureFlag
+        make_player(bot, self.FOREIGN_PID)
+        bot._carried_flag_id[self.FOREIGN_PID] = 51
+        payload = struct.pack(">B", self.FOREIGN_PID)
+        bot._on_capture_flag(MsgCaptureFlag, payload)
+        assert self.FOREIGN_PID not in bot._carried_flag_id
+        assert bot.players[self.FOREIGN_PID].flag == ""
+
+    # -- _learn_flag_type direkt --------------------------------------------
+
+    def test_learn_overwrites(self, bot):
+        bot._learn_flag_type(1, "GM")
+        bot._learn_flag_type(1, "SW")
+        assert bot._flag_knowledge[1] == "SW"
+
+    def test_learn_ignores_empty_abbr(self, bot):
+        bot._learn_flag_type(1, "GM")
+        bot._learn_flag_type(1, "")
+        assert bot._flag_knowledge[1] == "GM"
