@@ -18,7 +18,6 @@ from bot.constants import (
     M_REACT_MULTIPLIER,
     CS_REACT_MULTIPLIER,
     COVER_PEEK_BACK_S,
-    TANK_LENGTH,
 )
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
@@ -322,7 +321,8 @@ class StateMachineMixin(BZBotBase):
         Phase 0 (vorwärts, _wg_feint_phase == 0): fliegt mit voller _effective_tank_speed()
         Richtung Gegner, bis er horizontal an ihm vorbei ist — Kriterium: Projektion von
         (bot_pos − enemy_pos) auf die aktuelle Flugrichtung (Einheitsvektor aus vel_x/vel_y,
-        bei Speed≈0 ersatzweise azimuth) ≥ TANK_LENGTH. Am Umschaltpunkt wird die Blickrichtung
+        bei Speed≈0 ersatzweise azimuth) ≥ _tank_length (Server-Var, nicht die statische
+        TANK_LENGTH-Konstante). Am Umschaltpunkt wird die Blickrichtung
         des Gegners GENAU EINMAL geprüft (keine Flatter-Entscheidung pro Tick):
           - Gegner hat sich zum Bot gedreht (< 45° Abweichung) → Finte bestätigt:
             _wg_feint_phase = 1, ab jetzt Phase 1 (rückwärts) bis zur Landung.
@@ -367,7 +367,7 @@ class StateMachineMixin(BZBotBase):
         else:
             fdir_x, fdir_y = math.cos(self.azimuth), math.sin(self.azimuth)
         proj = bx * fdir_x + by * fdir_y
-        if proj < TANK_LENGTH:
+        if proj < self._tank_length:
             self._wings_air_steer(dt, az_to_enemy, self._effective_tank_speed())
             return True
 

@@ -1849,6 +1849,46 @@ class TestWingsFeint:
         speed_proj = bot.vel_x * math.cos(bot.azimuth) + bot.vel_y * math.sin(bot.azimuth)
         assert speed_proj < 0.0
 
+    def test_feint_switch_point_scales_with_tank_length(self, bot):
+        """Audit-Fix: der Umschaltpunkt (proj ≥ _tank_length) folgt der Server-Var, nicht der
+        statischen TANK_LENGTH-Konstante (6.0u). Mit _tank_length=10.0 löst ein Abstand von
+        6.0u (die alte Konstante) noch KEINEN Umschaltpunkt-Check aus — erst bei 10.0u."""
+        bot.own_flag = "WG"
+        bot._tank_length = 10.0
+        bot.pos_x = 26.0; bot.pos_y = 0.0; bot.pos_z = 30.0   # 6u am Gegner vorbei (alte TANK_LENGTH)
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        info.azimuth = 0.0   # würde "hat gedreht" ergeben, falls der Umschaltpunkt-Check liefe
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 0
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        # proj=6.0 < _tank_length=10.0 → Umschaltpunkt noch nicht erreicht, Finte bleibt Phase 0.
+        assert bot._wg_feint_target == 99
+        assert bot._wg_feint_phase == 0
+
+        # Gegenprobe: 10.0u am Gegner vorbei (== neuer _tank_length) → Umschaltpunkt erreicht
+        # (frischer Tick-Aufbau wie test_feint_switch_confirms_when_enemy_faces_bot, nur mit
+        # dem auf 10.0 skalierten Abstand statt der alten TANK_LENGTH=6.0).
+        bot.pos_x = 30.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._wg_feint_phase = 0
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.02)
+        assert bot._wg_feint_target == 99
+        assert bot._wg_feint_phase == 1
+        speed_proj = bot.vel_x * math.cos(bot.azimuth) + bot.vel_y * math.sin(bot.azimuth)
+        assert speed_proj < 0.0
+
     def test_feint_switch_aborts_when_enemy_not_facing(self, bot):
         """Gegner blickt am Umschaltpunkt WEG vom Bot → keine Finte: Ziel gelöscht, Heading
         wird über _wings_steer_az fixiert (kein Rückkrümmen zum Gegner), Bot fliegt im selben
