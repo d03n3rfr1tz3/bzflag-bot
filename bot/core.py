@@ -433,6 +433,13 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # Flag-Tracking
         self.flags = {}
         self._last_grab_attempt = 0.0
+        # P4-FLG-04: Typ-Wissen (flag_id → abbr), nur bei wahrnehmbarem Träger/Drop gelernt.
+        # Überlebt Tod/Respawn (Wissen bleibt); Reconnect erzeugt ohnehin eine frische
+        # BZBot-Instanz (bzbot.py), daher kein expliziter Reset nötig. _carried_flag_id ist
+        # reine pid→flag_id-Korrelation (kein Typ-Wissen), nötig für „wahrnehmbarer Drop"
+        # (MsgDropFlag enthält nur die pid).
+        self._flag_knowledge: Dict[int, str] = {}
+        self._carried_flag_id: Dict[int, int] = {}
 
     def _init_runtime_state(self):
         """GM-Tracking, State Machine, Sende-Kadenz, Tick-Memo, Lebenszyklus-Flags."""

@@ -20,6 +20,7 @@ from bot.constants import (
     TARGET_FOV,
     TANK_HALF_DIAG,
     COVER_EDGE_PROBE_DIST,
+    FLAG_KNOW_RADAR_RANGE,
 )
 from bot.util import _angle_diff
 
@@ -67,6 +68,23 @@ class PerceptionMixin(BZBotBase):
         if self.own_flag == "SE": return True
         if self.own_flag == "B":  return False     # blind
         return info.flag != "CL"
+
+    def _flag_carrier_perceptible(self, pid: int) -> bool:
+        """P4-FLG-04: War Spieler pid JETZT wahrnehmbar (für Flag-Typ-Lernen bei Grab/
+        Transfer/Drop)? Fenster: exakter Sicht-Check ohne now/Cache (läuft im Handler-Pfad,
+        nicht im 60-Hz-Tick). Radar: zusätzlich distanz-begrenzt (FLAG_KNOW_RADAR_RANGE) —
+        die volle Radarreichweite wäre für Typ-Wissen zu großzügig; gekappt auf die
+        tatsächliche effektive Reichweite (z.B. BU-Burrow-Reduktion)."""
+        info = self.players.get(pid)
+        if info is None:
+            return False
+        x, y, z = info.pos[0], info.pos[1], info.pos[2]
+        if self._sees_in_window(info, x, y, z):
+            return True
+        if not self._enemy_visible_radar(info):
+            return False
+        d = math.hypot(x - self.pos_x, y - self.pos_y)
+        return d <= min(FLAG_KNOW_RADAR_RANGE, self._effective_radar_range())
 
     def _sees_in_window(self, info, x: float, y: float, z: float, now: Optional[float] = None) -> bool:
         """Voller Fenster-Sichtkontakt: Flagge erlaubt Fenster-Sicht UND im FoV UND unverdeckt (LoS).
