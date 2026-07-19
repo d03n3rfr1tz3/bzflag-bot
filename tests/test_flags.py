@@ -822,3 +822,162 @@ class TestFlagKnowledge:
         bot._learn_flag_type(1, "GM")
         bot._learn_flag_type(1, "")
         assert bot._flag_knowledge[1] == "GM"
+
+
+# ---------------------------------------------------------------------------
+# P4-FLG-05: Flag-Wissen in der Zielwahl (_effective_flag_abbr / _new_target /
+# _check_opportunistic_grab) — bekannt-beste > bekannt-gute > nächste-unbekannte,
+# bekannt-schlechte/-neutrale werden übersprungen.
+# ---------------------------------------------------------------------------
+
+class TestFlagKnowledgeTargeting:
+
+    def test_effective_abbr_prefers_live_over_memory(self, bot):
+        from bot.models import FlagInfo
+        fi = FlagInfo(1, "GM", 1, [0.0, 0.0, 0.0])
+        bot._flag_knowledge[1] = "L"
+        assert bot._effective_flag_abbr(fi) == "GM"
+
+    def test_effective_abbr_falls_back_to_memory(self, bot):
+        from bot.models import FlagInfo
+        fi = FlagInfo(2, "", 1, [0.0, 0.0, 0.0])
+        bot._flag_knowledge[2] = "SW"
+        assert bot._effective_flag_abbr(fi) == "SW"
+
+    def test_new_target_prefers_known_good_over_nearer_unknown(self, bot):
+        """Flag1 (näher, unbekannt) vs. Flag2 (weiter, bekannt-gut 'V', nicht best)
+        → die bekannt-gute gewinnt trotz größerer Distanz."""
+        from bot.models import FlagInfo
+        bot.own_flag = ""
+        bot.flags[1] = FlagInfo(1, "", 1, [5.0, 0.0, 0.0])    # unbekannt, näher
+        bot.flags[2] = FlagInfo(2, "", 1, [50.0, 0.0, 0.0])   # bekannt-gut, weiter
+        bot._flag_knowledge[2] = "V"
+        with patch.object(bot, "_plan_path") as pp:
+            bot._new_target()
+            pp.assert_called_once_with(50.0, 0.0, 0.0)
+
+    def test_new_target_prefers_best_over_nearer_good(self, bot):
+        """Flag1 (näher, bekannt-gut 'V') vs. Flag2 (weiter, bekannt-best 'GM')
+        → best schlägt näher-gut."""
+        from bot.models import FlagInfo
+        bot.own_flag = ""
+        bot.flags[1] = FlagInfo(1, "", 1, [5.0, 0.0, 0.0])
+        bot._flag_knowledge[1] = "V"
+        bot.flags[2] = FlagInfo(2, "", 1, [50.0, 0.0, 0.0])
+        bot._flag_knowledge[2] = "GM"
+        with patch.object(bot, "_plan_path") as pp:
+            bot._new_target()
+            pp.assert_called_once_with(50.0, 0.0, 0.0)
+
+    def test_new_target_falls_back_to_nearest_when_no_known_good(self, bot):
+        """Beide Flaggen unbekannt → einfache Nähe entscheidet (Fallback-Stufe 3)."""
+        from bot.models import FlagInfo
+        bot.own_flag = ""
+        bot.flags[1] = FlagInfo(1, "", 1, [5.0, 0.0, 0.0])
+        bot.flags[2] = FlagInfo(2, "", 1, [50.0, 0.0, 0.0])
+        with patch.object(bot, "_plan_path") as pp:
+            bot._new_target()
+            pp.assert_called_once_with(5.0, 0.0, 0.0)
+
+    def test_new_target_skips_known_bad(self, bot):
+        """Flag1 (näher, bekannt-schlecht) wird übersprungen, Flag2 (weiter,
+        unbekannt) gewinnt. NJ (No Jumping) statt WG: WG steht laut
+        bot/constants.py GOOD_FLAGS_DEFAULT (Zeile 293) tatsächlich in der guten
+        Liste (nicht in BAD_FLAGS_DEFAULT) — NJ ist die reale bad-Flagge hierfür."""
+        from bot.models import FlagInfo
+        from bot.constants import BAD_FLAGS_DEFAULT, GOOD_FLAGS_DEFAULT
+        assert "NJ" in BAD_FLAGS_DEFAULT
+        assert "NJ" not in GOOD_FLAGS_DEFAULT
+        bot.own_flag = ""
+        bot.flags[1] = FlagInfo(1, "", 1, [5.0, 0.0, 0.0])
+        bot._flag_knowledge[1] = "NJ"
+        bot.flags[2] = FlagInfo(2, "", 1, [50.0, 0.0, 0.0])
+        with patch.object(bot, "_plan_path") as pp:
+            bot._new_target()
+            pp.assert_called_once_with(50.0, 0.0, 0.0)
+
+    def test_new_target_skips_known_neutral(self, bot):
+        """Flag1 (näher, bekannt-neutral 'US' — weder good noch bad) wird
+        übersprungen, Flag2 (weiter, unbekannt) gewinnt."""
+        from bot.models import FlagInfo
+        assert "US" not in bot.good_flags
+        assert "US" not in bot.bad_flags
+        bot.own_flag = ""
+        bot.flags[1] = FlagInfo(1, "", 1, [5.0, 0.0, 0.0])
+        bot._flag_knowledge[1] = "US"
+        bot.flags[2] = FlagInfo(2, "", 1, [50.0, 0.0, 0.0])
+        with patch.object(bot, "_plan_path") as pp:
+            bot._new_target()
+            pp.assert_called_once_with(50.0, 0.0, 0.0)
+
+    def test_best_flags_default_and_intersection_semantics(self):
+        """_init_flags-Semantik (bot/core.py ~409-420):
+        - Default: good=GOOD_FLAGS_DEFAULT, best=BEST_FLAGS_DEFAULT ({GM,L,SW}).
+        - good_flags=['V'] (custom good, kein best) → best wird mit good
+          GESCHNITTEN ({GM,L,SW} ∩ {V} = ∅), nicht erweitert.
+        - good_flags=['V'], best_flags=['GM'] → explizite best werden in good
+          gemergt: good={V,GM}, best={GM}."""
+        from bot.constants import BEST_FLAGS_DEFAULT, GOOD_FLAGS_DEFAULT
+        with patch("bot.core.BZFlagClient"):
+            from bot.core import BZBot
+            b1 = BZBot(host="localhost", callsign="T1")
+            assert b1.good_flags == set(GOOD_FLAGS_DEFAULT)
+            assert b1.best_flags == set(BEST_FLAGS_DEFAULT)
+
+            b2 = BZBot(host="localhost", callsign="T2", good_flags=["V"])
+            assert b2.good_flags == {"V"}
+            assert b2.best_flags == set()
+
+            b3 = BZBot(host="localhost", callsign="T3",
+                       good_flags=["V"], best_flags=["GM"])
+            assert b3.good_flags == {"V", "GM"}
+            assert b3.best_flags == {"GM"}
+
+    def test_opportunistic_grab_skips_known_bad(self, bot):
+        """Bekannt-schlechte Flagge (NJ) in Grab-Reichweite wird NICHT gegriffen."""
+        from bot.models import FlagInfo
+        bot.own_flag = ""
+        bot.azimuth = 0.0
+        bot.flags[3] = FlagInfo(3, "", 1, [5.0, 0.0, 0.0])
+        bot._flag_knowledge[3] = "NJ"
+        bot._last_grab_attempt = 0.0
+        bot.client.send.reset_mock()
+        bot._check_opportunistic_grab(100.0)
+        bot.client.send.assert_not_called()
+
+    def test_opportunistic_grab_still_grabs_known_good(self, bot):
+        """Regression: bekannt-gute (unbekannt/gute) Flagge nah wird weiterhin gegriffen."""
+        from bot.models import FlagInfo
+        bot.own_flag = ""
+        bot.azimuth = 0.0
+        bot.flags[3] = FlagInfo(3, "", 1, [5.0, 0.0, 0.0])
+        bot._flag_knowledge[3] = "V"
+        bot._last_grab_attempt = 0.0
+        bot.client.send.reset_mock()
+        bot._check_opportunistic_grab(100.0)
+        bot.client.send.assert_called()
+
+    def test_dropped_neutrals_dedup_uses_effective_abbr(self, bot):
+        """_dropped_neutrals speichert (abbr, x, y) (targeting.py ~232/240f). Eine
+        Flagge deren _effective_flag_abbr (aus _flag_knowledge, da fi.abbr=='')
+        mit einem kürzlich abgelegten Eintrag <20u übereinstimmt, wird nicht
+        angesteuert — auch wenn ihr Typ (hier 'V') an sich gut ist. Bewusst 'V'
+        statt der in der Vorgabe genannten 'BY' verwendet: BY steht in
+        bot/constants.py BAD_FLAGS_DEFAULT (Zeile 296), ein bad-Kürzel würde
+        also schon durch den good/bad-Filter übersprungen und den Dedup-Pfad
+        nicht isoliert testen.
+
+        Zweite (nicht gededuplizierte) Flagge nötig: bleibt best_pos None (kein
+        Flag-Kandidat übrig), fällt targeting.py am Ende von _new_target
+        ungated in 'Fall C' (zufälliger Wegpunkt) durch — dort wird _plan_path
+        ebenfalls aufgerufen, nur mit zufälligen statt deterministischen
+        Koordinaten. Ein reiner 'kein Ziel'-Fall existiert bei own_flag=='' nicht."""
+        from bot.models import FlagInfo
+        bot.own_flag = ""
+        bot._dropped_neutrals.append(("V", 5.0, 0.0))
+        bot.flags[1] = FlagInfo(1, "", 1, [5.0, 0.0, 0.0])   # dedupliziert -> übersprungen
+        bot._flag_knowledge[1] = "V"
+        bot.flags[2] = FlagInfo(2, "", 1, [50.0, 0.0, 0.0])  # einzig verbleibender Kandidat
+        with patch.object(bot, "_plan_path") as pp:
+            bot._new_target()
+            pp.assert_called_once_with(50.0, 0.0, 0.0)
