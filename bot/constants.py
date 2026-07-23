@@ -129,12 +129,12 @@ NAV_TELE_ENGAGE_DIST: Final = NAV_CELL_SIZE * 5.0  # nur engagen, wenn Tor-Mitte
 NAV_TELE_COOLDOWN: Final = 8.0             # Sperre eines Tors nach fehlgeschlagener Querung
 NAV_TELE_OVERSHOOT: Final = 4.0             # u über die Mitte hinaus anzielen → Tor-Ebene sicher queren
 # P4-MOV-01: Early-Advance (glatte WP-Übergänge / Ecken-Glättung)
-EARLY_ADVANCE_LOOKAHEAD: Final = NAV_CELL_SIZE * 4.0  # ≈16u: nur nahe Ecken glätten — hält query_segment
+EARLY_ADVANCE_LOOKAHEAD: Final = NAV_CELL_SIZE * 10.0  # ≈40u: nur nahe Ecken glätten — hält query_segment
                                                 # klein (≤2×2 Grid-Zellen) und die Plan-Abweichung begrenzt
-EARLY_ADVANCE_FLOOR_STEP: Final = 1.0             # Abtast-Abstand Kanten-/Absturz-Check. Spalten < 2×Overhang
+EARLY_ADVANCE_FLOOR_STEP: Final = 2.0             # Abtast-Abstand Kanten-/Absturz-Check. Spalten < 2×Overhang
                                                 # (~2.8u) überfährt der Tank physisch (Pixel-on); ab Breite
                                                 # 2×Overhang + STEP ist ein Abtast-Treffer garantiert →
-                                                # 1.0 hält das Blindfenster klein (max. ~16 Punktabfragen)
+                                                # 2.0 hält das Blindfenster klein (max. ~16 Punktabfragen)
 # P4-INF-01: Asynchrone Pfadplanung. Der Haupt-Thread plant schnell (Defaults 5k/125ms, ggf.
 # Best-Effort-Teilpfad); dauerte das länger als NAV_ASYNC_TRIGGER_MS, läuft parallel in einem
 # Zweit-Thread eine Vollsuche mit großen Limits, deren bessere Route (inkl. Treppen-Sprüngen)
