@@ -6,7 +6,7 @@ Bots für BZFlag 2.4 – füllen den Server automatisch auf und machen Platz, we
 
 - Vollwertiger Spieler (`PLAYER_TYPE_TANK`), umgeht `-disableBots`; client-seitige Physik & Hit-Detection
 - Kampf-KI: Zielauswahl (Radar/FOV), Vorhalt-Schießen, Ausweichen, taktische & defensive Sprünge
-- Flag-Strategie: gute Flags nutzen, schlechte/neutrale ablegen, gezielt zu Bonus-Flags navigieren
+- Flag-Strategie: gute Flags nutzen, schlechte/neutrale ablegen, beobachtete Best-Flaggen (GM/L/SW) gezielt priorisiert ansteuern
 - Flaggen-spezifisches Verhalten für (fast) alle BZFlag-Flaggen (Waffen, Wahrnehmung, Physik)
 - Team- und Wahrnehmungs-Bewusstsein (eigenes Team schonen; ST/CL/SE/MQ/CB berücksichtigen)
 - 3D-Navigation: A*-Pathfinding über NavGraph inkl. Sprünge auf/über Gebäude (Etagen-Wechsel)
@@ -57,6 +57,7 @@ python bzbot.py --host mein-server.de --callsign "Robo"
 | `idle_cleanup_delay` | `300.0`  | Sekunden ohne echte Präsenz, bis auf `min_bots` abgeräumt wird (`0` = sofort) |
 | `good_flags`      | eingebaute Liste | Flaggen-Kürzel, die die Bots behalten und nutzen                        |
 | `bad_flags`       | eingebaute Liste | Flaggen-Kürzel, die die Bots sofort ablegen                             |
+| `best_flags`      | `GM,L,SW`        | Besonders begehrte Flaggen, bevorzugt angesteuert; implizit zu `good_flags` ergänzt |
 | `bot_lifetime_min` | `900`      | Minimale Bot-Lebensdauer in Sekunden; danach Ersatz durch neuen Bot (Namens-/Statistik-Rotation) |
 | `bot_lifetime_max` | `7200`     | Maximale Bot-Lebensdauer in Sekunden                                         |
 | `log_level`       | `INFO`      | `DEBUG` / `INFO` / `WARNING` / `ERROR`                                       |
@@ -86,6 +87,7 @@ python bot_manager.py [Optionen]
   --idle_cleanup_delay S  Sekunden ohne Präsenz bis Abräumen auf min_bots (0 = sofort)
   --good_flags FLAGS      Kommagetrennte Flaggen-Kürzel, die die Bots behalten
   --bad_flags FLAGS       Kommagetrennte Flaggen-Kürzel, die die Bots ablegen
+  --best_flags FLAGS      Kommagetrennte, besonders begehrte Flaggen (bevorzugt angesteuert)
   --log_level LEVEL       Log-Level (DEBUG/INFO/WARNING/ERROR)
 ```
 

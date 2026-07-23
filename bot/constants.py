@@ -268,6 +268,12 @@ PAUSE_WAIT_S: Final = 12.0  # so lange wartet der Bot auf Rückkehr eines pausie
 
 RADAR_RANGE: Final = WORLD_HALF_DEFAULT   # bewusst HALBE Weltgröße (Fairness-Limit, s. F6 im
                                           # FABLE-PLAN); folgt _worldSize via _effective_radar_range
+# P4-FLG-04: Typ-Wissen (flag_id → abbr) nur bei wahrnehmbarem Träger/Drop übernehmen.
+# Radar-Pfad zusätzlich distanz-begrenzt: die volle Radarreichweite (halbe Weltgröße, s.
+# RADAR_RANGE) wäre für Typ-Wissen zu großzügig. Absoluter Wert analog IDENTIFY_RANGE;
+# effektiv min(FLAG_KNOW_RADAR_RANGE, _effective_radar_range()) — respektiert z.B. die
+# BU-Burrow-25%-Radarreduktion.
+FLAG_KNOW_RADAR_RANGE: Final = 150.0
 TARGET_FOV: Final = math.pi * 75 / 180  # 75°, ±37.5°
 WIDE_ANGLE_ANG: Final = 1.745329             # ~100°, _wideAngleAng ↔ self._wide_angle_ang
 
@@ -288,6 +294,10 @@ GOOD_FLAGS_DEFAULT = {"GM", "SW", "L", "SB", "MG", "V", "SE", "ID",
                       "OO", "MQ", "TH", "R", "CL", "ST", "SR", "CS", "PZ"}
 BAD_FLAGS_DEFAULT  = {"NJ", "B", "RC", "O", "JM", "BY",
                       "CB", "FO", "LT", "M", "RO", "RT", "TR", "WA"}
+# P4-FLG-05: "Best" ist eine Priorisierungs-Untermenge von "Good" — besonders begehrte
+# Flaggen, die bei bekanntem Typ VOR normalen guten Flaggen angesteuert werden. Beeinflusst
+# NUR die Zielwahl (_new_target), nicht die Grab-/Drop-/Keep-Logik (die läuft über good/bad).
+BEST_FLAGS_DEFAULT = {"GM", "L", "SW"}
 
 # Vollname → Abkürzung (aus BZFlag Flag.cxx); für MsgNearFlag-Auswertung
 FLAG_NAME_TO_ABBR: dict[str, str] = {
@@ -364,7 +374,8 @@ __all__ = [
     'COVER_BREAKOUT_MIN_WINDOW_S', 'COVER_CLOSE_EXIT_FRAC', 'RICO_AIM_MAX_COVER',
     'AHEAD_HALF_ANGLE', 'RADAR_SKIP_DEFAULT', 'RADAR_SKIP_CL', 'RADAR_COOLDOWN_DEFAULT',
     'RADAR_COOLDOWN_CL', 'PLAYER_LOS_TTL_S', 'ENEMY_STALE_S', 'PAUSE_WAIT_S', 'RADAR_RANGE',
+    'FLAG_KNOW_RADAR_RANGE',
     'TARGET_FOV', 'WIDE_ANGLE_ANG', 'SMALL_SCALE', 'SMALL_MAX_DIST', 'SMALL_MAX_VEL',
     'SMALL_MAX_ANGV', 'KILL_REASON_SHOT', 'KILL_REASON_RUNOVER', 'KILL_REASON_GENOCIDED',
-    'GOOD_FLAGS_DEFAULT', 'BAD_FLAGS_DEFAULT', 'FLAG_NAME_TO_ABBR',
+    'GOOD_FLAGS_DEFAULT', 'BAD_FLAGS_DEFAULT', 'BEST_FLAGS_DEFAULT', 'FLAG_NAME_TO_ABBR',
 ]

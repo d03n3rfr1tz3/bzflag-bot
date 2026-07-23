@@ -203,6 +203,7 @@ class HandlersMixin(BZBotBase):
         if len(payload) < 1: return
         pid  = unpack_uint8(payload, 0)
         info = self.players.pop(pid, None)
+        self._carried_flag_id.pop(pid, None)   # P4-FLG-04: Bookkeeping-Hygiene (pid-Reuse)
         with self._shots_lock:
             for k in [k for k in self._shots if k[0] == pid]:
                 del self._shots[k]
@@ -224,6 +225,17 @@ class HandlersMixin(BZBotBase):
         # unconditional: auch Zuschauer (Observer) zaehlen als Anwesenheit fuer _has_presence
         self._recompute_presence()
 
+    def _learn_flag_type(self, flag_id: int, abbr: str) -> None:
+        """P4-FLG-04: merkt sich den Typ einer Flag-ID dauerhaft. Überschreiben ist erlaubt
+        (z.B. wenn eine Flagge via _maxFlagGrabs neu ausgewürfelt und zwischenzeitlich per
+        Status 0 invalidiert wurde). Leeres Kürzel (maskierte Bodenflagge) wird ignoriert."""
+        if not abbr:
+            return
+        if self._flag_knowledge.get(flag_id) != abbr:
+            logger.debug("[%s] Flagge: Typ-Wissen flag_id=%d → %r gelernt",
+                         self.callsign, flag_id, abbr)
+        self._flag_knowledge[flag_id] = abbr
+
     def _on_grab_flag(self, code: int, payload: bytes) -> None:
         """Aktualisiert Flag-Zustand."""
         if len(payload) < 5: return
@@ -232,6 +244,7 @@ class HandlersMixin(BZBotBase):
         flag_abbv  = payload[3:5].rstrip(b'\x00').decode('ascii', errors='replace')
         self.flags.pop(flag_index, None)
         if pid == self.player_id:
+            self._learn_flag_type(flag_index, flag_abbv)   # eigener Grab: immer wahrgenommen
             self.own_flag = flag_abbv
             self._own_flag_since = time.monotonic()
             self._last_drop_attempt = 0.0
@@ -245,6 +258,11 @@ class HandlersMixin(BZBotBase):
                 logger.info("[%s] Flag aufgesammelt: %r – ablegen nach %.1fs",
                             self.callsign, flag_abbv, _drop_delay)
         elif pid in self.players:
+            # P4-FLG-04: Bookkeeping ungegated (reine pid→flag_id-Korrelation), Typ-Wissen
+            # nur wenn der Träger im Moment des Grabs wahrnehmbar war.
+            self._carried_flag_id[pid] = flag_index
+            if self._flag_carrier_perceptible(pid):
+                self._learn_flag_type(flag_index, flag_abbv)
             self.players[pid].flag = flag_abbv
             logger.debug("[%s] Spieler %d hält Flag %s", self.callsign, pid, flag_abbv)
 
@@ -267,6 +285,12 @@ class HandlersMixin(BZBotBase):
             logger.info("[%s] Flag %r erfolgreich abgelegt", self.callsign, self.own_flag)
             self.own_flag = ""
         elif pid in self.players:
+            # P4-FLG-04: wahrgenommener fremder Drop → Typ merken. dropped_abbr und das
+            # Wahrnehmungs-Gate MÜSSEN vor dem Nullen von .flag ausgewertet werden.
+            dropped_flag_id = self._carried_flag_id.pop(pid, None)
+            dropped_abbr = self.players[pid].flag
+            if dropped_flag_id is not None and self._flag_carrier_perceptible(pid):
+                self._learn_flag_type(dropped_flag_id, dropped_abbr)
             self.players[pid].flag = ""
 
     def _on_transfer_flag(self, code: int, payload: bytes) -> None:
@@ -294,6 +318,7 @@ class HandlersMixin(BZBotBase):
             self.own_flag = ""
         elif to_id == self.player_id:
             self.flags.pop(flag_index, None)
+            self._learn_flag_type(flag_index, flag_abbv)   # eigener Erhalt: immer wahrgenommen
             self.own_flag = flag_abbv
             self._own_flag_since = time.monotonic()
             self._last_drop_attempt = 0.0
@@ -306,11 +331,21 @@ class HandlersMixin(BZBotBase):
                 _drop_delay = self._drop_bad_flag_delay if flag_abbv in self.bad_flags else 0.0
                 logger.info("[%s] TH-Diebstahl: Flag %r – ablegen nach %.1fs",
                             self.callsign, flag_abbv, _drop_delay)
+        else:
+            # P4-FLG-04: Diebstahl zwischen zwei fremden Spielern → Bookkeeping umziehen,
+            # Typ merken wenn Opfer ODER Empfänger wahrnehmbar war.
+            self._carried_flag_id.pop(from_id, None)
+            if to_id in self.players:
+                self._carried_flag_id[to_id] = flag_index
+            if (self._flag_carrier_perceptible(from_id)
+                    or self._flag_carrier_perceptible(to_id)):
+                self._learn_flag_type(flag_index, flag_abbv)
 
     def _on_capture_flag(self, code: int, payload: bytes) -> None:
         """Löscht Flag-Zustand nach Flaggenübernahme."""
         if len(payload) < 1: return
         pid = unpack_uint8(payload, 0)
+        self._carried_flag_id.pop(pid, None)   # P4-FLG-04: Bookkeeping-Hygiene
         if pid in self.players:
             self.players[pid].flag = ""
 
@@ -819,9 +854,17 @@ class HandlersMixin(BZBotBase):
             if status == 2 and owner != 0xFF and abbr:
                 if owner == self.player_id:
                     self.own_flag = abbr          # Robustheit bei Reconnect/Resync
+                    self._learn_flag_type(flag_id, abbr)   # eigene Flagge: immer wahrgenommen
                 elif owner in self.players:
                     self.players[owner].flag = abbr
-            if status in (0, 2):
+                    # P4-FLG-04: Bookkeeping ungegated, Typ-Wissen nur wenn Träger wahrnehmbar
+                    self._carried_flag_id[owner] = flag_id
+                    if self._flag_carrier_perceptible(owner):
+                        self._learn_flag_type(flag_id, abbr)
+            if status == 0:
+                self.flags.pop(flag_id, None)
+                self._flag_knowledge.pop(flag_id, None)   # P4-FLG-04: Reset invalidiert Typ-Wissen
+            elif status == 2:
                 self.flags.pop(flag_id, None)
             else:
                 self.flags[flag_id] = FlagInfo(flag_id=flag_id, abbr=abbr,
@@ -856,6 +899,7 @@ class HandlersMixin(BZBotBase):
             logger.debug("[%s] Flagge: MsgNearFlag – Flag %d bei (%.0f,%.0f) = %r (%s)",
                          self.callsign, best_fi.flag_id, x, y, abbr, flag_name)
         best_fi.abbr = abbr
+        self._learn_flag_type(best_fi.flag_id, abbr)   # P4-FLG-04: ID-Identifikation: immer merken
         if abbr in self.good_flags and time.monotonic() - self._last_drop_attempt > 1.0:
             logger.info("[%s] MsgNearFlag: Gute Flagge %r bei (%.0f,%.0f) — ID ablegen",
                         self.callsign, abbr, x, y)

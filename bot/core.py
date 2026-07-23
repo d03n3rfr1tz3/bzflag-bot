@@ -96,6 +96,7 @@ from bot.constants import (
 
     GOOD_FLAGS_DEFAULT,
     BAD_FLAGS_DEFAULT,
+    BEST_FLAGS_DEFAULT,
 )
 from bot.models import Shot, PlayerInfo, FlagInfo, AIState
 from bot.ai import BZBotAI
@@ -119,6 +120,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
                  managed: bool = False,
                  good_flags: Optional[List[str]] = None,
                  bad_flags:  Optional[List[str]] = None,
+                 best_flags: Optional[List[str]] = None,
                  limited_flags: Optional[List[str]] = None,
                  debug_no_shoot: bool = False,
                  debug_target_flag: str = "",
@@ -142,7 +144,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._init_ai_state()
         self._init_debug(debug_no_shoot, debug_no_jump, debug_log_path, debug_log_shot,
                          debug_log_dodge, debug_log_flag, debug_log_tele)
-        self._init_flags(good_flags, bad_flags, limited_flags, debug_target_flag)
+        self._init_flags(good_flags, bad_flags, best_flags, limited_flags, debug_target_flag)
         self._init_runtime_state()
         self._init_handlers()
 
@@ -400,17 +402,28 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._debug_obstacle_logged = 0.0  # Drossel für Obstacle-Inside-Log
         self._debug_nav_tele_t = 0.0       # Drossel für NAV_TELE-Log
 
-    def _init_flags(self, good_flags, bad_flags, limited_flags, debug_target_flag):
+    def _init_flags(self, good_flags, bad_flags, best_flags, limited_flags, debug_target_flag):
         """Flag-Strategie + Flag-Tracking."""
         # Flag-Strategie
         self.own_flag = ""
         self.good_flags = set(good_flags) if good_flags is not None else set(GOOD_FLAGS_DEFAULT)
         self.bad_flags  = set(bad_flags)  if bad_flags  is not None else set(BAD_FLAGS_DEFAULT)
+        # P4-FLG-05: Best-Flaggen (Priorisierungs-Untermenge von good_flags). Explizit gesetzte
+        # Best-Flaggen werden implizit zu good ergänzt (Nutzerwunsch: eine priorisierte Flagge
+        # will man auch behalten). Die Default-Liste (GM,L,SW) wird dagegen mit good_flags
+        # geschnitten, damit sie eine benutzerdefinierte --good-flags-Liste nicht ungewollt
+        # erweitert. So bleibt best ⊆ good in beiden Fällen.
+        if best_flags is not None:
+            self.best_flags = set(best_flags)
+            self.good_flags |= self.best_flags
+        else:
+            self.best_flags = set(BEST_FLAGS_DEFAULT) & self.good_flags
         self._limited_flags = set(limited_flags) if limited_flags else set()
         self._shots_remaining = -1
         self._last_notschuss_threat = None
         if debug_target_flag:
             self.good_flags = {debug_target_flag}
+            self.best_flags = {debug_target_flag}   # Debug-Zielflagge auch priorisiert ansteuern
             self.bad_flags.discard(debug_target_flag)
             if self._debug_log_flag:
                 logger.debug("[%s] Flagge: Ziel-Flag: %s", self.callsign, debug_target_flag)
@@ -433,6 +446,13 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # Flag-Tracking
         self.flags = {}
         self._last_grab_attempt = 0.0
+        # P4-FLG-04: Typ-Wissen (flag_id → abbr), nur bei wahrnehmbarem Träger/Drop gelernt.
+        # Überlebt Tod/Respawn (Wissen bleibt); Reconnect erzeugt ohnehin eine frische
+        # BZBot-Instanz (bzbot.py), daher kein expliziter Reset nötig. _carried_flag_id ist
+        # reine pid→flag_id-Korrelation (kein Typ-Wissen), nötig für „wahrnehmbarer Drop"
+        # (MsgDropFlag enthält nur die pid).
+        self._flag_knowledge = {}   # Typ deklariert in _bot_base.BZBotBase (mypyc-Direktzugriff)
+        self._carried_flag_id = {}
 
     def _init_runtime_state(self):
         """GM-Tracking, State Machine, Sende-Kadenz, Tick-Memo, Lebenszyklus-Flags."""

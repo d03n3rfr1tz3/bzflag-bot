@@ -45,6 +45,10 @@ def parse_args():
                    help="Kommagetrennte Liste zu behaltender Flags (leer = Standardliste)")
     p.add_argument("--bad-flags",        default="",
                    help="Kommagetrennte Liste sofort abzulegender Flags (leer = Standardliste)")
+    p.add_argument("--best-flags",       default="",
+                   help="Kommagetrennte Liste besonders begehrter Flags, bevorzugt "
+                        "angesteuert (leer = Standardliste GM,L,SW). Wird implizit zu "
+                        "--good-flags ergänzt.")
     p.add_argument("--limited-flags",    default="",
                    help="Kommagetrennte Flaggen-Kürzel mit Server-Schusslimit (z.B. GM,L)")
     p.add_argument("--log-level",        default="INFO",
@@ -108,6 +112,8 @@ def main():
         if args.good_flags else None
     bad_flags = [s.strip() for s in args.bad_flags.split(",") if s.strip()] \
         if args.bad_flags else None
+    best_flags = [s.strip() for s in args.best_flags.split(",") if s.strip()] \
+        if args.best_flags else None
     limited_flags = [s.strip() for s in args.limited_flags.split(",") if s.strip()] \
         if args.limited_flags else None
     dump_path = args.dump_map.strip() if args.dump_map else ""
@@ -122,6 +128,7 @@ def main():
             managed=args.managed,
             good_flags=good_flags,
             bad_flags=bad_flags,
+            best_flags=best_flags,
             limited_flags=limited_flags,
             debug_no_shoot=args.debug_no_shoot,
             debug_target_flag=args.debug_target_flag.upper() if args.debug_target_flag else "",

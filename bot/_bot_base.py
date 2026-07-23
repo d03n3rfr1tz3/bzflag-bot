@@ -45,6 +45,7 @@ class BZBotBase:
     _burrow_ang_ad: Any
     _burrow_depth: Any
     _burrow_speed_ad: Any
+    _carried_flag_id: Dict[int, int]   # P4-FLG-04: pid → flag_id, reine Korrelation (kein Typ-Wissen)
     _combat_avoid: dict
     _connection_lost: bool
     # P4-TAC-02: float-Zeitstempel bleiben `Any` (boxed) — float in @trait-Basis crasht mypyc
@@ -73,6 +74,7 @@ class BZBotBase:
     _escape_jump_ang_vel: Any
     _evade_cleared_shots: dict
     _exploding_until: Any
+    _flag_knowledge: Dict[int, str]    # P4-FLG-04: flag_id → abbr, nur bei Wahrnehmung gelernt
     _flag_radius: Any
     _game_over: bool
     _gm_activation_time: Any
@@ -241,6 +243,7 @@ class BZBotBase:
     ang_vel: Any
     azimuth: Any
     bad_flags: set
+    best_flags: set       # P4-FLG-05: Priorisierungs-Untermenge von good_flags
     bot_callsigns: set
     bot_name_prefix: Any
     callsign: str
@@ -373,6 +376,8 @@ class BZBotBase:
     def _find_ricochet_aim_angle(self, target_pid: int, predicted_pos: Optional[Tuple[float, float]]=None, aim_max_deg: int=45) -> Optional[float]:
         raise NotImplementedError
     def _find_target_player(self):
+        raise NotImplementedError
+    def _flag_carrier_perceptible(self, pid: int) -> bool:
         raise NotImplementedError
     def _flag_grab_radius(self) -> float:
         raise NotImplementedError
