@@ -18,6 +18,7 @@ from bot.constants import (
     M_REACT_MULTIPLIER,
     CS_REACT_MULTIPLIER,
     COVER_PEEK_BACK_S,
+    TANK_LENGTH,
 )
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
@@ -112,7 +113,7 @@ class StateMachineMixin(BZBotBase):
             return  # diese Tick: Physik fertig, nächster Tick übernimmt _tick_falling
 
         if self._ai_state in (AIState.JUMPING, AIState.DODGE_JUMP):
-            self._tick_jumping(dt, now)
+            self._tick_jumping(dt, now, ai_tick)
             return
 
         if self._ai_state == AIState.NAV_JUMP:
@@ -235,11 +236,45 @@ class StateMachineMixin(BZBotBase):
                 else:
                     self._move_to_target(dt, half)
 
-    def _tick_jumping(self, dt: float, now: float) -> None:
-        """Sprungphysik (BZFlag: in der Luft keine Steuerung). LocalPlayer.cxx Z. 364-368."""
+    def _tick_jumping(self, dt: float, now: float, ai_tick: bool = True) -> None:
+        """Sprungphysik. Ohne WG-Luftsteuerung: keine Kontrolle (LocalPlayer.cxx Z. 364-368).
+
+        Mit WG (_wings_air_control_active(), P4-MOV-03a): Bewegung ist strikt an ±Blickrichtung
+        gekoppelt (_wings_air_steer) statt entkoppelt zu drehen (_jump_ang_vel wird dann NIE
+        angewandt). Zielwahl-Priorität: Bedrohungs-Wechsel nach EVADING (_handle_threat_airborne,
+        P4-MOV-03c/C3 — nur im 10-Hz-KI-Raster `ai_tick`, _find_incoming_shot ist der teure
+        Teil) > WG-TactJump-Finte (_wg_feint_target, P4-MOV-03b — _wg_feint_tick) > expliziter
+        Steuerziel-Azimuth (_wings_steer_az — aus Escape-/DODGE_JUMP-Drehwünschen, s.
+        tactics.py/combat.py) > Gegner-Verfolgung (target_player + _has_presence, volle Speed) >
+        Heading halten (aktueller signierter Horizontal-Speed, Projektion von vel auf azimuth).
+        Eine echte Bedrohung bricht eine laufende Finte ab (_handle_threat_airborne räumt
+        _wg_feint_target/_wg_feint_phase mit auf — "wer täuscht, bricht nur für echte
+        Bedrohungen ab"). Die Finte selbst kann pro Tick zusätzlich aus eigenen Gründen abbrechen
+        (Gegner weg/tot, Rest-Sinkzeit zu knapp, Blick-Check negativ) — dann übernimmt im SELBEN
+        Tick die nächste Priorität (_wg_feint_tick gibt False zurück)."""
         self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
-        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
+        if self._wings_air_control_active():
+            if ai_tick and self._handle_threat_airborne(now):
+                pass
+            elif self._wg_feint_target is not None and self._wg_feint_tick(dt):
+                pass
+            elif self._wings_steer_az is not None:
+                speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+                self._wings_air_steer(dt, self._wings_steer_az, speed)
+            else:
+                target_az = None
+                if self.target_player is not None and self._has_presence():
+                    ep = self._get_enemy_pos(self.target_player)
+                    if ep is not None:
+                        target_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
+                if target_az is not None:
+                    self._wings_air_steer(dt, target_az, self._effective_tank_speed())
+                else:
+                    speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+                    self._wings_air_steer(dt, self.azimuth, speed)
+        else:
+            self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
         self.pos_x += self.vel_x * dt
@@ -260,14 +295,94 @@ class StateMachineMixin(BZBotBase):
             self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
+            self._wings_steer_az = None
+            self._wg_feint_target = None   # P4-MOV-03b: Finte endet spätestens bei der Landung
+            self._wg_feint_phase = 0
             self._last_jump_at = now
             self.ang_vel = 0.0
+            # P4-MOV-03c/C3: _handle_threat_airborne kann DIESEN Tick bereits nach EVADING
+            # gewechselt haben (Landung folgt im selben Physik-Tick) — dann NICHT auf
+            # COMBAT/SEEKING/IDLE umleiten, sondern in EVADING bleiben; der Boden-Dodge-Pfad
+            # in _tick_committed übernimmt ab dem nächsten Tick nahtlos (kein Hängenbleiben).
+            if self._ai_state == AIState.EVADING:
+                return
             if self.target_player is not None and self._has_presence():
                 self._transition_to(AIState.COMBAT)
             elif self._has_presence():
                 self._transition_to(AIState.SEEKING)
             else:
                 self._transition_to(AIState.IDLE)
+
+    def _wg_feint_tick(self, dt: float) -> bool:
+        """Ein Steuer-Tick der WG-TactJump-Finte (P4-MOV-03b) — zweithöchste Priorität im
+        WG-Zweig von _tick_jumping (nach dem P4-MOV-03c/C3-Bedrohungs-Check, der eine laufende
+        Finte für eine echte Bedrohung abbricht — s. _handle_threat_airborne), solange
+        _wg_feint_target gesetzt ist (gesetzt vom Frontal-Zweig von _execute_jump, s. tactics.py).
+
+        Phase 0 (vorwärts, _wg_feint_phase == 0): fliegt mit voller _effective_tank_speed()
+        Richtung Gegner, bis er horizontal an ihm vorbei ist — Kriterium: Projektion von
+        (bot_pos − enemy_pos) auf die aktuelle Flugrichtung (Einheitsvektor aus vel_x/vel_y,
+        bei Speed≈0 ersatzweise azimuth) ≥ TANK_LENGTH. Am Umschaltpunkt wird die Blickrichtung
+        des Gegners GENAU EINMAL geprüft (keine Flatter-Entscheidung pro Tick):
+          - Gegner hat sich zum Bot gedreht (< 45° Abweichung) → Finte bestätigt:
+            _wg_feint_phase = 1, ab jetzt Phase 1 (rückwärts) bis zur Landung.
+          - Gegner hat sich NICHT gedreht → keine Finte: _wg_feint_target wird gelöscht und
+            _wings_steer_az auf die aktuelle Blickrichtung fixiert (Heading halten statt
+            Gegner-Verfolgung — sonst würde Priorität (2) in _tick_jumping die Flugbahn zurück
+            zum Gegner krümmen), der Bot landet klassisch vorwärts hinter dem Gegner.
+
+        Phase 1 (rückwärts, _wg_feint_phase == 1): _wings_air_steer mit Ziel-Azimuth Richtung
+        Gegner und halber Rückwärts-Speed (Azimuth bleibt auf dem Gegner — Feuerfenster bei der
+        Landung), kein erneuter Blick-Check.
+
+        Fallback (in JEDER Phase): Gegner tot/verschwunden ODER Rest-Sinkzeit zu knapp
+        (sinkend UND < 2u über dem Boden) → Finte abbrechen (_wg_feint_target = None).
+
+        Rückgabe: True, wenn dieser Tick von der Finte gesteuert wurde (vel_x/vel_y/azimuth
+        bereits gesetzt); False, wenn sie abgebrochen wurde — der Aufrufer (_tick_jumping)
+        fällt dann im SELBEN Tick auf die nächste Priorität zurück."""
+        info = self.players.get(self._wg_feint_target)
+        if info is None or not info.alive:
+            self._wg_feint_target = None
+            self._wg_feint_phase = 0
+            return False
+        if self.vel_z < 0.0 and self.pos_z - self._get_floor_z() < 2.0:
+            self._wg_feint_target = None
+            self._wg_feint_phase = 0
+            return False
+
+        ex, ey = info.pos[0], info.pos[1]
+        bx, by = self.pos_x - ex, self.pos_y - ey             # bot − Gegner
+        az_to_enemy = math.atan2(-by, -bx)                    # Steuerziel: Blick zum Gegner
+
+        if self._wg_feint_phase == 1:
+            # Phase 1 (rückwärts): Umschaltpunkt bereits entschieden, kein erneuter Blick-Check.
+            self._wings_air_steer(dt, az_to_enemy, -0.5 * self._effective_tank_speed())
+            return True
+
+        # Phase 0 (vorwärts): Flugrichtung als Einheitsvektor (bei ~Stillstand: Azimuth-Ausweiche)
+        speed_now = math.hypot(self.vel_x, self.vel_y)
+        if speed_now > 1e-3:
+            fdir_x, fdir_y = self.vel_x / speed_now, self.vel_y / speed_now
+        else:
+            fdir_x, fdir_y = math.cos(self.azimuth), math.sin(self.azimuth)
+        proj = bx * fdir_x + by * fdir_y
+        if proj < TANK_LENGTH:
+            self._wings_air_steer(dt, az_to_enemy, self._effective_tank_speed())
+            return True
+
+        # Umschaltpunkt erreicht: Gegner-Blickrichtung genau einmal prüfen.
+        az_enemy_to_bot = math.atan2(by, bx)                  # Blick des Gegners zum Bot hin
+        hat_gedreht = abs(_angle_diff(info.azimuth, az_enemy_to_bot)) < math.radians(45)
+        if hat_gedreht:
+            self._wg_feint_phase = 1
+            self._wings_air_steer(dt, az_to_enemy, -0.5 * self._effective_tank_speed())
+            return True
+        # Gegner NICHT gedreht: keine Finte — Heading halten statt Gegner-Verfolgung.
+        self._wg_feint_target = None
+        self._wg_feint_phase = 0
+        self._wings_steer_az = self.azimuth
+        return False
 
     def _tick_explosion(self, dt: float) -> None:
         """Integriert den Explosions-Bogen des Wracks (tot, PS_EXPLODING) — spiegelt explodeTank:
@@ -286,10 +401,32 @@ class StateMachineMixin(BZBotBase):
         self.pos_y = max(-half, min(half, self.pos_y))
 
     def _tick_nav_jump(self, dt: float, now: float) -> None:
-        """Navigationssprung-Physik. Landet auf Ziel-Etage → return_state."""
+        """Navigationssprung-Physik. Landet auf Ziel-Etage → return_state.
+
+        Mit WG-Luftsteuerung (P4-MOV-03a): Kurskorrektur Richtung Lande-WP (nav_path[0]) +
+        Speed-Nachführung aus der Rest-Sinkzeit (Lösung von z(t)=_nav_jump_target_z), statt der
+        am Absprung fixierten Lande-Drehung (_jump_ang_vel wird dann NIE angewandt) — kein
+        Land-Spin, Landeausrichtung = Flugrichtung; Nachdrehen übernimmt die Bodensteuerung nach
+        der Landung."""
         self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
-        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)   # Lande-Drehung (am Absprung fixiert)
+        if self._wings_air_control_active() and self._nav_path:
+            wp = self._nav_path[0]
+            g_abs = abs(self._effective_gravity())
+            disc = self.vel_z * self.vel_z - 2.0 * g_abs * (self._nav_jump_target_z - self.pos_z)
+            if disc >= 0.0 and g_abs > 1e-6:
+                t_rem = max((self.vel_z + math.sqrt(disc)) / g_abs, 0.01)
+            else:
+                t_rem = 0.01
+            hdist_rem = math.hypot(wp[0] - self.pos_x, wp[1] - self.pos_y)
+            target_az = math.atan2(wp[1] - self.pos_y, wp[0] - self.pos_x)
+            speed = max(1.0, min(hdist_rem / t_rem, self._travel_tank_speed()))
+            self._wings_air_steer(dt, target_az, speed)
+        elif self._wings_air_control_active():
+            speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+            self._wings_air_steer(dt, self.azimuth, speed)
+        else:
+            self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)   # Lande-Drehung (am Absprung fixiert)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
         self.pos_x += self.vel_x * dt
@@ -304,6 +441,9 @@ class StateMachineMixin(BZBotBase):
             self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
+            self._wings_steer_az = None
+            self._wg_feint_target = None   # P4-MOV-03b: Finte endet spätestens bei der Landung
+            self._wg_feint_phase = 0
             self._last_jump_at = now
             self.ang_vel = 0.0
             ret = self._nav_jump_return_state
@@ -397,10 +537,25 @@ class StateMachineMixin(BZBotBase):
                     speed, math.degrees(self.azimuth), self._is_inside_obstacle())
 
     def _tick_z_attack(self, dt: float, now: float) -> None:
-        """ZJ1-Sprungphysik. Nur aus COMBAT erreichbar; Landung → immer COMBAT."""
+        """ZJ1-Sprungphysik. Nur aus COMBAT erreichbar; Landung → immer COMBAT.
+
+        Mit WG-Luftsteuerung (P4-MOV-03a): kein entkoppelter Spin — Steuerziel ist der beim
+        Absprung berechnete Ziel-Azimuth (_wings_steer_az), sonst der Live-Gegner, sonst Heading;
+        die Horizontalgeschwindigkeit bleibt betragsgleich (Z-Attack übernimmt die Boden-vel)."""
         self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
-        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
+        if self._wings_air_control_active():
+            target_az = self._wings_steer_az
+            if target_az is None and self.target_player is not None:
+                _ep_wg = self._get_enemy_pos(self.target_player)
+                if _ep_wg is not None:
+                    target_az = math.atan2(_ep_wg[1] - self.pos_y, _ep_wg[0] - self.pos_x)
+            if target_az is None:
+                target_az = self.azimuth
+            speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+            self._wings_air_steer(dt, target_az, speed)
+        else:
+            self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
         self.pos_x += self.vel_x * dt
@@ -430,6 +585,9 @@ class StateMachineMixin(BZBotBase):
             self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
+            self._wings_steer_az = None
+            self._wg_feint_target = None   # P4-MOV-03b: Finte endet spätestens bei der Landung
+            self._wg_feint_phase = 0
             self._last_jump_at = now
             self._z_attack_mode = False
             self.ang_vel = 0.0
@@ -437,11 +595,22 @@ class StateMachineMixin(BZBotBase):
 
     def _tick_falling(self, dt: float, now: float) -> None:
         """Fall-Physik für unkontrollierten Fall vom Dach (analog _tick_jumping).
-        Kein Lenken: vel[0]/vel[1] und azimuth bleiben committed.
-        _jump_ang_vel wird nicht zurückgesetzt — bestehende Drehbewegung bleibt."""
+        Ohne WG-Luftsteuerung: kein Lenken, vel[0]/vel[1] und azimuth bleiben committed
+        (_jump_ang_vel wird nicht zurückgesetzt — bestehende Drehbewegung bleibt).
+        Mit WG (P4-MOV-03a): steuerbar Richtung aktuellem Nav-WP (nav_path[0]), falls
+        vorhanden, sonst Heading halten (aktueller signierter Horizontal-Speed)."""
         self.vel_z += self._effective_gravity() * dt
         self.pos_z += self.vel_z * dt
-        self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
+        if self._wings_air_control_active():
+            if self._nav_path:
+                wp = self._nav_path[0]
+                target_az = math.atan2(wp[1] - self.pos_y, wp[0] - self.pos_x)
+            else:
+                target_az = self.azimuth
+            speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+            self._wings_air_steer(dt, target_az, speed)
+        else:
+            self.azimuth = _wrap(self.azimuth + self._jump_ang_vel * dt)
         if not self._can_drive_through_obstacles():
             self._apply_obstacle_bounds(dt)
         self.pos_x += self.vel_x * dt
@@ -455,6 +624,9 @@ class StateMachineMixin(BZBotBase):
             self.vel_z = 0.0
             self._jumping = False
             self._wings_jumps_used = 0
+            self._wings_steer_az = None
+            self._wg_feint_target = None   # P4-MOV-03b: Finte endet spätestens bei der Landung
+            self._wg_feint_phase = 0
             # _last_jump_at nicht setzen — kein echter Sprung, kein Cooldown
             self.ang_vel = 0.0
             self._transition_to(self._pre_fall_state)
@@ -463,8 +635,80 @@ class StateMachineMixin(BZBotBase):
         """Führt aktiven Dodge aus. Keine neuen KI-Entscheidungen.
 
         JUMP_WINDUP: kein Abbruch bei Bedrohung. Nur Notschuss möglich,
-        Sprung wird trotzdem ausgeführt (Entscheidung steht)."""
+        Sprung wird trotzdem ausgeführt (Entscheidung steht).
+
+        P4-MOV-03c/C3: airborne-EVADING (self._jumping noch True — wird erst bei der echten
+        Landung zurückgesetzt; kann NUR aus _handle_threat_airborne in _tick_jumping entstehen,
+        s. dort) läuft komplett über den Sonderzweig unten und returnt vorher; der Boden-Dodge-
+        Pfad danach setzt weiterhin voraus, dass der Bot steht (kein vel_z/pos_z-Handling dort)."""
         half = self.world_half
+
+        # P4-MOV-03c/C3: Bewegung + Vertikalphysik wie in _tick_jumping (Gravity/Position/
+        # Obstacle-Bounds/Weltgrenzen), aber Horizontalsteuerung über die aktive Dodge-Richtung
+        # (_wings_air_steer) statt Boden-Zielwahl — KEIN _ramp_linear_speed/_ramp_azimuth_step
+        # (doMomentum läuft nicht airborne). _jumping bleibt bis zur echten Landung True (das
+        # verhindert die Schwerkraft-Dopplung im `not self._jumping`-Gate von _run_physics UND
+        # die FALLING-Umleitung im `not self._jumping`-Gate der _GROUND_STATES-Erkennung in
+        # _dispatch_movement).
+        if self._ai_state == AIState.EVADING and self._jumping:
+            self.vel_z += self._effective_gravity() * dt
+            self.pos_z += self.vel_z * dt
+            if self._wings_air_control_active():
+                if self._dodging and now < self._dodge_until:
+                    if self._dodge_reverse:
+                        # Wie am Boden: Heading halten (kein Turn), nur rückwärts — die Klemme
+                        # auf 0,5×_effective_tank_speed() übernimmt _wings_air_steer selbst.
+                        target_az, speed = self.azimuth, -self._effective_tank_speed()
+                    elif self._dodge_forward:
+                        target_az, speed = self.azimuth, self._effective_tank_speed()
+                    else:
+                        # Turning-Dodge: Kurs auf die vorberechnete Ausweich-Richtung.
+                        target_az, speed = self._dodge_dir, self._effective_tank_speed()
+                else:
+                    # Dodge-Timer abgelaufen, aber noch in der Luft: Heading/Speed halten, bis
+                    # die Landung unten den Boden-Pfad übergibt (dort läuft der reguläre
+                    # Timer-Ablauf/Early-Exit dann normal weiter).
+                    target_az = self.azimuth
+                    speed = self.vel_x * math.cos(self.azimuth) + self.vel_y * math.sin(self.azimuth)
+                self._wings_air_steer(dt, target_az, speed)
+                # Extra-Flap-Notausweg (Plan-Punkt 3, C3): fallend + Luftsprung übrig + Bedrohung
+                # weiterhin akut (vereinfachte time_to_dodge-Analogie aus _handle_threat: statt
+                # der vollen Fahrweg-/Drehzeit-Rechnung genügt ein knapper Restzeit-Schwellwert,
+                # da hier ohnehin schon aktiv gesteuert/gedodged wird). Teurer
+                # _find_incoming_shot-Scan daher erst NACH den billigen vel_z/_can_jump-Gates.
+                if self.vel_z < 0.0 and self._can_jump(now):
+                    _threat, _threat_t = self._find_incoming_shot(now)
+                    if _threat is not None:
+                        _elapsed = 0.0 if _threat.is_gm else max(0.0, now - _threat.fire_time)
+                        _t_impact = max(0.0, _threat.time_to_closest(self.pos_x, self.pos_y) - _elapsed)
+                        if (_threat.shooter_id, _threat.shot_id) in self._ricochet_paths:
+                            _t_impact = max(0.0, _threat_t)
+                        if _t_impact < 0.4:
+                            self.vel_z = self._jump_launch_vz(self.vel_z)
+                            self._wings_jumps_used += 1
+            # else: WG während des Falls verloren (seltener Randfall, z.B. Flag-Steal/-Tod-Timing)
+            # — reine Ballistik wie im WG-losen Zweig von _tick_jumping: vel_x/vel_y bleiben
+            # unangetastet, keine Steuerung/kein Extra-Flap mehr (beides braucht WG).
+            if not self._can_drive_through_obstacles():
+                self._apply_obstacle_bounds(dt)
+            self.pos_x += self.vel_x * dt
+            self.pos_y += self.vel_y * dt
+            self.pos_x = max(-half, min(half, self.pos_x))
+            self.pos_y = max(-half, min(half, self.pos_y))
+            if self._is_landed():
+                self.pos_z = self._get_floor_z()
+                self.vel_z = 0.0
+                self._jumping = False
+                self._wings_jumps_used = 0
+                self._wings_steer_az = None
+                self._wg_feint_target = None
+                self._wg_feint_phase = 0
+                self._last_jump_at = now
+                self.ang_vel = 0.0
+                # Bewusst KEIN _transition_to: bleibt EVADING — der Boden-Dodge-Pfad unten in
+                # dieser Funktion übernimmt ab dem NÄCHSTEN Aufruf nahtlos (kein Hängenbleiben;
+                # Dodge-Timer/_evade_cleared_shots unverändert, s. Plan-Seiteneffekt-Checkliste).
+            return
 
         if self._ai_state == AIState.JUMP_WINDUP:
             incoming, _ = self._find_incoming_shot(now)

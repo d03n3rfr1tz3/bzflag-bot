@@ -41,20 +41,47 @@ class TacticsMixin(BZBotBase):
         return v
 
     def _execute_jump(self) -> None:
-        """Führt Sprung nach Wind-Up-Ende aus (JUMP_WINDUP → JUMPING)."""
+        """Führt Sprung nach Wind-Up-Ende aus (JUMP_WINDUP → JUMPING).
+
+        P4-MOV-03a: mit WG-Luftsteuerung (_wings_air_control_active()) wird der Drehwunsch NIE
+        mehr in _jump_ang_vel geschrieben (entkoppeltes Drehen ist mit WG physikalisch unmöglich)
+        — der Escape-Drehwunsch wird stattdessen zum Steuerziel-Azimuth _wings_steer_az (gleicher
+        Gesamtdrehwinkel wie die alte Ballistik-Spin-Rate über die volle Flugzeit integriert).
+
+        P4-MOV-03b: der klassische TactJump (feste Lande-Drehung) ist mit WG unmöglich — im
+        FRONTAL-Zweig (nicht Escape) setzt WG-aktiv + vorhandener target_player stattdessen die
+        WG-TactJump-Finte (_wg_feint_target, ausgeführt in states.py::_wg_feint_tick)."""
+        wg_air = self._wings_air_control_active()
         if self._escape_jump_ang_vel is not None:
-            self._jump_ang_vel = self._escape_jump_ang_vel
+            if wg_air:
+                jump_time = 2.0 * self._effective_jump_velocity() / max(abs(self._effective_gravity()), 0.001)
+                self._wings_steer_az = _wrap(self.azimuth + self._escape_jump_ang_vel * jump_time)
+                if self._debug_log_dodge:
+                    logger.debug("[%s] Ausweichen: Escape-Sprung (WG) Steuerziel-az=%.1f°",
+                                 self.callsign, math.degrees(self._wings_steer_az))
+            else:
+                self._jump_ang_vel = self._escape_jump_ang_vel
+                if self._debug_log_dodge:
+                    logger.debug("[%s] Ausweichen: Escape-Sprung ang_vel=%.2f az=%.1f°",
+                                 self.callsign, self._jump_ang_vel, math.degrees(self.azimuth))
             self._escape_jump_ang_vel = None
-            if self._debug_log_dodge:
-                logger.debug("[%s] Ausweichen: Escape-Sprung ang_vel=%.2f az=%.1f°",
-                             self.callsign, self._jump_ang_vel, math.degrees(self.azimuth))
         else:
             if self.target_player is not None:
                 _ep2 = self._get_enemy_pos(self.target_player)
                 if _ep2 is not None:
                     self.azimuth = math.atan2(
                         _ep2[1] - self.pos_y, _ep2[0] - self.pos_x)
-            self._jump_ang_vel = self.ang_vel
+            if wg_air:
+                # Bereits auf den Gegner ausgerichtet — kein zusätzliches Steuerziel nötig, die
+                # normale Gegner-Verfolgungs-Priorität in _tick_jumping übernimmt (live Tracking).
+                self._wings_steer_az = None
+                if self.target_player is not None:
+                    # P4-MOV-03b: Übersprung-Finte statt fester Lande-Drehung (nur Frontal-Sprung,
+                    # nicht Escape — s. Docstring).
+                    self._wg_feint_target = self.target_player
+                    self._wg_feint_phase = 0
+            else:
+                self._jump_ang_vel = self.ang_vel
             if self._debug_log_dodge:
                 logger.debug("[%s] Ausweichen: Frontal-Sprung ang_vel=%.2f az=%.1f°",
                              self.callsign, self._jump_ang_vel, math.degrees(self.azimuth))
@@ -353,8 +380,13 @@ class TacticsMixin(BZBotBase):
         ang_diff = _angle_diff(az_target, self.azimuth)
         if abs(ang_diff) > self._tank_turn_rate * t_fire:
             return False  # Bot kann in t_fire nicht ausreichend drehen
-        self._jump_ang_vel = math.copysign(
-            min(abs(ang_diff / max(t_fire, 0.001)), self._tank_turn_rate), ang_diff)
+        if self._wings_air_control_active():
+            # P4-MOV-03a: kein entkoppelter Spin mit WG — Ziel-Azimuth wird zum Steuerziel,
+            # _tick_z_attack dreht per _wings_air_steer hin (Flugbahn krümmt sich entsprechend).
+            self._wings_steer_az = az_target
+        else:
+            self._jump_ang_vel = math.copysign(
+                min(abs(ang_diff / max(t_fire, 0.001)), self._tank_turn_rate), ang_diff)
 
         # Sprung starten
         self.vel_z = self._jump_launch_vz(self.vel_z)

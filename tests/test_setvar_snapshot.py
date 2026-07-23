@@ -37,6 +37,7 @@ SIMPLE_FLOAT_VARS = [
     ("_gravity",           "_gravity",            -12.0),
     ("_wingsGravity",      "_wings_gravity",      -5.0),
     ("_wingsJumpVelocity", "_wings_jump_velocity", 15.0),
+    ("_wingsSlideTime",    "_wings_slide_time",   0.5),
     ("_dropBadFlagDelay",  "_drop_bad_flag_delay", 2.5),
     ("_shockInRadius",     "_shock_in_radius",    7.0),
     ("_shockOutRadius",    "_shock_out_radius",   80.0),

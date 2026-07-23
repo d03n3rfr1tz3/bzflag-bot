@@ -90,17 +90,22 @@ class CombatMixin(BZBotBase):
         if not self._check_tactical_jump(now):
             self._check_z_attack_jump(now)
 
-    def _handle_threat(self, now: float) -> bool:
-        """Bedrohungserkennung mit react-delay und Fix-B-Dodge-Feasibility.
-        Gibt True zurück wenn eine Aktion ausgeführt wurde (Caller soll return)."""
+    def _detect_reactable_threat(self, now: float):
+        """Bedrohungserkennung + react-delay-Gate + Ausweich-Richtung — gemeinsamer Vorbau für
+        _handle_threat (Boden) UND _handle_threat_airborne (P4-MOV-03c/C3, WG-Luft). Hält beide
+        Pfade auf derselben Erkennungs-/Timing-Logik, statt sie zu duplizieren.
+
+        Gibt (threat, threat_key, time_to_impact, dodge_dir, orig_diff) zurück, oder None wenn
+        (noch) keine reaktionsreife Bedrohung vorliegt (kein Schuss / ungesehen / react-delay
+        noch nicht abgelaufen — Aufrufer soll dann False zurückgeben)."""
         threat, threat_t = self._find_incoming_shot(now)
         if threat is None:
             self._last_threat_id = None
-            return False
+            return None
         _sh = self.players.get(threat.shooter_id)
         if self._threat_unseen(_sh):
             self._last_threat_id = None    # IB/ST ohne Sicht: nicht als 'erkannt' merken
-            return False
+            return None
         threat_key = (threat.shooter_id, threat.shot_id)
         if self._last_threat_id != threat_key:
             self._last_threat_id = threat_key
@@ -113,7 +118,7 @@ class CombatMixin(BZBotBase):
         elif _sh and _sh.flag == "CS":
             _react = DODGE_REACT_DELAY * CS_REACT_MULTIPLIER
         if now - self._threat_detected_at < _react:
-            return False
+            return None
         # Fix J1a: verbleibende Zeit = Zeit_ab_Abschuss − bereits_vergangene_Zeit.
         # Gilt nur für Schüsse mit pos=Abschussort — GM-pos ist bereits die aktuelle
         # Raketenposition, time_to_closest rechnet dort schon ab jetzt → nichts abziehen.
@@ -123,6 +128,15 @@ class CombatMixin(BZBotBase):
         if threat_key in self._ricochet_paths:
             time_to_impact = max(0.0, threat_t)
         dodge_dir, orig_diff = self._compute_dodge_dir(threat, now)
+        return threat, threat_key, time_to_impact, dodge_dir, orig_diff
+
+    def _handle_threat(self, now: float) -> bool:
+        """Bedrohungserkennung mit react-delay und Fix-B-Dodge-Feasibility.
+        Gibt True zurück wenn eine Aktion ausgeführt wurde (Caller soll return)."""
+        detected = self._detect_reactable_threat(now)
+        if detected is None:
+            return False
+        threat, threat_key, time_to_impact, dodge_dir, orig_diff = detected
         turn_rad = abs(_angle_diff(dodge_dir, self.azimuth))
         # Wie viel Zeit braucht der Bot zum Ausweichen:
         # Fahrweg (einen Trefferradius) + 30% der Drehzeit bis zur Ausweichrichtung.
@@ -151,25 +165,46 @@ class CombatMixin(BZBotBase):
             # doMomentum). Damit ist der Dodge-Sprung ohne weitere Änderung bereits ramp-korrekt.
             self.vel_z = self._jump_launch_vz(self.vel_z)
             self._jumping = True
-            jump_time = 2.0 * self._effective_jump_velocity() / max(abs(self._effective_gravity()), 0.001)
-            if self.own_flag != "WG":
-                self._jump_ang_vel = 0.0
-            if self.target_player is not None:
-                ep = self._get_enemy_pos(self.target_player)
-                if ep is not None:
-                    enemy_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
-                    needed = _angle_diff(enemy_az, self.azimuth)
-                    if abs(needed) > math.radians(135):
-                        # Nur korrigieren wenn Rücken zum Gegner → sanfte Rotation
-                        self._jump_ang_vel = math.copysign(
-                            min(abs(needed / max(jump_time, 0.001)) * 0.5,
-                                self._tank_turn_rate * 0.5), needed)
-                        if self._debug_log_dodge:
-                            logger.debug("[%s] Ausweichen: Dodge-Sprung mit Korrektur (%.0f°)",
-                                         self.callsign, math.degrees(needed))
+            # P4-MOV-03a: mit WG-Luftsteuerung wird der Drehwunsch NIE mehr in _jump_ang_vel
+            # geschrieben (entkoppeltes Drehen ist mit WG physikalisch unmöglich) — die Korrektur
+            # wird stattdessen zum Steuerziel-Azimuth _wings_steer_az (direkt der Gegner-Azimuth,
+            # da hier — anders als beim Escape-Spin — ein echtes Ziel statt einer Rate vorliegt).
+            wg_air = self._wings_air_control_active()
+            if wg_air:
+                self._wings_steer_az = None
+                if self.target_player is not None:
+                    ep = self._get_enemy_pos(self.target_player)
+                    if ep is not None:
+                        enemy_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
+                        needed = _angle_diff(enemy_az, self.azimuth)
+                        if abs(needed) > math.radians(135):
+                            # Nur korrigieren wenn Rücken zum Gegner → Steuerziel = Gegner-Azimuth
+                            self._wings_steer_az = enemy_az
+                            if self._debug_log_dodge:
+                                logger.debug("[%s] Ausweichen: Dodge-Sprung mit Korrektur (%.0f°)",
+                                             self.callsign, math.degrees(needed))
+            else:
+                jump_time = 2.0 * self._effective_jump_velocity() / max(abs(self._effective_gravity()), 0.001)
+                if self.own_flag != "WG":
+                    self._jump_ang_vel = 0.0
+                if self.target_player is not None:
+                    ep = self._get_enemy_pos(self.target_player)
+                    if ep is not None:
+                        enemy_az = math.atan2(ep[1] - self.pos_y, ep[0] - self.pos_x)
+                        needed = _angle_diff(enemy_az, self.azimuth)
+                        if abs(needed) > math.radians(135):
+                            # Nur korrigieren wenn Rücken zum Gegner → sanfte Rotation
+                            self._jump_ang_vel = math.copysign(
+                                min(abs(needed / max(jump_time, 0.001)) * 0.5,
+                                    self._tank_turn_rate * 0.5), needed)
+                            if self._debug_log_dodge:
+                                logger.debug("[%s] Ausweichen: Dodge-Sprung mit Korrektur (%.0f°)",
+                                             self.callsign, math.degrees(needed))
             if self._debug_log_dodge:
                 logger.debug("[%s] Ausweichen: Dodge-Sprung statt Ausweichen (Zeit zu knapp)", self.callsign)
-            self.ang_vel = self._jump_ang_vel  # analog zu _initiate_nav_jump
+            # analog zu _initiate_nav_jump; bei WG-Luftsteuerung überschreibt der nächste
+            # _tick_jumping-Tick (_wings_air_steer) ang_vel ohnehin sofort mit dem echten Wert.
+            self.ang_vel = 0.0 if wg_air else self._jump_ang_vel
             self._transition_to(AIState.DODGE_JUMP)
         else:
             if self._debug_log_shot:
@@ -185,6 +220,34 @@ class CombatMixin(BZBotBase):
                 self._set_next_shoot_after_fire(now)
                 if self._debug_log_shot:
                     logger.debug("[%s] Schuss: Notschuss abgefeuert", self.callsign)
+        return True
+
+    def _handle_threat_airborne(self, now: float) -> bool:
+        """WG-Luft-Pendant zu _handle_threat (P4-MOV-03c/C3): dieselbe Erkennungs-/react-delay-
+        Logik (_detect_reactable_threat) wie am Boden, aber OHNE die DODGE_JUMP-Eskalation (bleibt
+        airborne bewusst AUS — der Extra-Flap in _tick_committed übernimmt deren Rolle als
+        Notausweg bei zu knapper Zeit) und OHNE den Notschuss-Zweig (läuft nach der Landung über
+        den normalen Boden-Pfad weiter). Jede reaktionsreife Bedrohung löst airborne direkt
+        EVADING aus — mit WG kann der Bot in der Luft genauso lenken wie am Boden, eine eigene
+        Dodge-Feasibility-Abwägung ist daher nicht nötig.
+
+        Bricht eine laufende WG-TactJump-Finte (C2) ab: wer täuscht, bricht die Täuschung nur für
+        echte Bedrohungen ab — deshalb wird dieser Check in _tick_jumping VOR der Finte geprüft.
+
+        Gibt True zurück, wenn eine Bedrohung gefunden + reaktionsbereit war (Aufrufer in
+        _tick_jumping überspringt dann die restliche Zielwahl dieses Ticks — die Bewegung
+        übernimmt ab dem nächsten Tick der airborne-EVADING-Zweig in _tick_committed)."""
+        detected = self._detect_reactable_threat(now)
+        if detected is None:
+            return False
+        threat, _threat_key, time_to_impact, dodge_dir, orig_diff = detected
+        self._setup_dodge(threat, now, time_to_impact, dodge_dir, orig_diff)
+        self._wg_feint_target = None
+        self._wg_feint_phase = 0
+        self._transition_to(AIState.EVADING)
+        if self._debug_log_dodge:
+            logger.debug("[%s] Ausweichen: airborne (WG) EVADING gegen Shot [%d/%d]",
+                         self.callsign, threat.shooter_id, threat.shot_id)
         return True
 
     def _compute_dodge_dir(self, threat, now: float):

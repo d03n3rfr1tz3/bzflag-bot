@@ -211,11 +211,15 @@ class BZBotBase:
     _unreach_until: Any
     _velocity_ad: Any
     _wall_height: Any
+    _wg_feint_phase: int
+    _wg_feint_target: Any
     _wide_angle_ang: Any
     _wings_gravity: Any
     _wings_jump_count: int
     _wings_jump_velocity: Any
     _wings_jumps_used: int
+    _wings_slide_time: Any
+    _wings_steer_az: Any
     _world_map: Any
     _wp_fail_count: int
     _wp_start_time: Any
@@ -367,6 +371,8 @@ class BZBotBase:
         raise NotImplementedError
     def _handle_threat(self, now: float) -> bool:
         raise NotImplementedError
+    def _handle_threat_airborne(self, now: float) -> bool:
+        raise NotImplementedError
     def _has_los_to_enemy(self, target_pid: int) -> bool:
         raise NotImplementedError
     def _has_los_to_point(self, ex: float, ey: float, ez: float) -> bool:
@@ -480,6 +486,10 @@ class BZBotBase:
     def _update_indirect_hold(self, now: float, in_hold_case: bool) -> bool:
         raise NotImplementedError
     def _validate_and_find_target(self) -> None:
+        raise NotImplementedError
+    def _wings_air_control_active(self) -> bool:
+        raise NotImplementedError
+    def _wings_air_steer(self, dt: float, target_az: float, speed: float) -> None:
         raise NotImplementedError
     def _wp_reach_radius(self) -> float:
         raise NotImplementedError
