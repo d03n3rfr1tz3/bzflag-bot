@@ -114,6 +114,8 @@ class BZBotBase:
     _max_bump_height: Any
     _max_shots: int
     _mgun_ad_life: Any
+    _momentum_lin_acc: Any
+    _momentum_ang_acc: Any
     _mgun_ad_rate: Any
     _mgun_ad_vel: Any
     _move_reverse: bool
@@ -172,6 +174,7 @@ class BZBotBase:
     _shots_lock: Any
     _shots_remaining: int
     _slot_reload_at: Any
+    _solid_boxes_cache: Any
     _spawn_sent_at: Any
     _sr_radius_mult: Any
     _stall_anchor: Any
@@ -384,6 +387,8 @@ class BZBotBase:
         raise NotImplementedError
     def _jump_launch_vz(self, cur_vz: float) -> float:
         raise NotImplementedError
+    def _momentum_ramp_time(self, cycles: float) -> float:
+        raise NotImplementedError
     def _move_to_target(self, dt: float, half: float) -> None:
         raise NotImplementedError
     def _muzzle_clear(self, az: float) -> bool:
@@ -403,6 +408,10 @@ class BZBotBase:
     def _plan_path(self, goal_x: float, goal_y: float, goal_z: float | None=None, *, cap_wps: int | None=None) -> None:
         raise NotImplementedError
     def _poll_async_plan(self) -> None:
+        raise NotImplementedError
+    def _ramp_azimuth_step(self, diff: float, dt: float, max_turn_rate: float) -> None:
+        raise NotImplementedError
+    def _ramp_linear_speed(self, target_speed: float, dt: float) -> float:
         raise NotImplementedError
     def _recompute_gm_min_range(self) -> None:
         raise NotImplementedError
@@ -436,6 +445,8 @@ class BZBotBase:
         raise NotImplementedError
     def _should_update_player(self, info, px: float, py: float, pz: float, now: float) -> bool:
         raise NotImplementedError
+    def _solid_boxes(self):
+        raise NotImplementedError
     def _spawn(self) -> None:
         raise NotImplementedError
     def _start_explosion(self, now: float) -> None:
@@ -457,6 +468,8 @@ class BZBotBase:
     def _try_drop_flag(self) -> None:
         raise NotImplementedError
     def _turn_toward(self, target_az: float, dt: float) -> float:
+        raise NotImplementedError
+    def _turn_toward_ramped(self, target_az: float, dt: float) -> float:
         raise NotImplementedError
     def _update_indirect_hold(self, now: float, in_hold_case: bool) -> bool:
         raise NotImplementedError

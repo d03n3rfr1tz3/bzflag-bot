@@ -1833,6 +1833,99 @@ modelliert) fast gratis (`_momentumLinAcc/_momentumAngAcc`, gleiche Klemme). Hin
 `_inertiaLinear/_inertiaAngular` sind 3.0-BZDB-Variablen und existieren in 2.4 nicht —
 2.4 nutzt ausschließlich die `-a`-Option.
 
+**P4-MOV-02a — umgesetzt.** Beschleunigungsrampe im normalen Bodenfahren: `_ramp_linear_speed`
+und `_ramp_azimuth_step` (`bot/ai/capabilities.py`), angewandt in `_navigate_wp`
+(`bot/ai/navigation.py`), `_execute_combat_move` und `_stall_maneuver_tick`
+(`bot/ai/combat.py`) — jeweils als Drop-in-Ersatz des bisherigen Dreh-/Speed-Snippets, ohne
+dessen Verhalten ohne `-a` zu ändern. Verifizierte Formeln (`LocalPlayer::doMomentum`): linear
+klemmt die Änderung der Vorwärtsgeschwindigkeit auf **20×linearAcceleration·dt** gegen den
+Vorframe-Speed (Projektion von `vel_x/vel_y` auf den bereits gedrehten Azimuth); angular klemmt
+die Änderung von `ang_vel` auf **1×angularAcceleration·dt** gegen die Vorframe-`ang_vel` (KEIN
+Faktor 20 wie linear) — beides nur am Boden (Airborne-States rufen diese Pfade ohnehin nie auf).
+Die Rampen sind jeweils unabhängig über `_accel_limits()` gegated (`lin > 0` bzw. `ang > 0`) —
+kein separater Helper, die Ramp-Helper lesen den Accessor direkt. Timeout-/Stuck-Nachführung
+über `_momentum_ramp_time(cycles)`
+(0.0 ohne Limit, sonst `cycles * effektive Speed / (20×linearAcceleration)`): der WP-Timeout
+bekommt an vier Stellen in `navigation.py` einen Zuschlag von `MOMENTUM_TIMEOUT_CYCLES` Rampen
+(Anfahren + eine Kehre als Marge), das Stuck-Fenster in `states.py` (`_tick_seeking`) einen
+Zuschlag von einer Rampe. Ohne Server-Option `-a` sind `_linear_acceleration`/
+`_angular_acceleration` beide 0.0 → alle Rampen sind No-Ops → exaktes Alt-Verhalten, kein
+Regressionsrisiko auf Servern ohne `-a`. Bewusst NICHT in diesem Commit behandelt: committed
+States (Sprünge/Dodge/COVER_HOLD/LANDING_SHOT/NAV_TELE) nutzen weiterhin `_turn_toward` (nicht
+`_turn_toward_ramped`) und werden einzeln in P4-MOV-02b nachgezogen.
+
+Nach der Accel-Klemme wird `ang_vel` in `_ramp_azimuth_step` zusätzlich auf die tatsächlich
+ausgeführte Drehrate geschnappt (kein Überschwingen des Ziels) — bewusste Abweichung vom echten
+Client (der überschwingt), relevant für Konsumenten, die `ang_vel` als Ist-Drehrate lesen:
+Wire-Update (`core.py`), Sprung-/Fall-Spin-Übernahme (`tactics.py`, `states.py`) und der
+Combat-Edge-Guard (`combat.py`).
+
+**P4-MOV-02 — M-Flagge (Momentum) modelliert.** Die Beschleunigungsgrenzen liefert jetzt der
+zentrale Accessor `_accel_limits()` (`bot/ai/capabilities.py`): normal die `-a`-Server-Werte
+(`_linear_acceleration`/`_angular_acceleration`), bei getragenem M **ersetzen**
+`_momentumLinAcc`/`_momentumAngAcc` sie komplett (ternäre Auswahl in `LocalPlayer::doMomentum` —
+kein Max, keine Addition; verifiziert am Rohquelltext 2.4). Alle Rampen-Helper und `_momentum_ramp_time`
+lesen ausschließlich über `_accel_limits()`, damit M überall konsistent wirkt (auch in der
+Dodge-/Timeout-Vorberechnung, nicht nur im eigentlichen Ramp). BZDB-Defaults (`src/common/global.cxx`)
+`_momentumLinAcc`/`_momentumAngAcc` = **1.0/1.0** → linearer Clamp mit M = 20×1.0 = 20 u/s² (statt
+1000 bei `-a 50`), angular = 1.0 rad/s² (statt 38) → **~50× träger** als der Zielserver; via
+`MsgSetVar` überschreibbar (`_SETVAR_VARS`, Guard `>=0`, Defaults in `core._init_server_vars`).
+M bleibt **bad flag** und wird weiter nach `shakeTimeout` abgeworfen — die Modellierung macht M
+nicht behaltenswert, sondern dient (a) der Protokoll-Konformität während der erzwungenen Haltezeit
+(keine physikalisch unmöglichen PlayerUpdates mehr) und (b) korrekten Dodge-/Timing-Entscheidungen
+in dieser Zeit. `_momentumFriction` (BZDB-Default 0, gehört zur separaten `doFriction`) ist bewusst
+NICHT modelliert: der Bot hat kein Coasting-/Leerlauf-Konzept (jeder Tick gibt einen expliziten
+Ziel-Speed vor), das Ausrollen ohne Steuer-Input hat kein Äquivalent.
+
+**Reaktionszeit-Audit (P4-MOV-02).** Die einzige *bot-eigene* Motor-Reaktionsverzögerung ist
+`DODGE_REACT_DELAY` (0.2 s, Erkennung→Handlung auf Schüsse) — bereits menschlich-normal, unverändert.
+`M_REACT_MULTIPLIER` wurde **von 1.5 auf 1.1 gesenkt**: der Aufschlag gegen M-Schützen war ein
+Ausgleich dafür, dass der Bot sich früher instantan bewegte — mit dem eigenen Trägheitsmodell
+entfällt der Grund weitgehend. Unverändert bleiben `IB_REACT_MULTIPLIER`/`CS_REACT_MULTIPLIER`
+(Wahrnehmungs-/Sichtbarkeits-Modellierung schwer erkennbarer Schützen, P3-PER-06) sowie
+`TACT_JUMP_REACTION_S`/`LANDING_DOUBLE_SHOT_DELAY` (modellieren Gegner- bzw. Menschlichkeits-Verhalten,
+nicht die eigene Chassis-Latenz).
+
+**P4-MOV-02b — Launch-Events bleiben bewusst instant.** `doMomentum` läuft im echten Client NUR
+am Boden; `doJump` übernimmt die alte Horizontal-Velocity unverändert und ruft KEIN `doMomentum`
+auf (verifiziert `LocalPlayer.cxx` 2.4). Ein Sprung-Absprung ist also kein Rampen-Pfad. Entsprechend
+setzen die drei Absprung-Stellen ihre Velocity weiterhin instant (kein `_ramp_linear_speed`):
+
+| Stelle | Verhalten | Warum korrekt |
+|---|---|---|
+| `_execute_jump` (`bot/ai/tactics.py`) | `vel = _tank_speed` in Blickrichtung, instant | Launch-Event; idealisierte Absprung-Geschwindigkeit, doJump rampt nicht |
+| `_initiate_nav_jump` (`bot/ai/navigation.py`) | `vel = needed_hspeed` instant | Launch-Event; needed_hspeed ist die geplante Absprung-Geschwindigkeit |
+| DODGE_JUMP-Setup (`bot/ai/combat.py`) | setzt gar kein `vel_x/vel_y`, nur `vel_z`/`ang_vel` | übernimmt die (gerampte) Bodengeschwindigkeit — exakt doJump-Semantik |
+
+Regressionsguards: `TestLaunchEventsIgnoreRamp` (`tests/test_dodge_and_jump.py`) sichert ab, dass
+diese Launches auch bei aktivem `-a`-Limit instant bleiben. Ebenfalls unverändert (selbstkonsistent,
+kein Ramp-Bezug): die Sprung-Vorberechnungen `_check_tactical_jump`/`_nav_jump_feasible` (Flugphase
+nutzt den beim Launch gesetzten Wert bzw. wird live bei Ankunft am Anlaufpunkt ausgewertet).
+
+**P4-MOV-02b — Gesamtübersicht committed States.** Jeder Zustand, der `vel/ang_vel` am Boden setzt,
+wurde einzeln bewertet. Am Boden fahrende States rampen jetzt (via `_ramp_linear_speed`/
+`_ramp_azimuth_step`/`_turn_toward_ramped`); Launch-Events und Vorberechnungen bleiben bewusst
+instant bzw. selbstkonsistent. Ohne `-a`/M ist alles No-Op.
+
+| State/Stelle | Entscheidung | Begründung |
+|---|---|---|
+| `_navigate_wp`, `_execute_combat_move`, `_stall_maneuver_tick` (02a) | rampen | normales Bodenfahren |
+| EVADING/JUMP_WINDUP-Dodge (`_tick_committed`) | rampen | Bodenfahrt; kein doMomentum-Sonderfall für Dodges |
+| COVER_HOLD-Peek | rampen | Bodenpendel (Peek-Timing bleibt Wanduhr) |
+| `_tick_nav_tele` Endanflug | rampen | Bodenfahrt; Timeout um `_momentum_ramp_time(1.0)` nachgeführt |
+| LANDING_SHOT | rampen | Ramp gegen 0 (sanftes Abbremsen) + gerampte Drehung |
+| `_execute_jump`, `_initiate_nav_jump`, DODGE_JUMP-Setup | instant | Launch-Events (doJump rampt nicht; DODGE_JUMP übernimmt die gerampte Boden-vel) |
+| `time_to_dodge` | nachführen | `+ _momentum_ramp_time(1.0)` → rechtzeitig DODGE_JUMP statt zu langsamer Dodge |
+| `_check_tactical_jump`/`_nav_jump_feasible`, LANDING_SHOT `t_rem/tof` | unverändert | selbstkonsistent bzw. live pro Tick ausgewertet |
+
+Nicht Teil von 02b: die Sprungkanten-Planung im Navigationsgraphen an die effektive Beschleunigung
+angleichen (→ **P4-MOV-02c**, offen).
+
+**F4-Notiz (`time_to_dodge`).** Der Zuschlag nutzt bewusst die volle 0→v_max-Rampenzeit
+(`_momentum_ramp_time(1.0)`) statt exakter Kinematik am aktuellen Geschwindigkeitspunkt — bei
+extremer Trägheit (M) liegt der Fehler konservativ Richtung DODGE_JUMP (sichere Seite), nicht
+Richtung zu später Erkennung.
+
 **P4-FLG-04/05 — Best-Flags-Wissen: Wahrnehmungs-Gate.** Protokoll-seitig wäre der Bot
 allwissend: die `flag_id` ist über Drops stabil, `MsgFlagUpdate` liefert die exakte
 Bodenposition, und getragene Flaggen kommen mit echtem Kürzel durch (nur liegende sind
@@ -1871,6 +1964,14 @@ anzugreifen. Design-Entscheidungen:
   Ausnahmen: SB (durchschlägt Wände) / SW (radial) → nie halten; GM (Deckung bricht Lock) →
   erwünscht. Ricochet um die Deckung herum bleibt bewusst der Dodge-Kaskade (`_ricochet_paths`)
   überlassen.
+- **Bugfix (F2):** Der Peek-Zyklus setzte bis zu diesem Fix nur `vel_x`/`vel_y`, ohne die
+  Position zu integrieren — `_dispatch_movement` rief im COVER_HOLD-Zweig kein `_apply_bounds`
+  auf (der einzige X/Y-Positions-Integrator der Bodenfahrt). Folge: Der Peek fand nur auf dem
+  Wire statt (vel≠0 gemeldet, Position eingefroren), das Schussfenster öffnete sich physisch nie.
+  Behoben analog zum LANDING_SHOT-Fix (F1): `_apply_bounds(dt, half)` wird jetzt am Ende des
+  `if not self._jumping:`-Blocks aufgerufen — der Bot fährt beim Peek jetzt real vor/zurück,
+  `_apply_obstacle_bounds` (Teil von `_apply_bounds`) verhindert per Wall-Slide das Clippen in
+  die Deckungsbox.
 - **Indirekt-Schuss aus der Deckung (mit TAC-05):** ohne LoS dreht der COVER_HOLD-Dispatch den
   Rumpf über `_cover_hold_aim_az` auf den gecachten Abprall-/Tor-Azimut (Rico-Drive-Muster aus
   `_execute_combat_move`) statt auf den Gegner — nur so passiert der Rumpf das Fire-Gate und

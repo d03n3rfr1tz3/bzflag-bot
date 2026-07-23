@@ -81,6 +81,15 @@ class StateMachineMixin(BZBotBase):
             self.azimuth + math.copysign(min(abs(diff), self._tank_turn_rate * dt), diff))
         return diff
 
+    def _turn_toward_ramped(self, target_az: float, dt: float) -> float:
+        """Wie _turn_toward, aber mit angularer Beschleunigungsklemme (P4-MOV-02a, via
+        _ramp_azimuth_step). Gleicher Vertrag: gibt den Winkelabstand VOR der Drehung zurück.
+        Ohne aktives -a-Limit identisch zu _turn_toward. Für 02a-Bodenfahren (Combat); die
+        committed States nutzen weiter _turn_toward, bis sie in 02b einzeln umgestellt werden."""
+        diff = _angle_diff(target_az, self.azimuth)
+        self._ramp_azimuth_step(diff, dt, self._tank_turn_rate)
+        return diff
+
     def _dispatch_movement(self, dt: float, now: float, ai_tick: bool = True) -> None:
         """Physik (60 Hz) + KI (10 Hz): State-Machine-Dispatch."""
         half = self.world_half
@@ -134,15 +143,20 @@ class StateMachineMixin(BZBotBase):
             if ai_tick:
                 self._tick_landing_shot(now)
             if not self._jumping:
-                # Position halten; aktiv auf Landepunkt drehen
-                self.vel_x = 0.0
-                self.vel_y = 0.0
+                # Position halten; aktiv auf Landepunkt drehen. P4-MOV-02b: Ramp gegen 0 (sanftes
+                # Abbremsen aus der Landegeschwindigkeit) statt Hart-Stopp; ohne -a/M instant.
+                speed = self._ramp_linear_speed(0.0, dt)
+                self.vel_x = math.cos(self.azimuth) * speed
+                self.vel_y = math.sin(self.azimuth) * speed
                 if self._landing_aim_pos is not None:
                     ax, ay = self._landing_aim_pos
-                    self._turn_toward(
+                    self._turn_toward_ramped(
                         math.atan2(ay - self.pos_y, ax - self.pos_x), dt)
                 else:
-                    self.ang_vel = 0.0
+                    self._ramp_azimuth_step(0.0, dt, self._tank_turn_rate)
+                # F1: Abbremsen bewegt den Bot jetzt real (Ausrollen wie im echten Client);
+                # ohne -a/M ist vel=0 → No-Op.
+                self._apply_bounds(dt, half)
             return
 
         if self._ai_state == AIState.COVER_HOLD:
@@ -157,9 +171,9 @@ class StateMachineMixin(BZBotBase):
                 if ep is not None:
                     # Ausrichtung für Ausbruch/Peek-Schuss: bei fehlendem LoS auf den gecachten
                     # Abprall-/Tor-Azimut (Rico-Drive), sonst direkt aufs Ziel (P4-TAC-05).
-                    self._turn_toward(self._cover_hold_aim_az(self.target_player, ep), dt)
+                    self._turn_toward_ramped(self._cover_hold_aim_az(self.target_player, ep), dt)
                 else:
-                    self.ang_vel = 0.0
+                    self._ramp_azimuth_step(0.0, dt, self._tank_turn_rate)
                 # Peek-Zyklus: kurz vorfahren (Phase 1) und sofort rückwärts zurück (Phase 2).
                 if self._cover_peek_phase == 1:
                     speed = self._tank_speed * 0.6
@@ -172,8 +186,14 @@ class StateMachineMixin(BZBotBase):
                         self._cover_peek_phase = 0
                 else:
                     speed = 0.0   # halten
+                # P4-MOV-02b: Peek ist Bodenfahrt → Beschleunigungsklemme (ohne -a/M instant)
+                speed = self._ramp_linear_speed(speed, dt)
                 self.vel_x = math.cos(self.azimuth) * speed
                 self.vel_y = math.sin(self.azimuth) * speed
+                # F2: Peek bewegt den Bot jetzt real (vorher nur vel gesetzt, Position
+                # eingefroren); _apply_obstacle_bounds (Teil von _apply_bounds) verhindert
+                # per Wall-Slide das Clippen in die Deckungsbox.
+                self._apply_bounds(dt, half)
             return
 
         # IDLE / SEEKING / COMBAT (10 Hz KI-Tick)
@@ -341,7 +361,8 @@ class StateMachineMixin(BZBotBase):
             return
         # Abbruch: Timeout deckt auch den Revert ab (bei _is_inside_obstacle setzt der Crossing-
         # Check _teleporting_until NICHT → kein Erfolg → nach ≤NAV_TELE_TIMEOUT Abbruch).
-        if center is None or now - self._nav_tele_start > NAV_TELE_TIMEOUT:
+        # P4-MOV-02b: Timeout um die Anfahr-Rampe nachführen (ohne -a/M +0 → wie bisher).
+        if center is None or now - self._nav_tele_start > NAV_TELE_TIMEOUT + self._momentum_ramp_time(1.0):
             if center is not None:
                 self._nav_tele_cooldowns[(round(center[0]), round(center[1]))] = now + NAV_TELE_COOLDOWN
             logger.info("[%s] NAV_TELE: Abbruch (Timeout/blockiert) → Cooldown + Replan", self.callsign)
@@ -358,8 +379,10 @@ class StateMachineMixin(BZBotBase):
         aim_x = cx + (ddx / d) * NAV_TELE_OVERSHOOT
         aim_y = cy + (ddy / d) * NAV_TELE_OVERSHOOT
         target_az = math.atan2(aim_y - self.pos_y, aim_x - self.pos_x)
-        diff = self._turn_toward(target_az, dt)
+        diff = self._turn_toward_ramped(target_az, dt)
         speed = self._effective_tank_speed() if abs(diff) < math.pi / 2 else 0.0
+        # P4-MOV-02b: Endanflug ist Bodenfahrt → Beschleunigungsklemme (ohne -a/M instant)
+        speed = self._ramp_linear_speed(speed, dt)
         self.vel_x = math.cos(self.azimuth) * speed
         self.vel_y = math.sin(self.azimuth) * speed
         self._apply_bounds(dt, self.world_half)
@@ -491,14 +514,17 @@ class StateMachineMixin(BZBotBase):
                 if self.own_flag == "OO" and self._is_inside_obstacle(include_oo=True):
                     speed = 0.0
                 else:
-                    self.ang_vel = 0.0
+                    self._ramp_azimuth_step(0.0, dt, self._tank_turn_rate)
                     speed = -self._tank_speed * 0.5
             elif self._dodge_forward:
-                self.ang_vel = 0.0
+                self._ramp_azimuth_step(0.0, dt, self._tank_turn_rate)
                 speed = self._tank_speed
             else:
-                self._turn_toward(self._dodge_dir, dt)
+                self._turn_toward_ramped(self._dodge_dir, dt)
                 speed = self._tank_speed
+            # P4-MOV-02b: EVADING/JUMP_WINDUP-Dodge ist Bodenfahrt → lineare Beschleunigungsklemme
+            # (ohne -a wie bisher instant). time_to_dodge führt die Anfahr-Rampe im Trigger nach.
+            speed = self._ramp_linear_speed(speed, dt)
             self.vel_x = math.cos(self.azimuth) * speed
             self.vel_y = math.sin(self.azimuth) * speed
             self._apply_bounds(dt, half)
@@ -662,7 +688,9 @@ class StateMachineMixin(BZBotBase):
             return
         if self._handle_threat(now):
             return
-        if now - self._last_pos_check_time >= STUCK_WINDOW:
+        # P4-MOV-02a: Stuck-Fenster um die Anfahr-Rampe nachführen (ohne -a: +0 → wie bisher),
+        # damit die träge Anfahrt auf sehr niedrigen -a-Configs nicht als "festgefahren" gilt.
+        if now - self._last_pos_check_time >= STUCK_WINDOW + self._momentum_ramp_time(1.0):
             d = math.hypot(self.pos_x - self._last_pos_check[0],
                            self.pos_y - self._last_pos_check[1])
             if d < STUCK_MIN_DIST and self.target_pos is not None:

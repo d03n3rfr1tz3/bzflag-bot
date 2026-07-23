@@ -125,9 +125,14 @@ class CombatMixin(BZBotBase):
         dodge_dir, orig_diff = self._compute_dodge_dir(threat, now)
         turn_rad = abs(_angle_diff(dodge_dir, self.azimuth))
         # Wie viel Zeit braucht der Bot zum Ausweichen:
-        # Fahrweg (einen Trefferradius) + 30% der Drehzeit bis zur Ausweichrichtung
+        # Fahrweg (einen Trefferradius) + 30% der Drehzeit bis zur Ausweichrichtung.
+        # P4-MOV-02b: + Anfahr-Rampe (_momentum_ramp_time), da der Dodge jetzt beschleunigt statt
+        # instant loszufahren. Ohne -a/M = 0 (unverändert); bei -a 50 ~0,05 s, bei trägen Configs/M
+        # groß genug, um rechtzeitig auf DODGE_JUMP umzuschwenken statt einen zu langsamen Dodge zu
+        # starten (_accel_limits berücksichtigt dabei M).
         time_to_dodge = (HIT_RADIUS * 1.3 / max(self._tank_speed, 1e-6)
-                         + turn_rad / max(self._tank_turn_rate, 1e-6) * 0.3)
+                         + turn_rad / max(self._tank_turn_rate, 1e-6) * 0.3
+                         + self._momentum_ramp_time(1.0))
         # Wenn Ausweichen noch möglich (10% Puffer gegen knappe Situationen)
         if time_to_dodge * 1.1 <= time_to_impact:
             self._setup_dodge(threat, now, time_to_impact, dodge_dir, orig_diff)
@@ -140,7 +145,10 @@ class CombatMixin(BZBotBase):
             # eingestuft wurde für 1 s ignorieren (verhindert sofortigen DODGE_JUMP).
             if self._evade_cleared_shots.get(threat_key, 0.0) > now:
                 return False
-            # Fix E3: DODGE_JUMP — defensiver Sprung, minimale Rotation
+            # Fix E3: DODGE_JUMP — defensiver Sprung, minimale Rotation.
+            # P4-MOV-02b: setzt bewusst KEIN vel_x/vel_y — die Horizontalgeschwindigkeit bleibt, was
+            # die Boden-Rampe hinterlassen hat (entspricht exakt doJump: alte vel übernommen, kein
+            # doMomentum). Damit ist der Dodge-Sprung ohne weitere Änderung bereits ramp-korrekt.
             self.vel_z = self._jump_launch_vz(self.vel_z)
             self._jumping = True
             jump_time = 2.0 * self._effective_jump_velocity() / max(abs(self._effective_gravity()), 0.001)
@@ -399,7 +407,7 @@ class CombatMixin(BZBotBase):
             _tan = self._steep_wall_ahead(target_az, min(dist, NAV_WALL_PROBE_DIST))
             if _tan is not None:
                 target_az = _tan
-        self._turn_toward(target_az, dt)
+        self._turn_toward_ramped(target_az, dt)   # P4-MOV-02a: angulare Beschleunigungsklemme
         if dist < _opt - COMBAT_DIST_DEADZONE:
             speed = -self._tank_speed * 0.5
             _nav = self._nav_graph
@@ -421,6 +429,7 @@ class CombatMixin(BZBotBase):
                 _ny = self.pos_y + math.sin(self.azimuth) * speed * dt
                 if _nav.get_floor_z(_nx, _ny, self.pos_z + 0.1) < self._get_floor_z() - 1.0:
                     speed = 0.0
+        speed = self._ramp_linear_speed(speed, dt)   # P4-MOV-02a: lineare Beschleunigungsklemme
         speed, self.ang_vel = self._apply_movement_caps(speed, self.ang_vel)
         self.vel_x = math.cos(self.azimuth) * speed
         self.vel_y = math.sin(self.azimuth) * speed
@@ -586,7 +595,9 @@ class CombatMixin(BZBotBase):
             # fracOfMaxSpeed clientseitig auf -0,5×maxSpeed (LocalPlayer.cxx) — maxSpeed enthält
             # den Flaggen-Modifikator (V/TH/A/BU). Volle Speed triggert den Server-Speedcheck.
             speed = -self._effective_tank_speed() * 0.5
-            self.ang_vel = 0.0
+            # P4-MOV-02a: ang_vel auf 0 und Rückwärts-Speed mit Beschleunigungsklemme (ohne -a wie bisher)
+            self._ramp_azimuth_step(0.0, dt, self._tank_turn_rate)
+            speed = self._ramp_linear_speed(speed, dt)
             speed, self.ang_vel = self._apply_movement_caps(speed, self.ang_vel)
             self.vel_x = math.cos(self.azimuth) * speed
             self.vel_y = math.sin(self.azimuth) * speed

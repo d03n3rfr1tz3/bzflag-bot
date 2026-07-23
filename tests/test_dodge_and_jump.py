@@ -6,7 +6,8 @@ Konstanten (aus bzbot.py):
   DODGE_REACT_DELAY   = 0.25s
   IB_REACT_MULTIPLIER = 1.5   → IB-Delay = 0.375s
   CS_REACT_MULTIPLIER = 3.0   → CS-Delay = 0.75s
-  M_REACT_MULTIPLIER  = 1.5   → M-Delay  = 0.375s
+  M_REACT_MULTIPLIER  = 1.1   (P4-MOV-02: von 1.5 gesenkt — Bot bewegt sich mit dem
+                              Trägheitsmodell selbst nicht mehr instant)
   JUMP_VELOCITY       = 19.0
   TANK_SPEED          = 25.0
 
@@ -1301,3 +1302,133 @@ class TestTactJumpRestrictionsTJ1:
             result = bot._check_tactical_jump(now)
         assert result is True
         assert bot._ai_state == AIState.JUMP_WINDUP
+
+
+class TestDodgeMomentumRamp:
+    """P4-MOV-02b: EVADING-Dodge ist Bodenfahrt → die Geschwindigkeit rampt bei aktivem -a hoch,
+    statt instant auf _tank_speed zu springen (ohne -a unverändert)."""
+
+    def _setup_active_evading(self, bot, now):
+        # Bot weicht vorwärts aus (azimuth = π/2), Schuss noch im Anflug → EVADING bleibt aktiv.
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = math.pi / 2
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.human_count = 1
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_dir = math.pi / 2
+        bot._dodge_until = now + 0.5
+        from bot.models import AIState
+        bot._ai_state = AIState.EVADING
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(50.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))
+
+    def test_forward_dodge_ramps_with_dash_a(self, bot):
+        now = time.monotonic()
+        bot._linear_acceleration = 50.0   # max_delta = 20×50×0.02 = 20 u/s pro Tick
+        self._setup_active_evading(bot, now)
+        bot._update_movement(0.02, now, ai_tick=False)
+        v1 = math.hypot(bot.vel_x, bot.vel_y)
+        assert v1 == pytest.approx(20.0, abs=1e-6)      # gerampt, noch nicht bei 25
+        assert v1 < bot._tank_speed
+
+    def test_forward_dodge_instant_without_dash_a(self, bot):
+        now = time.monotonic()
+        bot._linear_acceleration = 0.0   # keine Klemme → instant wie bisher
+        self._setup_active_evading(bot, now)
+        bot._update_movement(0.02, now, ai_tick=False)
+        v1 = math.hypot(bot.vel_x, bot.vel_y)
+        assert v1 == pytest.approx(bot._tank_speed, abs=1e-6)
+
+
+class TestDodgeMarginMomentumRamp:
+    """P4-MOV-02b: time_to_dodge berücksichtigt die Anfahr-Rampe (_momentum_ramp_time). Bei
+    trägen Beschleunigungen (niedriges -a oder M) kippt ein grenzwertiger Fall korrekt von EVADING
+    auf DODGE_JUMP, statt einen zu langsamen Dodge zu starten. Bei -a 50 bleibt die Entscheidung."""
+
+    def _fire_40u_shot(self, bot):
+        # 40u/−100 → t_impact ≈ 0.4s; Bot senkrecht (turn_rad=0) → time_to_dodge ≈ 0.29s.
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+        bot.azimuth = math.pi / 2
+        bot.alive = True
+        bot.human_count = 0
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(40.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))
+        bot._last_threat_id = (2, 1)
+        bot._threat_detected_at = time.monotonic() - 1.0
+
+    def test_low_accel_flips_to_dodge_jump(self, bot):
+        from bot.models import AIState
+        bot._linear_acceleration = 1.0   # ramp ≈ 1.25s → time_to_dodge ≫ t_impact
+        self._fire_40u_shot(bot)
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.DODGE_JUMP
+
+    def test_m_flag_flips_to_dodge_jump(self, bot):
+        """M (Momentum-Default 1.0) ist ~50× träger als -a 50 → wie niedriges -a → DODGE_JUMP.
+        (Dieser Fall war für Commit 2 vorgesehen, braucht aber die time_to_dodge-Nachführung.)"""
+        from bot.models import AIState
+        bot._linear_acceleration = 0.0
+        bot.own_flag = "M"
+        bot._momentum_lin_acc = 1.0
+        self._fire_40u_shot(bot)
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.DODGE_JUMP
+
+    def test_target_server_still_evades(self, bot):
+        from bot.models import AIState
+        bot._linear_acceleration = 50.0   # ramp ≈ 0.05s → Entscheidung unverändert
+        self._fire_40u_shot(bot)
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.EVADING
+
+
+class TestLaunchEventsIgnoreRamp:
+    """P4-MOV-02b: Sprung-Launches sind KEINE doMomentum-Pfade (der echte doJump übernimmt die
+    alte Horizontal-Velocity unverändert). Der Bot setzt die Absprung-Velocity daher bewusst
+    instant — auch bei aktivem Beschleunigungs-Limit. Diese Guards sichern die Entscheidung ab,
+    damit nicht versehentlich später eine Rampe in einen Launch eingebaut wird."""
+
+    def test_tactical_jump_launch_ignores_ramp(self, bot):
+        """_execute_jump setzt vel auf die volle _tank_speed, nicht auf einen einzelnen
+        Ramp-Schritt (20×50×0.02 = 20 wäre die Ein-Tick-Klemme bei -a 50)."""
+        import math
+        bot._linear_acceleration = 50.0   # Rampe aktiv — würde vel sonst auf 20 klemmen
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        bot.target_player = None
+        bot._escape_jump_ang_vel = None
+        bot._execute_jump()
+        assert math.hypot(bot.vel_x, bot.vel_y) == pytest.approx(bot._tank_speed)
+
+    def test_nav_jump_launch_ignores_ramp(self, bot):
+        """_initiate_nav_jump setzt vel auf die berechnete needed_hspeed instant — deutlich über
+        dem, was ein einzelner Ramp-Tick aus dem Stand (0) erlauben würde."""
+        import math
+        bot._linear_acceleration = 50.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        wp = [85.0, 0.0, 0.0]   # weit → needed_hspeed ~22.6, klar über der Ein-Tick-Ramp-Klemme
+        bot._initiate_nav_jump(wp)
+        speed = math.hypot(bot.vel_x, bot.vel_y)
+        # Ein-Tick-Ramp aus dem Stand bei -a 50 wäre 20×50×0.02 = 20; der Launch ist instant und
+        # setzt needed_hspeed (>20) sofort, statt über mehrere Ticks hochzurampen.
+        assert speed > 20.0
+
+    def test_dodge_jump_preserves_ground_velocity(self, bot):
+        """DODGE_JUMP setzt kein vel_x/vel_y → die (ggf. gerampte) Bodengeschwindigkeit bleibt
+        exakt erhalten (entspricht doJump: alte Horizontal-vel übernommen)."""
+        from bot.models import AIState
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.azimuth = 0.0
+        bot.vel_x = 12.0; bot.vel_y = 0.0; bot.vel_z = 0.0   # fährt vorwärts am Boden
+        bot.alive = True
+        bot.human_count = 0
+        make_shot(bot, shooter_id=2, shot_id=1,
+                  pos=(5.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))   # zu nah → DODGE_JUMP
+        bot._last_threat_id = (2, 1)
+        bot._threat_detected_at = time.monotonic() - 1.0
+        bot._update_movement(0.02, time.monotonic(), ai_tick=True)
+        assert bot._ai_state == AIState.DODGE_JUMP
+        assert bot.vel_x == pytest.approx(12.0)   # horizontal unverändert
+        assert bot.vel_y == pytest.approx(0.0)

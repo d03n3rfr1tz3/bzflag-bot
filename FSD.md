@@ -323,7 +323,7 @@ Kritische Fähigkeiten für den produktiven Server-Betrieb.
 |---|---|---|---|
 | P3-PER-01 | Freund/Feind- und Sicht-Mechaniken: Rogue/Colorblindness werten alle als Feind | ✅ | — |
 
-| P3-PER-06 | Verstärkte Reaktionsverzögerung gegen schwer wahrnehmbare Schützen: IB ×3, Momentum ×1,5, Cloaked Shot ×3 | ✅ | — |
+| P3-PER-06 | Verstärkte Reaktionsverzögerung gegen schwer wahrnehmbare Schützen: IB ×1,1, Momentum ×1,1, Cloaked Shot ×2,0 | ✅ | — |
 | P3-PER-07 | Ziel-Scoring (Distanz, Mensch-Bonus, PhantomZone-/Stealth-gegen-GM-Abwertung) | ✅ | — |
 | P3-PER-08 | Rabbit-Chase: Team-Umbelegung verarbeiten (neuer Rabbit vs. Hunter korrekt als Freund/Feind gewertet) | ✅ | — |
 
@@ -365,8 +365,8 @@ Taktische und infrastrukturelle Verbesserungen ohne harte Produktionsrelevanz.
 | ID | Feature | Status | Abhängigkeiten |
 |---|---|---|---|
 | P4-MOV-01 | Glatte Wegpunkt-Übergänge (kein hartes Zick-Zack an Pfad-Ecken) | ✅ | P2-PTH-01…03 |
-| P4-MOV-02a | Trägheitsmodell: lineare/angulare Beschleunigungsgrenzen (Server-Vorgabe) im normalen Bodenfahren, inkl. nachgeführter Stuck-/Timeout-Erkennung | 📋 | — |
-| P4-MOV-02b | Trägheitsmodell: committed Zustände und Vorberechnungen (Sprünge, Z-Angriff, Landing-Shot) einzeln bewerten und ggf. nachführen | 📋 | P4-MOV-02a |
+| P4-MOV-02a | Trägheitsmodell: lineare/angulare Beschleunigungsgrenzen (Server-Vorgabe) im normalen Bodenfahren, inkl. nachgeführter Stuck-/Timeout-Erkennung | ✅ | — |
+| P4-MOV-02b | Trägheitsmodell: committed Zustände und Vorberechnungen (Sprünge, Z-Angriff, Landing-Shot) einzeln bewerten und ggf. nachführen | ✅ | P4-MOV-02a |
 | P4-MOV-02c | Trägheitsmodell: Sprungkanten-Planung im Navigationsgraphen an die effektive Beschleunigung angleichen | 📋 | P4-MOV-02b |
 
 **Flaggen (P4-FLG)**
@@ -456,7 +456,7 @@ als Gegner-Effekt auf den Bot. Server-Variablen können die Werte überschreiben
 | JM | bad | Radar fällt aus (nur Sicht) |
 | CB | bad | Alle als Feind gewertet (Teamkollegen-Risiko) |
 | WA | bad | Weiteres Sichtfeld, leichte Ziel-Streuung |
-| M | bad | Träge; gegen M-Schützen reagiert der Bot langsamer |
+| M | bad | Träge: der Bot modelliert die eigene M-Beschleunigungsgrenze (P4-MOV-02) und wirft M nach shakeTimeout ab; gegen M-Schützen reagiert er nur noch leicht verzögert (×1,1) |
 | FO/RO/LT/RT | bad | Fahr-/Dreh-Beschränkungen |
 | RC | bad | Keine Sonderbehandlung — nur Drop |
 

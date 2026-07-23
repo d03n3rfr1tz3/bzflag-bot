@@ -14,6 +14,7 @@ from bot.constants import (
     TELEPORT_TIME,
     WP_TIMEOUT_BASE,
     WP_TIMEOUT_SCALE,
+    MOMENTUM_TIMEOUT_CYCLES,
     NAV_JUMP_Z_TOL,
     NAV_TELE_ENGAGE_DIST,
     NAV_ASYNC_TRIGGER_MS,
@@ -238,25 +239,19 @@ class NavigationMixin(BZBotBase):
         target_az = math.atan2(dy, dx)
         _eff_turn = self._effective_turn_rate()
         _eff_speed = self._effective_tank_speed()
-        max_turn = _eff_turn * dt
         if reverse:
             enemy_facing = _wrap(target_az + math.pi)
             diff = _angle_diff(enemy_facing, self.azimuth)
             if not self._can_turn_left()  and diff > 0: diff = 0.0
             if not self._can_turn_right() and diff < 0: diff = 0.0
-            self.ang_vel = math.copysign(
-                min(abs(diff / max(dt, 1e-6)), _eff_turn), diff)
-            self.azimuth = _wrap(
-                self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+            # P4-MOV-02a: ang_vel/azimuth mit angularer Beschleunigungsklemme (ohne -a wie bisher)
+            self._ramp_azimuth_step(diff, dt, _eff_turn)
             speed = -_eff_speed * 0.5 * max(0.05, math.cos(diff))
         else:
             diff = _angle_diff(target_az, self.azimuth)
             if not self._can_turn_left()  and diff > 0: diff = 0.0
             if not self._can_turn_right() and diff < 0: diff = 0.0
-            self.ang_vel = math.copysign(
-                min(abs(diff / max(dt, 1e-6)), _eff_turn), diff)
-            self.azimuth = _wrap(
-                self.azimuth + math.copysign(min(abs(diff), max_turn), diff))
+            self._ramp_azimuth_step(diff, dt, _eff_turn)
             if abs(diff) >= math.pi / 2.0:
                 speed = 0.0
             else:
@@ -274,6 +269,8 @@ class NavigationMixin(BZBotBase):
                         self.pos_x, self.pos_y, self.pos_z,
                         dist_to_wp, r, speed,
                         math.degrees(diff), math.degrees(self.azimuth))
+        # P4-MOV-02a: lineare Beschleunigungsklemme auf den Ziel-Speed (ohne -a unverändert)
+        speed = self._ramp_linear_speed(speed, dt)
         speed, self.ang_vel = self._apply_movement_caps(speed, self.ang_vel)
         self.vel_x = math.cos(self.azimuth) * speed
         self.vel_y = math.sin(self.azimuth) * speed
@@ -424,7 +421,8 @@ class NavigationMixin(BZBotBase):
             self._wp_fail_count = 0
             self._wp_timeout    = (WP_TIMEOUT_BASE
                                    + math.hypot(ex - self.pos_x, ey - self.pos_y)
-                                   * WP_TIMEOUT_SCALE)
+                                   * WP_TIMEOUT_SCALE
+                                   + self._momentum_ramp_time(MOMENTUM_TIMEOUT_CYCLES))
             return
 
         if nav is None or self._can_drive_through_obstacles():
@@ -476,7 +474,8 @@ class NavigationMixin(BZBotBase):
             self._wp_timeout = (WP_TIMEOUT_BASE
                                 + math.hypot(path[0][0] - self.pos_x,
                                              path[0][1] - self.pos_y)
-                                * WP_TIMEOUT_SCALE)
+                                * WP_TIMEOUT_SCALE
+                                + self._momentum_ramp_time(MOMENTUM_TIMEOUT_CYCLES))
         else:
             self._nav_path  = []
             self.target_pos = (goal_x, goal_y)
@@ -485,7 +484,8 @@ class NavigationMixin(BZBotBase):
             self._wp_timeout = (WP_TIMEOUT_BASE
                                 + math.hypot(goal_x - self.pos_x,
                                              goal_y - self.pos_y)
-                                * WP_TIMEOUT_SCALE)
+                                * WP_TIMEOUT_SCALE
+                                + self._momentum_ramp_time(MOMENTUM_TIMEOUT_CYCLES))
 
     def _submit_async_plan(self, sx: float, sy: float, sz: float,
                            goal_x: float, goal_y: float, goal_z: float | None,
@@ -660,7 +660,8 @@ class NavigationMixin(BZBotBase):
             self._wp_timeout = (WP_TIMEOUT_BASE
                                 + math.hypot(wp[0] - self.pos_x,
                                              wp[1] - self.pos_y)
-                                * WP_TIMEOUT_SCALE)
+                                * WP_TIMEOUT_SCALE
+                                + self._momentum_ramp_time(MOMENTUM_TIMEOUT_CYCLES))
         else:
             if self._debug_log_path:
                 logger.debug("[%s] Pfad: Fertig → Neuziel", self.callsign)
@@ -733,7 +734,9 @@ class NavigationMixin(BZBotBase):
             calc      = hdist_aim / max(t_desc, 0.01)
             if 1.0 < calc <= _ts:
                 needed_hspeed = calc
-        # Velocity in Blickrichtung (self.azimuth) — NAV_JUMP_ALIGN hat Ausrichtung sichergestellt
+        # Velocity in Blickrichtung (self.azimuth) — NAV_JUMP_ALIGN hat Ausrichtung sichergestellt.
+        # P4-MOV-02b: Launch-Event — needed_hspeed ist die idealisierte Absprung-Geschwindigkeit,
+        # bewusst instant (kein _ramp_linear_speed): doJump übernimmt die Horizontal-vel unverändert.
         self.vel_x       = math.cos(self.azimuth) * needed_hspeed
         self.vel_y       = math.sin(self.azimuth) * needed_hspeed
         self._jumping      = True

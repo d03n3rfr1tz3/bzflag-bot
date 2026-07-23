@@ -123,6 +123,15 @@ TELEPORT_TIME: Final = 1.0    # BZDB_TELEPORTTIME-Default: PS_TELEPORTING-Dauer 
 WP_TIMEOUT_BASE: Final = 3.0             # Basiszeit für Drehen/Anfahren/Sicherheit
 WP_TIMEOUT_SCALE: Final = 0.3             # s pro Einheit Distanz (≈3.3 u/s effektiv)
 WP_TIMEOUT_JUMP_BONUS: Final = 2.0             # Aufschlag für NAV_JUMP-Anfahrt-WPs
+
+# ── Trägheitsmodell (P4-MOV-02a/b): Beschleunigungsgrenzen (LocalPlayer::doMomentum) ──
+MOMENTUM_LIN_ACC_FACTOR: Final = 20.0    # linearer Clamp = 20×linearAcceleration (verifiziert LocalPlayer.cxx)
+MOMENTUM_TIMEOUT_CYCLES: Final = 2.0     # WP-Timeout-/Stuck-Zuschlag: Anfahren + eine Kehre als Marge
+# M-Flagge (Momentum): _momentumLinAcc/_momentumAngAcc ERSETZEN bei getragenem M die -a-Werte
+# (ternäre Auswahl in doMomentum, kein Max). BZDB-Defaults (global.cxx) = 1.0/1.0 → ~50× träger
+# als der Zielserver (-a 50 38). Server kann sie via MsgSetVar überschreiben.
+MOMENTUM_LIN_ACC_DEFAULT: Final = 1.0    # _momentumLinAcc BZDB-Default
+MOMENTUM_ANG_ACC_DEFAULT: Final = 1.0    # _momentumAngAcc BZDB-Default
 NAV_JUMP_Z_TOL: Final = 2.5             # max. Z-Abweichung bei NAV_JUMP-Landung
 NAV_TELE_TIMEOUT: Final = 2.0             # max. Sekunden Direktanflug in die Tor-Mitte vor Abbruch
 NAV_TELE_ENGAGE_DIST: Final = NAV_CELL_SIZE * 5.0  # nur engagen, wenn Tor-Mitte so nah ist (~20u)
@@ -208,7 +217,9 @@ INDIRECT_HOLD_S: Final = 5.0                 # max. Halt (s) zum Zielen eines In
 HIT_RADIUS: Final = TANK_RADIUS * 1.3   # ~5.62u
 DODGE_REACT_DELAY: Final = 0.2
 IB_REACT_MULTIPLIER: Final = 1.1
-M_REACT_MULTIPLIER: Final = 1.5
+M_REACT_MULTIPLIER: Final = 1.1   # M-Schütze: minimal träger lesbar. Von 1.5 gesenkt (P4-MOV-02):
+                            # mit dem eigenen Trägheitsmodell bewegt sich der Bot selbst nicht mehr
+                            # instant, der Fairness-Aufschlag gegen M-Schützen entfällt weitgehend.
 CS_REACT_MULTIPLIER: Final = 2.0   # Cloaked Shot (Gegenstück zu IB): out-the-window unsichtbar, aber auf
                             # Radar sichtbar → nur visuelle Bestätigung fehlt, daher kleiner als IB
 ST_GM_PENALTY: Final = 4.0   # ST-Spieler bei GM: 4× schlechtere Priorität (kein Homing)
@@ -324,6 +335,8 @@ __all__ = [
     'SHOOT_INTERVAL_RANDOM_MAX', 'MIN_BURST_INTERVAL', 'GM_BURST_INTERVAL',
     'LANDING_DOUBLE_SHOT_DELAY', 'RESPAWN_DELAY', 'EXPLODE_TIME', 'ROUND_END_LINGER',
     'TELEPORT_TIME', 'WP_TIMEOUT_BASE', 'WP_TIMEOUT_SCALE', 'WP_TIMEOUT_JUMP_BONUS',
+    'MOMENTUM_LIN_ACC_FACTOR', 'MOMENTUM_TIMEOUT_CYCLES',
+    'MOMENTUM_LIN_ACC_DEFAULT', 'MOMENTUM_ANG_ACC_DEFAULT',
     'NAV_JUMP_Z_TOL', 'NAV_TELE_TIMEOUT', 'NAV_TELE_ENGAGE_DIST', 'NAV_TELE_COOLDOWN',
     'NAV_TELE_OVERSHOOT', 'NAV_ASYNC_TRIGGER_MS', 'NAV_ASYNC_MAX_EXPANSIONS',
     'NAV_ASYNC_MAX_MS', 'NAV_ASYNC_RESYNC_TOL', 'NAV_WALL_PROBE_DIST', 'NAV_WALL_STEEP_DEG',

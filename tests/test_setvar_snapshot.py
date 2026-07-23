@@ -82,6 +82,9 @@ SIMPLE_FLOAT_VARS = [
     # W3/F8: Nachführung neu ergänzt (vorher rechnete der Steamroller-Radius
     # immer mit dem 0.8-Default)
     ("_srRadiusMult",      "_sr_radius_mult",     1.2),
+    # P4-MOV-02: M-Flaggen-Trägheit (Momentum-Beschleunigungsgrenzen)
+    ("_momentumLinAcc",    "_momentum_lin_acc",   5.0),
+    ("_momentumAngAcc",    "_momentum_ang_acc",   3.0),
 ]
 
 

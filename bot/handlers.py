@@ -108,6 +108,7 @@ class HandlersMixin(BZBotBase):
         # P3-NAV-02: solide Teleporter-Teile (Posts + Crossbar) für die reaktive Kollision cachen.
         self._tele_solid_boxes = [box for t in world_map.teleporters
                                   for box in teleporter_solid_boxes(t)]
+        self._solid_boxes_cache = None   # Invalidieren: _solid_boxes() baut lazy neu (neue Welt)
         if self._debug_log_tele:
             teles = world_map.teleporters
             logger.debug("[%s] Tele: %d Teleporter, %d Links geparst",
@@ -917,6 +918,8 @@ class HandlersMixin(BZBotBase):
         "_tankWidth":        ("_tank_width",         float, ">0",  "%.2f", None),
         "_tankHeight":       ("_tank_height",        float, ">0",  "%.2f", "_set_wall_height_from_tank"),
         "_maxBumpHeight":    ("_max_bump_height",    float, ">=0", "%.2f", None),
+        "_momentumLinAcc":   ("_momentum_lin_acc",   float, ">=0", "%.2f", None),
+        "_momentumAngAcc":   ("_momentum_ang_acc",   float, ">=0", "%.2f", None),
         "_wallHeight":       ("_wall_height",        float, ">0",  None,   None),
         "_muzzleHeight":     ("_muzzle_height",      float, ">=0", "%.2f", None),
         "_muzzleFront":      ("_muzzle_front",       float, ">=0", "%.2f", None),
