@@ -511,13 +511,100 @@ def test_check_teleport_crossing_retrigger_guard(bot):
 
 
 def test_check_teleport_crossing_pz_skips(bot):
+    """PZ: Querung togglet zoned (P4-FLG-03) — KEIN Positionssprung, KEIN MsgTeleport."""
     teles, lmap = _pair()
     _bot_world(bot, teles, lmap)
-    bot.own_flag = "PZ"                        # PhantomZone togglet zoned (P4-FLG-03), kein Sprung
+    bot.own_flag = "PZ"
     bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
     bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
     bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
     assert (bot.pos_x, bot.pos_y, bot.pos_z) == (2.0, 0.0, 3.0)
+    assert bot.is_phantom_zoned is True
+    assert bot._pz_zoned_gate == 0
+    assert not [c for c in bot.client.send.call_args_list if c.args[0] == MsgTeleport]
+
+
+def test_pz_crossing_retrigger_guard_single_toggle(bot):
+    """Eine Querung = genau ein Toggle: der zweite Check innerhalb der Re-Trigger-Sperre
+    (_teleporting_until) darf nicht zurück-togglen."""
+    teles, lmap = _pair()
+    _bot_world(bot, teles, lmap)
+    bot.own_flag = "PZ"
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
+    assert bot.is_phantom_zoned is True
+    bot.pos_x = 2.5
+    bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.05)   # < _teleporting_until
+    assert bot.is_phantom_zoned is True
+
+
+def test_pz_unzone_other_gate_sets_cooldown_keeps_flag(bot):
+    """Entzonen über ein ANDERES Tor: Cooldown (PZ_REZONE_COOLDOWN) startet, KEIN Drop."""
+    from unittest.mock import patch
+    from bot.constants import PZ_REZONE_COOLDOWN, TELEPORT_TIME
+    teles, lmap = _pair()
+    _bot_world(bot, teles, lmap)
+    bot.own_flag = "PZ"
+    bot.is_phantom_zoned = True
+    bot._pz_zoned_gate = 0                     # gezoned über Tor 0 …
+    bot.pos_x = 52.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    with patch.object(bot, "_try_drop_flag") as drop:
+        bot._check_teleport_crossing((48.0, 0.0, 3.0), 100.0)   # … entzont über Tor 1
+    assert bot.is_phantom_zoned is False
+    assert bot._pz_zoned_gate is None
+    assert bot._pz_rezone_block_until == pytest.approx(100.0 + PZ_REZONE_COOLDOWN)
+    assert bot._teleporting_until == pytest.approx(100.0 + TELEPORT_TIME)
+    drop.assert_not_called()
+
+
+def test_pz_unzone_same_gate_drops_flag(bot):
+    """User-Regel: Zone UND Entzone über DASSELBE Tor → Flagge direkt abgeben
+    (deckt Ein-Teleporter-Karten ab)."""
+    from unittest.mock import patch
+    teles, lmap = _pair()
+    _bot_world(bot, teles, lmap)
+    bot.own_flag = "PZ"
+    bot.is_phantom_zoned = True
+    bot._pz_zoned_gate = 0
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    with patch.object(bot, "_try_drop_flag") as drop:
+        bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)   # Tor 0 erneut
+    assert bot.is_phantom_zoned is False
+    drop.assert_called_once()
+
+
+def test_check_teleport_crossing_rotates_wings_steer_az(bot):
+    """Audit-Fix (P4-MOV-03a-Steuerziel): das absolute Steuerziel _wings_steer_az muss den
+    Portal-Warp mitmachen — sonst würde die WG-Luftsteuerung nach der Querung noch auf den
+    alten (Vor-Warp-)Winkel zusteuern. Torpaar mit unterschiedlicher Ausrichtung (angle=π/2 bei
+    t1) erzeugt eine echte Winkeldifferenz, die auf _wings_steer_az genauso wie auf azimuth
+    angewandt werden muss."""
+    from bot.util import _wrap
+    teles = [_tele("t0", 0.0, 0.0, angle=0.0), _tele("t1", 50.0, 0.0, angle=math.pi / 2)]
+    lmap = build_link_map([(0, 3), (3, 0), (1, 2), (2, 1)])
+    _bot_world(bot, teles, lmap)
+    bot.own_flag = "WG"
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+    bot.azimuth = 0.0
+    bot._wings_steer_az = 0.0                  # Steuerziel vor der Querung: geradeaus
+    bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
+    portal_delta = _wrap(bot.azimuth - 0.0)     # tatsächliche Winkeldifferenz dieses Torpaars
+    assert portal_delta != pytest.approx(0.0), "Testaufbau muss eine echte Drehung erzeugen"
+    assert bot._wings_steer_az == pytest.approx(portal_delta)
+
+
+def test_check_teleport_crossing_leaves_wings_steer_az_none(bot):
+    """Gegenprobe: ist kein Steuerziel gesetzt (_wings_steer_az is None, z.B. ohne WG-Finte/
+    -Escape), bleibt es nach der Querung unangetastet (kein versehentliches Setzen)."""
+    teles, lmap = _pair()
+    _bot_world(bot, teles, lmap)
+    bot.own_flag = ""
+    bot.pos_x = 2.0; bot.pos_y = 0.0; bot.pos_z = 3.0
+    bot.vel_x = 25.0; bot.vel_y = 0.0; bot.vel_z = 0.0
+    bot._wings_steer_az = None
+    bot._check_teleport_crossing((-2.0, 0.0, 3.0), 100.0)
+    assert bot._wings_steer_az is None
 
 
 def test_update_movement_invokes_crossing_check(bot):

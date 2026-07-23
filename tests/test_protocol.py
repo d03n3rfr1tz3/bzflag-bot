@@ -539,6 +539,61 @@ class TestScoreOver:
         assert bot._round_over_until is None
 
 
+# ── P4-FLG-03: MsgScore-Tracking ─────────────────────────────────────────────
+
+def _build_score(entries) -> bytes:
+    """Baut einen MsgScore-Payload: u8 count, je Eintrag 7 Byte (u8 playerId, u16 wins,
+    u16 losses, u16 tks). entries: Liste von (pid, wins, losses, tks)."""
+    payload = struct.pack(">B", len(entries))
+    for pid, wins, losses, tks in entries:
+        payload += struct.pack(">BHHH", pid, wins, losses, tks)
+    return payload
+
+
+class TestScoreMsg:
+    """_on_score (MsgScore, bzfs sendPlayerScores): wins/losses je Spieler + eigener Score
+    (player_id == self.player_id → _own_wins/_own_losses, sonst players[..].wins/losses)."""
+
+    def test_score_updates_own_and_other_player(self, bot):
+        """Eigene ID → _own_wins/_own_losses; fremde bekannte ID → players[..].wins/losses."""
+        from bzflag.protocol import MsgScore
+        make_player(bot, 7)
+        payload = _build_score([(bot.player_id, 5, 2, 0), (7, 3, 9, 1)])
+        bot._on_score(MsgScore, payload)
+        assert bot._own_wins == 5
+        assert bot._own_losses == 2
+        assert bot.players[7].wins == 3
+        assert bot.players[7].losses == 9
+
+    def test_score_unknown_player_ignored_no_crash(self, bot):
+        """Unbekannte playerId (nicht in players, nicht eigene ID) → kein Crash, wird ignoriert."""
+        from bzflag.protocol import MsgScore
+        payload = _build_score([(42, 1, 1, 0)])
+        bot._on_score(MsgScore, payload)   # darf nicht crashen
+        assert 42 not in bot.players
+
+    def test_score_empty_payload_no_crash(self, bot):
+        """Leeres Payload: kein Absturz."""
+        from bzflag.protocol import MsgScore
+        bot._on_score(MsgScore, b"")
+        assert bot._own_wins == 0
+        assert bot._own_losses == 0
+
+    def test_score_truncated_entry_no_crash(self, bot):
+        """count kündigt mehr Einträge an, als tatsächlich im Payload stehen (abgeschnitten,
+        z.B. Split-Read) → still abbrechen statt zu crashen, bereits gelesene Einträge bleiben
+        gültig."""
+        from bzflag.protocol import MsgScore
+        make_player(bot, 7)
+        full = _build_score([(7, 3, 9, 1), (bot.player_id, 5, 2, 0)])
+        payload = struct.pack(">B", 2) + full[1:1 + 7] + full[8:8 + 3]   # zweiter Eintrag abgeschnitten
+        bot._on_score(MsgScore, payload)   # darf nicht crashen
+        assert bot.players[7].wins == 3
+        assert bot.players[7].losses == 9
+        assert bot._own_wins == 0          # abgeschnittener Eintrag nicht übernommen
+        assert bot._own_losses == 0
+
+
 # ── Fix 18: MsgTimeUpdate Reconnect ──────────────────────────────────────────
 
 class TestTimeUpdate:

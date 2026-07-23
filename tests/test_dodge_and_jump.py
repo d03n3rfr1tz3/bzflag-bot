@@ -1385,6 +1385,31 @@ class TestDodgeMarginMomentumRamp:
         assert bot._ai_state == AIState.EVADING
 
 
+class TestDodgeDurationRampAudit:
+    """Audit-Fix: die dodge_duration-Kappung (0,8 s, aus der Vor-Rampen-Zeit) wird um
+    _momentum_ramp_time(1.0) erweitert — sonst bricht der Dodge bei trägen Configs ab, bevor
+    die in _handle_threat angenommene Sicherheitsdistanz gefahren ist (und die EV2-Grace
+    unterdrückt denselben Schuss danach noch 1 s)."""
+
+    def test_duration_cap_extends_with_ramp(self, bot):
+        bot._linear_acceleration = 1.0   # eff. 20 u/s² → Rampe 25/20 = 1.25s
+        now = time.monotonic()
+        shot = make_shot(bot, shooter_id=2, shot_id=1,
+                         pos=(300.0, 0.0, 1.025), vel=(-50.0, 0.0, 0.0))
+        bot._setup_dodge(shot, now, 5.0, 0.0)   # t_impact*1.5 = 7.5 → Kappung greift
+        expected = 0.8 + bot._momentum_ramp_time(1.0)
+        assert expected > 2.0                    # Rampe wirkt wirklich (kein 0-Fall)
+        assert bot._dodge_until - now == pytest.approx(expected, abs=1e-6)
+
+    def test_duration_cap_unchanged_without_limit(self, bot):
+        bot._linear_acceleration = 0.0   # weder -a noch M → Alt-Verhalten (0,8 s)
+        now = time.monotonic()
+        shot = make_shot(bot, shooter_id=2, shot_id=1,
+                         pos=(300.0, 0.0, 1.025), vel=(-50.0, 0.0, 0.0))
+        bot._setup_dodge(shot, now, 5.0, 0.0)
+        assert bot._dodge_until - now == pytest.approx(0.8, abs=1e-6)
+
+
 class TestLaunchEventsIgnoreRamp:
     """P4-MOV-02b: Sprung-Launches sind KEINE doMomentum-Pfade (der echte doJump übernimmt die
     alte Horizontal-Velocity unverändert). Der Bot setzt die Absprung-Velocity daher bewusst
@@ -1844,6 +1869,46 @@ class TestWingsFeint:
              patch.object(bot, "_get_floor_z", return_value=-1000.0), \
              patch.object(bot, "_is_landed", return_value=False):
             bot._tick_jumping(0.02, now=1000.0)
+        assert bot._wg_feint_target == 99
+        assert bot._wg_feint_phase == 1
+        speed_proj = bot.vel_x * math.cos(bot.azimuth) + bot.vel_y * math.sin(bot.azimuth)
+        assert speed_proj < 0.0
+
+    def test_feint_switch_point_scales_with_tank_length(self, bot):
+        """Audit-Fix: der Umschaltpunkt (proj ≥ _tank_length) folgt der Server-Var, nicht der
+        statischen TANK_LENGTH-Konstante (6.0u). Mit _tank_length=10.0 löst ein Abstand von
+        6.0u (die alte Konstante) noch KEINEN Umschaltpunkt-Check aus — erst bei 10.0u."""
+        bot.own_flag = "WG"
+        bot._tank_length = 10.0
+        bot.pos_x = 26.0; bot.pos_y = 0.0; bot.pos_z = 30.0   # 6u am Gegner vorbei (alte TANK_LENGTH)
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        info = make_player(bot, 99, pos=(20.0, 0.0, 0.0))
+        info.vel = [0.0, 0.0, 0.0]
+        info.azimuth = 0.0   # würde "hat gedreht" ergeben, falls der Umschaltpunkt-Check liefe
+        bot.target_player = 99
+        bot._wg_feint_target = 99
+        bot._wg_feint_phase = 0
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.0)
+        # proj=6.0 < _tank_length=10.0 → Umschaltpunkt noch nicht erreicht, Finte bleibt Phase 0.
+        assert bot._wg_feint_target == 99
+        assert bot._wg_feint_phase == 0
+
+        # Gegenprobe: 10.0u am Gegner vorbei (== neuer _tank_length) → Umschaltpunkt erreicht
+        # (frischer Tick-Aufbau wie test_feint_switch_confirms_when_enemy_faces_bot, nur mit
+        # dem auf 10.0 skalierten Abstand statt der alten TANK_LENGTH=6.0).
+        bot.pos_x = 30.0; bot.pos_y = 0.0; bot.pos_z = 30.0
+        bot.vel_x = bot._tank_speed; bot.vel_y = 0.0; bot.vel_z = -1.0
+        bot.azimuth = 0.0
+        bot._wg_feint_phase = 0
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_get_floor_z", return_value=-1000.0), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_jumping(0.02, now=1000.02)
         assert bot._wg_feint_target == 99
         assert bot._wg_feint_phase == 1
         speed_proj = bot.vel_x * math.cos(bot.azimuth) + bot.vel_y * math.sin(bot.azimuth)
@@ -2416,7 +2481,11 @@ class TestWingsAirborneEvading:
 
     def test_extra_flap_fires_when_falling_and_threat_tight(self, bot):
         """Fallend + Bedrohung auf Kollisionskurs mit knapper Restzeit (< 0.4s) + Luftsprung
-        übrig → zusätzlicher Flap hebt vel_z an, _wings_jumps_used inkrementiert."""
+        übrig → zusätzlicher Flap hebt vel_z an, _wings_jumps_used inkrementiert.
+
+        Audit-Fix-Regression: bewusst UNGEMOCKTE Sprungprüfung (_can_air_jump) bei gesetztem
+        _dodging — mit dem alten _can_jump-Gate war der Notausweg toter Code, weil _dodging
+        im airborne-EVADING immer True ist."""
         bot.own_flag = "WG"
         bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
         bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = -10.0
@@ -2427,22 +2496,22 @@ class TestWingsAirborneEvading:
         bot._dodge_forward = True
         bot._dodge_until = time.monotonic() + 1.0
         bot._wings_jumps_used = 0
+        bot._wings_jump_count = 2   # Server-Var: 1 Luftsprung übrig (Bodensprung zählt mit)
         now = time.monotonic()
         # Schuss knapp vor dem Bot (Höhe = Bot-Höhe, sonst filtert perception.py ihn als
         # Schuss "auf anderer Etage" aus), sehr schnell → time_to_closest ≈ 0.05s (< 0.4s)
         make_shot(bot, shooter_id=2, shot_id=1, pos=(5.0, 0.0, 20.0),
                   vel=(-100.0, 0.0, 0.0), fire_time=now)
         with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
-             patch.object(bot, "_is_landed", return_value=False), \
-             patch.object(bot, "_can_jump", return_value=True):
+             patch.object(bot, "_is_landed", return_value=False):
             bot._tick_committed(0.02, now)
         expected_gravity_only = -10.0 + bot._effective_gravity() * 0.02
         assert bot.vel_z > expected_gravity_only + 1.0   # spürbar angehoben (Flap zusätzlich)
         assert bot._wings_jumps_used == 1
 
-    def test_extra_flap_skipped_without_remaining_jumps(self, bot):
-        """Keine Luftsprünge mehr übrig (_can_jump → False, entspricht
-        _wings_jumps_used >= _wings_jump_count - 1) → kein Flap trotz akuter Bedrohung."""
+    def test_extra_flap_scan_only_on_ai_tick(self, bot):
+        """Perf-Gate: der teure _find_incoming_shot-Scan (und damit der Flap) läuft nur im
+        10-Hz-KI-Raster — ai_tick=False → kein Flap trotz akuter Bedrohung."""
         bot.own_flag = "WG"
         bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
         bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = -10.0
@@ -2453,16 +2522,40 @@ class TestWingsAirborneEvading:
         bot._dodge_forward = True
         bot._dodge_until = time.monotonic() + 1.0
         bot._wings_jumps_used = 0
+        bot._wings_jump_count = 2
         now = time.monotonic()
         make_shot(bot, shooter_id=2, shot_id=1, pos=(5.0, 0.0, 20.0),
                   vel=(-100.0, 0.0, 0.0), fire_time=now)
         with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
-             patch.object(bot, "_is_landed", return_value=False), \
-             patch.object(bot, "_can_jump", return_value=False):
-            bot._tick_committed(0.02, now)
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_committed(0.02, now, ai_tick=False)
         expected_vz = -10.0 + bot._effective_gravity() * 0.02
         assert bot.vel_z == pytest.approx(expected_vz)
         assert bot._wings_jumps_used == 0
+
+    def test_extra_flap_skipped_without_remaining_jumps(self, bot):
+        """Keine Luftsprünge mehr übrig (_wings_jumps_used >= _wings_jump_count - 1,
+        reale _can_air_jump-Prüfung) → kein Flap trotz akuter Bedrohung."""
+        bot.own_flag = "WG"
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 20.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0; bot.vel_z = -10.0
+        bot.azimuth = 0.0
+        bot._jumping = True
+        bot._ai_state = AIState.EVADING
+        bot._dodging = True
+        bot._dodge_forward = True
+        bot._dodge_until = time.monotonic() + 1.0
+        bot._wings_jump_count = 2
+        bot._wings_jumps_used = 1   # == count - 1 → verbraucht
+        now = time.monotonic()
+        make_shot(bot, shooter_id=2, shot_id=1, pos=(5.0, 0.0, 20.0),
+                  vel=(-100.0, 0.0, 0.0), fire_time=now)
+        with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
+             patch.object(bot, "_is_landed", return_value=False):
+            bot._tick_committed(0.02, now)
+        expected_vz = -10.0 + bot._effective_gravity() * 0.02
+        assert bot.vel_z == pytest.approx(expected_vz)
+        assert bot._wings_jumps_used == 1
 
     def test_extra_flap_skipped_when_threat_not_tight(self, bot):
         """Bedrohung vorhanden, aber Restzeit komfortabel (≥ 0.4s) → kein Flap, seitliches
@@ -2477,13 +2570,13 @@ class TestWingsAirborneEvading:
         bot._dodge_forward = True
         bot._dodge_until = time.monotonic() + 1.0
         bot._wings_jumps_used = 0
+        bot._wings_jump_count = 2   # Luftsprung wäre übrig — der Skip kommt vom Threat-Timing
         now = time.monotonic()
         # Schuss weit weg, langsam → time_to_closest deutlich > 0.4s
         make_shot(bot, shooter_id=2, shot_id=1, pos=(300.0, 0.0, 20.0),
                   vel=(-50.0, 0.0, 0.0), fire_time=now)
         with patch.object(bot, "_can_drive_through_obstacles", return_value=True), \
-             patch.object(bot, "_is_landed", return_value=False), \
-             patch.object(bot, "_can_jump", return_value=True):
+             patch.object(bot, "_is_landed", return_value=False):
             bot._tick_committed(0.02, now)
         expected_vz = -10.0 + bot._effective_gravity() * 0.02
         assert bot.vel_z == pytest.approx(expected_vz)

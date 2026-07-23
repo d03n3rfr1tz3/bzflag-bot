@@ -158,7 +158,11 @@ class HandlersMixin(BZBotBase):
         pid      = unpack_uint8( payload, off); off += 1
         ptype    = unpack_uint16(payload, off); off += 2
         team     = unpack_uint16(payload, off); off += 2
-        off += 6
+        # Initiale Punktestände direkt aus MsgAddPlayer (wins/losses/tks) — damit kennt auch
+        # ein spät joinender Bot die Scores vor dem ersten MsgScore-Broadcast (P4-FLG-03-Gate).
+        wins     = unpack_uint16(payload, off); off += 2
+        losses   = unpack_uint16(payload, off); off += 2
+        off += 2   # tks überspringen
         callsign = unpack_string(payload, off, CallSignLen)
         logger.debug("MsgAddPlayer: id=%d type=%d team=%d callsign=%r",
                      pid, ptype, team, callsign)
@@ -176,9 +180,12 @@ class HandlersMixin(BZBotBase):
         is_obs = (team == TEAM_OBSERVER)
         self.players[pid] = PlayerInfo(
             callsign=callsign, team=team,
-            is_human=not is_bot and not is_obs)
+            is_human=not is_bot and not is_obs,
+            wins=wins, losses=losses)
         if pid == self.player_id:
             self.team = team
+            self._own_wins = wins
+            self._own_losses = losses
         if is_obs:
             self.observer_count += 1
             logger.info("[%s] Observer beigetreten: %r (Beobachter: %d)",
@@ -253,6 +260,10 @@ class HandlersMixin(BZBotBase):
             if self.own_flag == "BU":
                 self.pos_z = 0.0
                 self.vel_z = 0.0
+            # P4-FLG-03: Zoned endet mit dem Flaggenverlust (PlayerState: FlagActive ∧ PZ)
+            self.is_phantom_zoned = False
+            self._pz_zoned_gate = None
+            self._pz_target_gate = None
             logger.info("[%s] Flag %r erfolgreich abgelegt", self.callsign, self.own_flag)
             self.own_flag = ""
         elif pid in self.players:
@@ -274,6 +285,10 @@ class HandlersMixin(BZBotBase):
             if self.own_flag == "BU":
                 self.pos_z = 0.0
                 self.vel_z = 0.0
+            # P4-FLG-03: Zoned endet mit dem Flaggenverlust (auch per Thief-Diebstahl)
+            self.is_phantom_zoned = False
+            self._pz_zoned_gate = None
+            self._pz_target_gate = None
             logger.info("[%s] MsgTransferFlag: Flagge '%s' gestohlen → Spieler %d",
                         self.callsign, self.own_flag, to_id)
             self.own_flag = ""
@@ -665,7 +680,9 @@ class HandlersMixin(BZBotBase):
         _shooter_info = self.players.get(shooter)
         # P4-TAC-05: Gegner-Schuss-Slot als belegt vormerken (Ready = fire_time + Reload für das
         # Schützen-Flag AUS DEM PAYLOAD, nicht players[..].flag → kein Race mit späterem Flag-Wechsel).
-        # Kein Wahrnehmungs-Gate: MsgShotBegin kommt zuverlässig per TCP. Eigene Schüsse zählt
+        # Kein Wahrnehmungs-Gate: MsgShotBegin läuft (sobald der UDP-Link aktiv ist) über UDP und
+        # kann verlorengehen — die Slot-Buchhaltung bleibt trotzdem korrekt, weil ein nie gesehener
+        # Slot konservativ als geladen gilt (_enemy_slots_empty). Eigene Schüsse zählt
         # _slot_reload_at separat.
         if _shooter_info is not None and shooter != self.player_id:
             _slot = shot_id & 0xFF
@@ -768,7 +785,8 @@ class HandlersMixin(BZBotBase):
                 s.gm_target_pid  = target
         tank_cz = self.pos_z + self._tank_height / 2
         dist3d  = math.sqrt((px-self.pos_x)**2 + (py-self.pos_y)**2 + (pz-tank_cz)**2)
-        if self.alive and self.player_id is not None and dist3d < HIT_RADIUS:
+        # P4-FLG-03: GM ist ein normaler Schuss — trifft den gezonten Bot nicht.
+        if self.alive and not self.is_phantom_zoned and self.player_id is not None and dist3d < HIT_RADIUS:
             shot_obj = None
             with self._shots_lock:
                 shot_obj = self._shots.get((shooter, shot_id))
@@ -897,6 +915,30 @@ class HandlersMixin(BZBotBase):
         """Rundenende durch Score-Limit oder Admin-/gameover — wie _begin_round_over."""
         winner_id = payload[0] if payload else 255
         self._begin_round_over("MsgScoreOver (winner=%d)" % winner_id)
+
+    def _on_score(self, code: int, payload: bytes) -> None:
+        """Aktualisiert wins/losses aus MsgScore (bzfs sendPlayerScores). Wire-Format: u8 count,
+        dann je Eintrag 7 Byte: u8 playerId, u16 wins, u16 losses, u16 tks (P4-FLG-03-Gate:
+        Score = wins − losses)."""
+        if len(payload) < 1:
+            return
+        off = 0
+        count = unpack_uint8(payload, off); off += 1
+        for _ in range(count):
+            if off + 7 > len(payload):
+                break
+            pid    = unpack_uint8(payload, off);      off += 1
+            wins   = unpack_uint16(payload, off);     off += 2
+            losses = unpack_uint16(payload, off);     off += 2
+            off += 2                                  # tks überspringen
+            if pid == self.player_id:
+                self._own_wins = wins
+                self._own_losses = losses
+            else:
+                info = self.players.get(pid)
+                if info is not None:
+                    info.wins = wins
+                    info.losses = losses
 
     # ── _on_set_var: Dispatch-Tabellen (Track 4/W3) ───────────────────────
     #

@@ -768,3 +768,81 @@ class TestCleanupShots:
         bot._cleanup_shots(now)
         assert key not in bot._shots
         assert key not in bot._ricochet_paths
+
+
+# ── P4-FLG-03: Verwundbarkeits-Regeln des GEZONTEN Bots ──────────────────────
+
+class TestZonedBotHitRules:
+    """Der gezonte Bot (PZ + Tor-Querung) ist nur durch SB, SW und Phantom-Schüsse
+    (Wire-Flag PZ) verwundbar — normale Schüsse, GM, Laser/Thief (Instant-Modell)
+    und Steamroller ignorieren ihn (LocalPlayer::checkHit / playing.cxx isKillable)."""
+
+    @staticmethod
+    def _zone(bot):
+        bot.own_flag = "PZ"
+        bot.is_phantom_zoned = True
+
+    def test_normal_shot_does_not_kill_zoned(self, bot):
+        self._zone(bot)
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        make_shot(bot, pos=(2.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0))
+        _resolve_incoming_shots(bot)
+        assert not _was_killed(bot)
+
+    def test_pz_shot_kills_zoned(self, bot):
+        """Phantom-Schuss trifft den gezonten Bot — _phantom_shot_harmless gilt nur ungezoned."""
+        self._zone(bot)
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        make_shot(bot, pos=(2.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+                  flag_abbr=b"PZ")
+        _resolve_incoming_shots(bot)
+        assert _was_killed(bot)
+
+    def test_sb_shot_kills_zoned(self, bot):
+        self._zone(bot)
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        make_shot(bot, pos=(2.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+                  flag_abbr=b"SB")
+        _resolve_incoming_shots(bot)
+        assert _was_killed(bot)
+
+    def test_sw_kills_zoned(self, bot):
+        self._zone(bot)
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        make_shot(bot, pos=(30.0, 0.0, TANK_CZ), is_sw=True, flag_abbr=b"SW",
+                  fire_time=time.monotonic() - 0.5)
+        _resolve_incoming_shots(bot)
+        assert _was_killed(bot)
+
+    def test_instant_shot_misses_zoned(self, bot):
+        """Laser/Thief (Instant-Modell) sind normale Schüsse → treffen Gezonte nicht."""
+        self._zone(bot)
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        # Strahl exakt durch die Tank-Mitte — ungezoned wäre das ein sicherer Treffer
+        assert bot._instant_shot_hits(2, 1, 50.0, 0.0, TANK_CZ,
+                                      -1000.0, 0.0, 0.0, 0.35) is False
+
+    def test_normal_shot_not_a_threat_for_zoned(self, bot):
+        """Kein Dodge gegen Schüsse, die nicht treffen können."""
+        self._zone(bot)
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        make_shot(bot, pos=(50.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0))
+        shot, t = bot._find_incoming_shot(time.monotonic())
+        assert shot is None and t == float("inf")
+
+    def test_pz_shot_is_threat_for_zoned(self, bot):
+        """Phantom-Schüsse gezonter Gegner bleiben ausweich-relevant."""
+        self._zone(bot)
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.vel_x = 0.0; bot.vel_y = 0.0
+        make_shot(bot, pos=(50.0, 0.0, 1.025), vel=(-100.0, 0.0, 0.0),
+                  flag_abbr=b"PZ")
+        shot, _ = bot._find_incoming_shot(time.monotonic())
+        assert shot is not None
+
+    def test_steamroller_ignores_zoned(self, bot):
+        self._zone(bot)
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        make_player(bot, pid=3, pos=(5.0, 0.0, 0.0), flag="SR")
+        bot._check_steamroller(time.monotonic())
+        assert bot.alive

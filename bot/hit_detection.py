@@ -46,14 +46,20 @@ class HitDetectionMixin(BZBotBase):
         return half_len, half_w, half_h
 
     def _phantom_shot_harmless(self, shot: Shot) -> bool:
-        """True für Phantom-Schüsse: Wire-Flag „PZ" bedeutet, der Schütze war beim
-        Feuern gezoned (sein Client nullt das Flag sonst, ShotPath.cxx:46). Solche
-        Schüsse phasen durch Wände, treffen aber nur ebenfalls gezonede Ziele
-        (LocalPlayer::checkHit: „zoned shots only kill zoned tanks"). Der Bot zoned
-        sich nie selbst (P4-FLG-03 offen) → für ihn sind sie weder Treffer- noch
-        Ausweich-relevant. Bei einer FLG-03-Umsetzung muss hier der eigene
-        Zoned-Status geprüft werden."""
-        return shot.flag_abbr == b"PZ"
+        """True für Phantom-Schüsse, solange der Bot NICHT selbst gezoned ist: Wire-Flag „PZ"
+        bedeutet, der Schütze war beim Feuern gezoned (sein Client nullt das Flag sonst,
+        ShotPath.cxx:46). Solche Schüsse phasen durch Wände, treffen aber nur ebenfalls
+        gezonede Ziele (LocalPlayer::checkHit: „zoned shots only kill zoned tanks") — für den
+        gezonten Bot (P4-FLG-03) sind sie also sehr wohl Treffer- und Ausweich-relevant."""
+        return shot.flag_abbr == b"PZ" and not self.is_phantom_zoned
+
+    def _shot_harmless_to_zoned(self, shot: Shot) -> bool:
+        """True, wenn der GEZONTE Bot diesen Schuss ignorieren kann (P4-FLG-03): normale
+        Schüsse (auch GM/L/MG/F …) treffen gezonede Tanks nicht — tödlich bleiben nur
+        Super Bullet, Shock Wave und Phantom-Schüsse gezonter Gegner (Wire-Flag „PZ")."""
+        if not self.is_phantom_zoned:
+            return False
+        return not (shot.is_sw or shot.flag_abbr in (b"SB", b"PZ"))
 
     def _instant_shot_hits(self, shooter: int, shot_id: int,
                            px: float, py: float, pz: float,
@@ -64,6 +70,8 @@ class HitDetectionMixin(BZBotBase):
         Mit Pfad-Cache: OBB-Test über alle Segmente (Abpraller/Teleporter);
         ohne Cache: Punkt-zu-Strahl-Abstand über die gerade Linie.
         (F9: vorher zwei nahezu identische Blöcke für Laser und Thief.)"""
+        if self.is_phantom_zoned:
+            return False   # L/TH sind normale Schüsse — treffen den gezonten Bot nicht (P4-FLG-03)
         segs = self._ricochet_paths.get((shooter, shot_id))
         if segs:
             half_len, half_w, half_h = self._hitbox_half_dims()
@@ -144,6 +152,9 @@ class HitDetectionMixin(BZBotBase):
                 # Phantom-Schuss (Schütze war gezoned) → kann den ungezoneden Bot
                 # nicht treffen; bleibt bis zum Ablauf in _shots (MsgShotEnd-Buchhaltung).
                 if self._phantom_shot_harmless(shot):
+                    continue
+                # Gezonter Bot (P4-FLG-03): normale Schüsse treffen ihn nicht — nur SB/SW/PZ.
+                if self._shot_harmless_to_zoned(shot):
                     continue
                 if shot.is_sw:
                     if shot.shooter_id == self.player_id:
@@ -340,6 +351,8 @@ class HitDetectionMixin(BZBotBase):
         # list()-Snapshot: players wird im Recv-Thread mutiert (Join/Leave),
         # diese Iteration läuft im Game-Loop → ohne Kopie droht
         # "RuntimeError: dictionary changed size during iteration".
+        if self.is_phantom_zoned:
+            return   # gezoned = nicht überrollbar (playing.cxx isKillable, P4-FLG-03)
         thr = self._effective_tank_radius() * (1.0 + self._sr_radius_mult)  # schleifeninvariant
         for pid, info in list(self.players.items()):
             if not info.alive: continue

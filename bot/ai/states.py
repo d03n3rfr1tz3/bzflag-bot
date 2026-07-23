@@ -18,7 +18,6 @@ from bot.constants import (
     M_REACT_MULTIPLIER,
     CS_REACT_MULTIPLIER,
     COVER_PEEK_BACK_S,
-    TANK_LENGTH,
 )
 from bot.util import _angle_diff, _wrap
 from bot.models import AIState
@@ -51,8 +50,10 @@ class StateMachineMixin(BZBotBase):
         """Realer Boden-State je nach Lage: COMBAT (Ziel + Mensch da), sonst SEEKING/IDLE.
 
         Dient als sicherer Return-State, damit NAV_JUMP/NAV_JUMP_ALIGN nie auf sich selbst
-        „aussteigen" (sonst No-Op-Transition in _transition_to → Endlosfalle)."""
-        if self.target_player is not None and self._has_presence():
+        „aussteigen" (sonst No-Op-Transition in _transition_to → Endlosfalle).
+        P4-FLG-03: aktives PZ-Manöver → SEEKING statt COMBAT (Flucht schlägt Kampf)."""
+        if (self.target_player is not None and self._has_presence()
+                and not self._pz_escape_active()):
             return AIState.COMBAT
         if self._has_presence():
             return AIState.SEEKING
@@ -137,7 +138,7 @@ class StateMachineMixin(BZBotBase):
             return
 
         if self._ai_state in (AIState.EVADING, AIState.JUMP_WINDUP):
-            self._tick_committed(dt, now)
+            self._tick_committed(dt, now, ai_tick)
             return
 
         if self._ai_state == AIState.LANDING_SHOT:
@@ -322,7 +323,8 @@ class StateMachineMixin(BZBotBase):
         Phase 0 (vorwärts, _wg_feint_phase == 0): fliegt mit voller _effective_tank_speed()
         Richtung Gegner, bis er horizontal an ihm vorbei ist — Kriterium: Projektion von
         (bot_pos − enemy_pos) auf die aktuelle Flugrichtung (Einheitsvektor aus vel_x/vel_y,
-        bei Speed≈0 ersatzweise azimuth) ≥ TANK_LENGTH. Am Umschaltpunkt wird die Blickrichtung
+        bei Speed≈0 ersatzweise azimuth) ≥ _tank_length (Server-Var, nicht die statische
+        TANK_LENGTH-Konstante). Am Umschaltpunkt wird die Blickrichtung
         des Gegners GENAU EINMAL geprüft (keine Flatter-Entscheidung pro Tick):
           - Gegner hat sich zum Bot gedreht (< 45° Abweichung) → Finte bestätigt:
             _wg_feint_phase = 1, ab jetzt Phase 1 (rückwärts) bis zur Landung.
@@ -367,7 +369,7 @@ class StateMachineMixin(BZBotBase):
         else:
             fdir_x, fdir_y = math.cos(self.azimuth), math.sin(self.azimuth)
         proj = bx * fdir_x + by * fdir_y
-        if proj < TANK_LENGTH:
+        if proj < self._tank_length:
             self._wings_air_steer(dt, az_to_enemy, self._effective_tank_speed())
             return True
 
@@ -631,7 +633,7 @@ class StateMachineMixin(BZBotBase):
             self.ang_vel = 0.0
             self._transition_to(self._pre_fall_state)
 
-    def _tick_committed(self, dt: float, now: float) -> None:
+    def _tick_committed(self, dt: float, now: float, ai_tick: bool = True) -> None:
         """Führt aktiven Dodge aus. Keine neuen KI-Entscheidungen.
 
         JUMP_WINDUP: kein Abbruch bei Bedrohung. Nur Notschuss möglich,
@@ -674,9 +676,11 @@ class StateMachineMixin(BZBotBase):
                 # Extra-Flap-Notausweg (Plan-Punkt 3, C3): fallend + Luftsprung übrig + Bedrohung
                 # weiterhin akut (vereinfachte time_to_dodge-Analogie aus _handle_threat: statt
                 # der vollen Fahrweg-/Drehzeit-Rechnung genügt ein knapper Restzeit-Schwellwert,
-                # da hier ohnehin schon aktiv gesteuert/gedodged wird). Teurer
-                # _find_incoming_shot-Scan daher erst NACH den billigen vel_z/_can_jump-Gates.
-                if self.vel_z < 0.0 and self._can_jump(now):
+                # da hier ohnehin schon aktiv gesteuert/gedodged wird). Audit-Fix: _can_air_jump
+                # statt _can_jump — dessen _dodging-Gate machte den Notausweg unerreichbar
+                # (_dodging ist im airborne-EVADING immer gesetzt). Teurer _find_incoming_shot-
+                # Scan nur im 10-Hz-KI-Raster (ai_tick) und erst NACH den billigen Gates.
+                if ai_tick and self.vel_z < 0.0 and self._can_air_jump():
                     _threat, _threat_t = self._find_incoming_shot(now)
                     if _threat is not None:
                         _elapsed = 0.0 if _threat.is_gm else max(0.0, now - _threat.fire_time)
@@ -941,6 +945,14 @@ class StateMachineMixin(BZBotBase):
                 self._new_target()
             self._last_pos_check_time = now
             self._last_pos_check = [self.pos_x, self.pos_y]
+        # P4-FLG-03: aktives PZ-Manöver — kein Ziel-Erwerb (Flucht schlägt Kampf), stattdessen
+        # das Zoning-Manöver treiben (Tor wählen/validieren/anfahren). Bedrohungs-Handling
+        # (_handle_threat oben) bleibt davor aktiv: EVADING unterbricht, _ground_state führt
+        # danach hierher zurück.
+        if self._pz_escape_active():
+            self._pz_maneuver_tick(now)
+            self._move_reverse = False
+            return
         self._check_opportunistic_grab(now)
         _prev = self.target_player
         self._validate_and_find_target()

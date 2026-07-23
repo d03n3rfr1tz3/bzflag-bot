@@ -441,3 +441,116 @@ class TestGenocideMultikill:
             if now - bot._last_drop_attempt > 2.0:
                 bot._try_drop_flag()
         bot.client.send.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# P4-FLG-03: PhantomZone-Keep-Gate (_pz_worth_keeping)
+# ---------------------------------------------------------------------------
+
+class TestPhantomZoneKeepGate:
+    """PZ behalten nur wenn Teleporter existieren UND ein Gegner mit mehr Punkten
+    in Radar-Reichweite ist; nie droppen solange gezoned."""
+
+    def _wire_tele_world(self, bot):
+        from bzflag.world_map import TeleporterObstacle
+        t = TeleporterObstacle(name="t0", cx=0.0, cy=0.0, bottom_z=0.0, angle=0.0,
+                               half_w=0.5, half_d=5.0, height=10.0, border=1.0)
+        wm = MagicMock()
+        wm.teleporters = [t]
+        wm.boxes = []
+        bot._world_map = wm
+        bot._link_map = {0: 3, 3: 0}
+
+    def _richer_enemy(self, bot, pid=5, wins=10, losses=0, dist=100.0, flag=""):
+        info = make_player(bot, pid, pos=(dist, 0.0, 0.0), flag=flag)
+        info.wins = wins
+        info.losses = losses
+        return info
+
+    def test_gate_true_with_richer_enemy_and_tele(self, bot):
+        bot.team = 1
+        self._wire_tele_world(bot)
+        self._richer_enemy(bot)
+        assert bot._pz_worth_keeping() is True
+
+    def test_gate_false_without_teleporter(self, bot):
+        bot.team = 1
+        bot._world_map = None
+        self._richer_enemy(bot)
+        assert bot._pz_worth_keeping() is False
+
+    def test_gate_false_when_bot_has_more_points(self, bot):
+        bot.team = 1
+        self._wire_tele_world(bot)
+        bot._own_wins = 20
+        self._richer_enemy(bot, wins=10)   # 10 ≤ 20 → kein Grund zur Flucht
+        assert bot._pz_worth_keeping() is False
+
+    def test_gate_true_on_score_via_losses(self, bot):
+        """Score = wins − losses: Gegner 5−0=5 > Bot 10−8=2 → Gate wahr."""
+        bot.team = 1
+        self._wire_tele_world(bot)
+        bot._own_wins = 10
+        bot._own_losses = 8
+        self._richer_enemy(bot, wins=5, losses=0)
+        assert bot._pz_worth_keeping() is True
+
+    def test_gate_false_enemy_outside_radar_range(self, bot):
+        bot.team = 1
+        self._wire_tele_world(bot)
+        far = bot._effective_radar_range() + 50.0
+        self._richer_enemy(bot, dist=far)
+        assert bot._pz_worth_keeping() is False
+
+    def test_gate_false_stealth_enemy_not_on_radar(self, bot):
+        """ST-Träger ist radar-unsichtbar → zählt nicht fürs Radar-Gate."""
+        bot.team = 1
+        self._wire_tele_world(bot)
+        self._richer_enemy(bot, flag="ST")
+        assert bot._pz_worth_keeping() is False
+
+    def test_gate_false_while_gates_unreachable(self, bot):
+        """Alle Tore unerreichbar (Async-Validierung überall gescheitert) → Gate fällt."""
+        bot.team = 1
+        self._wire_tele_world(bot)
+        self._richer_enemy(bot)
+        bot._pz_unreachable_until = time.monotonic() + 10.0
+        assert bot._pz_worth_keeping() is False
+
+    def test_pz_kept_on_grab_as_good_flag(self, bot):
+        """PZ ist jetzt good (P4-FLG-03) → der Grab-Handler droppt sie nicht sofort."""
+        from bzflag.protocol import MsgGrabFlag
+        payload = struct.pack(">BH", bot.player_id, 0) + b"PZ"
+        bot._on_grab_flag(MsgGrabFlag, payload)
+        assert bot.own_flag == "PZ"
+        assert "PZ" in bot.good_flags
+        bot.client.send.assert_not_called()
+
+    def test_pz_main_loop_drop_when_gate_false_and_not_zoned(self, bot):
+        """Hauptloop-Bedingung (core.py): Gate falsch + nicht gezoned → Drop."""
+        bot.team = 1
+        bot.own_flag = "PZ"
+        bot.is_phantom_zoned = False
+        bot._last_drop_attempt = 0.0
+        now = time.monotonic()
+        with patch.object(bot, "_try_drop_flag") as drop:
+            if (bot.own_flag == "PZ" and not bot.is_phantom_zoned
+                    and not bot._pz_worth_keeping()):
+                if now - bot._last_drop_attempt > 2.0:
+                    bot._try_drop_flag()
+        drop.assert_called_once()
+
+    def test_pz_never_dropped_while_zoned(self, bot):
+        """Solange gezoned wird NICHT gedroppt — auch wenn das Gate gefallen ist
+        (erst regulär am Tor entzonen, Manöver Phase 2)."""
+        bot.team = 1
+        bot.own_flag = "PZ"
+        bot.is_phantom_zoned = True
+        bot._last_drop_attempt = 0.0
+        now = time.monotonic()
+        with patch.object(bot, "_try_drop_flag") as drop:
+            if (bot.own_flag == "PZ" and not bot.is_phantom_zoned
+                    and not bot._pz_worth_keeping()):
+                if now - bot._last_drop_attempt > 2.0:
+                    bot._try_drop_flag()
+        drop.assert_not_called()

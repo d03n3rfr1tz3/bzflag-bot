@@ -415,8 +415,20 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
             if self._debug_log_flag:
                 logger.debug("[%s] Flagge: Ziel-Flag: %s", self.callsign, debug_target_flag)
         self._own_flag_since = 0.0
+        self._own_wins = 0      # aus MsgScore; P4-FLG-03-Gate
+        self._own_losses = 0    # aus MsgScore; P4-FLG-03-Gate
         self._last_drop_attempt = 0.0
         self._drop_bad_flag_delay = 1.0
+        # P4-FLG-03: PhantomZone-Zustand + Manöver (zonen am Tor A, entzonen am Tor B)
+        self.is_phantom_zoned = False        # eigener Zoned-Status (PZ + Tor-Querung togglet)
+        self._pz_zoned_gate = None           # Tor-Index der Zoning-Querung (Selbes-Tor-Drop-Regel)
+        self._pz_target_gate = None          # aktuelles Manöver-Ziel-Tor (Index)
+        self._pz_rezone_block_until = 0.0    # Re-Zone-Cooldown nach dem Entzonen (PZ_REZONE_COOLDOWN)
+        self._pz_unreachable_until = 0.0     # alle Tore unerreichbar → Keep-Gate fällt (Drop)
+        self._pz_failed_gates = {}           # Tor-Index → nicht-vor-Zeit (Validierung gescheitert)
+        self._pz_validate_goal = None        # (cx, cy) der laufenden Async-Erreichbarkeits-Validierung
+        self._pz_validate_result = None      # None = offen, sonst bool (gesetzt in _poll_async_plan)
+        self._pz_validate_deadline = 0.0     # Timeout der Validierung (PZ_PLAN_TIMEOUT_S)
 
         # Flag-Tracking
         self.flags = {}
@@ -507,6 +519,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self.client.add_handler(MsgSetVar,          self._on_set_var)
         self.client.add_handler(MsgSuperKill,             self._on_disconnect)
         self.client.add_handler(MsgScoreOver,             self._on_score_over)
+        self.client.add_handler(MsgScore,                 self._on_score)
         self.client.add_handler(MSG_INTERNAL_DISCONNECT, self._on_disconnect)
         self.client.add_handler(MsgGrabFlag,      self._on_grab_flag)
         self.client.add_handler(MsgDropFlag,      self._on_drop_flag)
@@ -518,7 +531,6 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self.client.add_handler(MsgTimeUpdate,    self._on_time_update)
         self.client.add_handler(MsgNewRabbit,     self._on_new_rabbit)
         for code in (MsgPlayerInfo, MsgTeamUpdate,
-                     MsgScore,
                      MsgHandicap, MsgLagState):
             self.client.add_handler(code, self._ignored)
         self.client.add_handler(MsgMessage, self._on_message)
@@ -616,6 +628,13 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
                 elif self.own_flag == "G" and not self._genocide_multikill_possible():
                     if now - self._last_drop_attempt > 2.0:
                         self._try_drop_flag()
+                elif (self.own_flag == "PZ" and not self.is_phantom_zoned
+                        and not self._pz_worth_keeping()):
+                    # P4-FLG-03-Gate gefallen (kein Teleporter/kein reicherer Gegner in Radar-
+                    # Reichweite/Tore unerreichbar) → abgeben. NIE solange gezoned: erst regulär
+                    # am Tor entzonen (Manöver Phase 2), sonst bliebe der Zustand regelwidrig.
+                    if now - self._last_drop_attempt > 2.0:
+                        self._try_drop_flag()
             elif now < self._exploding_until:
                 self._tick_explosion(dt_r)   # Explosions-Bogen (tot); gatet implizit den Respawn
             elif not self._game_over and self._round_over_until is None and self.death_time is not None:
@@ -676,7 +695,11 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
             status = PS_EXPLODING | (PS_FALLING if falling else 0)
             vel, ang_vel = (self.vel_x, self.vel_y, self.vel_z), 0.0
         elif self.alive:
-            status = PS_ALIVE | (PS_FALLING if falling else 0) | (PS_FLAG_ACTIVE if self.own_flag else 0)
+            # PS_FLAG_ACTIVE bei PZ nur wenn wirklich gezoned — Gegner-Clients lesen genau dieses
+            # Bit als „zoned" (is_phantom_zoned in _on_player_update); sonst würde sich der Bot
+            # fälschlich unverwundbar broadcasten (P4-FLG-03).
+            _flag_active = bool(self.own_flag) and (self.own_flag != "PZ" or self.is_phantom_zoned)
+            status = PS_ALIVE | (PS_FALLING if falling else 0) | (PS_FLAG_ACTIVE if _flag_active else 0)
             if time.monotonic() < self._teleporting_until:
                 status |= PS_TELEPORTING   # P3-NAV-02: laufender Teleport
             if self._crossing_wall():
@@ -721,6 +744,13 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         # abbrechen und ihr Ergebnis invalidieren (P4-INF-01).
         self._async_cancel.set()
         self._plan_gen += 1
+        # P4-FLG-03: Zoned endet mit dem Flaggenverlust beim Tod — Robustheits-Reset auch hier
+        # (deckt Pfade ab, auf denen kein MsgDropFlag ankam, z.B. Rundenende/Resync).
+        self.is_phantom_zoned = False
+        self._pz_zoned_gate = None
+        self._pz_target_gate = None
+        self._pz_validate_goal = None
+        self._pz_validate_result = None
         logger.info("[%s] Sende MsgAlive (Spawn-Anfrage)", self.callsign)
         self._spawn_sent_at = time.monotonic()
         self.client.send(MsgAlive, b"")

@@ -88,14 +88,24 @@ class CapabilityMixin(BZBotBase):
         if self._debug_no_jump:   return False
         if self._dodging:                             return False
         if self._jumping:
-            if self.own_flag != "WG":                return False
-            return self._wings_jumps_used < self._wings_jump_count - 1
+            return self._can_air_jump()
         if not self._is_landed():                     return False
         if self.own_flag in ("NJ", "BU"):            return False
         if not self._server_jumping and self.own_flag not in ("WG", "BY", "JP"):
             return False
         if now - self._last_jump_at < JUMP_COOLDOWN: return False
         return True
+
+    def _can_air_jump(self) -> bool:
+        """WG-Luftsprung (Extra-Flap) verfügbar? Bewusst OHNE das _dodging-Gate von _can_jump:
+        der EVADING-Notausweg (P4-MOV-03c) läuft mitten im Dodge — _setup_dodge setzt _dodging,
+        der Reset kommt erst im Boden-Pfad von _tick_committed, also wäre der Extra-Flap über
+        _can_jump nie erreichbar. Kein JUMP_COOLDOWN airborne (deckungsgleich zum bisherigen
+        _jumping-Zweig von _can_jump; doJump zählt airborne nur wingsFlapCount)."""
+        if self._debug_no_jump:   return False
+        if not self._jumping:     return False
+        if self.own_flag != "WG": return False
+        return self._wings_jumps_used < self._wings_jump_count - 1
 
     def _can_move_forward(self)  -> bool: return self.own_flag != "RO"
 
@@ -141,7 +151,11 @@ class CapabilityMixin(BZBotBase):
     def _own_flag_bytes(self) -> bytes:
         """2-Byte-Wire-Encoding der eigenen Flagge (Protokoll-FlagAbbr mit
         Null-Padding; keine Flagge → b'\\x00\\x00'). F9: einzige Quelle —
-        vorher 6× inline dupliziert."""
+        vorher 6× inline dupliziert. PZ nur wenn gezoned: der echte Client
+        nullt das Flag im Schuss sonst (ShotPath.cxx:46) — das Wire-Flag „PZ"
+        BEDEUTET „Schütze war beim Feuern gezoned" (P4-FLG-03)."""
+        if self.own_flag == "PZ" and not self.is_phantom_zoned:
+            return b'\x00\x00'
         return (self.own_flag.encode('ascii') + b'\x00\x00')[:2]
 
     def _effective_shot_speed(self) -> float:
@@ -354,8 +368,11 @@ class CapabilityMixin(BZBotBase):
         return self._presence
 
     def _can_drive_through_obstacles(self) -> bool:
-        """True wenn Bot mit aktueller Flagge durch Hindernisse fahren darf (OO u.a.)."""
-        return self.own_flag in ("OO",)
+        """True wenn Bot mit aktueller Flagge durch Hindernisse fahren darf: OO — oder gezoned
+        (PZ + P4-FLG-03): der gezonte Tank phast durch Gebäude; die Navigation nutzt dann den
+        Direktziel-Pfad (_plan_path) statt A*. Entzont wird ausschließlich an Teleporter-Feldern
+        (nie im Gebäudeinneren), ein Drop ist solange zoned gesperrt — kein Feststecken."""
+        return self.own_flag == "OO" or (self.own_flag == "PZ" and self.is_phantom_zoned)
 
     def _has_teleporters(self) -> bool:
         """True wenn die Karte Teleporter hat (→ indirekte Schüsse auch ohne Ricochet möglich)."""
