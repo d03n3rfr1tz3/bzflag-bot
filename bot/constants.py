@@ -218,14 +218,19 @@ ST_GM_PENALTY: Final = 4.0   # ST-Spieler bei GM: 4× schlechtere Priorität (ke
 # nicht mehr (Deckungskante). Statt blind in den offenen Kampf zu fahren, hält er im State
 # COVER_HOLD kurz und peekt gelegentlich. Kein aktives Anfahren, keine Pfadplanung.
 COVER_EDGE_PROBE_DIST: Final = TANK_LENGTH   # Kanten-Probe: 1 Tanklänge voraus (6u)
-COVER_HOLD_MAX_S: Final = 10.0   # max. Haltezeit, bewusst großzügig — nur Notausgang. P4-TAC-05
-                                 # ergänzt später den klugen früheren Ausgang ("Gegner-Slots leer"),
-                                 # dieser Timeout bleibt als Fallback bestehen.
+COVER_HOLD_MAX_S: Final = 10.0   # max. Haltezeit als Fallback-Notausgang. Der kluge frühe Ausgang
+                                 # ("Gegner-Slots leer", P4-TAC-05) greift meist deutlich vorher.
 COVER_HOLD_COOLDOWN_S: Final = 2.5   # Sperre gegen sofortigen Wieder-Eintritt (Hysterese gegen Oszillation)
 COVER_PEEK_CHANCE: Final = 0.15   # Peek-Wahrscheinlichkeit pro AI-Tick (10 Hz) im Halten
 COVER_PEEK_OUT_S: Final = 0.25   # kurz vorfahren …
 COVER_PEEK_BACK_S: Final = 0.40   # … und sofort rückwärts zurück (länger = sicher wieder hinter der Kante)
 COVER_MAX_RANGE_FACTOR: Final = 1.0   # Halten nur, wenn Gegner < _shot_range * Faktor entfernt
+# P4-TAC-05: das Gegner-Nachlade-Fenster muss mind. so groß sein, um Ausbruch/Angriff aus der
+# Deckung zu rechtfertigen (sonst lohnt sich das Herauskommen nicht).
+COVER_BREAKOUT_MIN_WINDOW_S: Final = 1.2
+# Zu-nah-Exit: kommt der Gegner näher als optimale Distanz × Faktor, regelt COMBAT wieder Abstand.
+COVER_CLOSE_EXIT_FRAC: Final = 0.5
+RICO_AIM_MAX_COVER: Final = 90   # breiterer Abpraller-Sweep (°) in Deckung — im Stand ist Zeit dafür
 
 # ── Wahrnehmung ───────────────────────────────────────────────────────────
 AHEAD_HALF_ANGLE: Final = math.pi / 2  # ±90° — Geometrie „liegt vor mir" (kein Sicht-FoV, s. _is_ahead)
@@ -334,6 +339,7 @@ __all__ = [
     'IB_REACT_MULTIPLIER', 'M_REACT_MULTIPLIER', 'CS_REACT_MULTIPLIER', 'ST_GM_PENALTY',
     'COVER_EDGE_PROBE_DIST', 'COVER_HOLD_MAX_S', 'COVER_HOLD_COOLDOWN_S', 'COVER_PEEK_CHANCE',
     'COVER_PEEK_OUT_S', 'COVER_PEEK_BACK_S', 'COVER_MAX_RANGE_FACTOR',
+    'COVER_BREAKOUT_MIN_WINDOW_S', 'COVER_CLOSE_EXIT_FRAC', 'RICO_AIM_MAX_COVER',
     'AHEAD_HALF_ANGLE', 'RADAR_SKIP_DEFAULT', 'RADAR_SKIP_CL', 'RADAR_COOLDOWN_DEFAULT',
     'RADAR_COOLDOWN_CL', 'PLAYER_LOS_TTL_S', 'ENEMY_STALE_S', 'PAUSE_WAIT_S', 'RADAR_RANGE',
     'TARGET_FOV', 'WIDE_ANGLE_ANG', 'SMALL_SCALE', 'SMALL_MAX_DIST', 'SMALL_MAX_VEL',

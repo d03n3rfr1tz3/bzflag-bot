@@ -76,6 +76,11 @@ class PlayerInfo:
     is_phantom_zoned: bool = False
     paused:     bool  = False  # aus MsgPause: pausiert = unverwundbar, nicht beschießen
     last_teleport: Optional[Tuple[float, int, int]] = None  # (zeit, from_face, to_face), letzter Teleport
+    slot_reload_at: List[float] = field(default_factory=list)
+    # P4-TAC-05: Ready-Zeitpunkt (monotonic) je Schuss-Slot dieses Gegners; Index = shot_id & 0xFF.
+    # Befüllt in _on_shot_begin, Reset auf [] bei Tod/Respawn. Konvention: leere Liste bzw. ein
+    # fehlender Index = Slot gilt als GELADEN (konservativ — ein nie gesehener Schuss heißt nicht,
+    # dass der Slot leer ist).
 
 
 @dataclass

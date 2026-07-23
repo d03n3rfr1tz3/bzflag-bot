@@ -298,6 +298,8 @@ class BZBotBase:
         raise NotImplementedError
     def _cover_edge_ahead(self, pid: int, now: float=0.0) -> bool:
         raise NotImplementedError
+    def _cover_hold_aim_az(self, pid: int, ep) -> float:
+        raise NotImplementedError
     def _cover_silhouette_blocked(self, ex: float, ey: float, oz: float, cx: float, cy: float, cz: float) -> bool:
         raise NotImplementedError
     def _covered_from(self, pid: int, now: float=0.0) -> bool:
@@ -332,6 +334,10 @@ class BZBotBase:
         raise NotImplementedError
     def _effective_turn_rate(self) -> float:
         raise NotImplementedError
+    def _enemy_next_slot_ready_in(self, info, now: float) -> float:
+        raise NotImplementedError
+    def _enemy_slots_empty(self, info, now: float) -> bool:
+        raise NotImplementedError
     def _enemy_visible_radar(self, info) -> bool:
         raise NotImplementedError
     def _enemy_visible_window(self, info) -> bool:
@@ -341,6 +347,8 @@ class BZBotBase:
     def _execute_jump(self) -> None:
         raise NotImplementedError
     def _find_incoming_shot(self, now: float, bot_vel=None):
+        raise NotImplementedError
+    def _find_ricochet_aim_angle(self, target_pid: int, predicted_pos: Optional[Tuple[float, float]]=None, aim_max_deg: int=45) -> Optional[float]:
         raise NotImplementedError
     def _find_target_player(self):
         raise NotImplementedError
@@ -399,6 +407,8 @@ class BZBotBase:
     def _recompute_gm_min_range(self) -> None:
         raise NotImplementedError
     def _recompute_presence(self) -> None:
+        raise NotImplementedError
+    def _reload_time_for_flag(self, flag: str) -> float:
         raise NotImplementedError
     def _report_killed(self, shot: Shot) -> None:
         raise NotImplementedError

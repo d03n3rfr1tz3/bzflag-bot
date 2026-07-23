@@ -94,13 +94,38 @@ class CapabilityMixin(BZBotBase):
 
     def _can_turn_right(self)    -> bool: return self.own_flag != "LT"
 
-    def _effective_reload_time(self) -> float:
-        """Reload-Zeit je nach aktiver Flagge."""
-        if self.own_flag == "MG":
+    def _reload_time_for_flag(self, flag: str) -> float:
+        """Reload-Zeit für ein gegebenes Flag (MG/F beschleunigen). Für die eigene Flagge UND für
+        Gegner-Schüsse (P4-TAC-05, Schützen-Flag aus dem Shot-Payload). Hinweis: _laser_ad_rate wird
+        als Server-Var getrackt, aber — wie schon im bisherigen _effective_reload_time — bewusst NICHT
+        in die Reload-Zeit einbezogen (vorbestehende Lücke, s. DEVELOPER.md)."""
+        if flag == "MG":
             return self._reload_time / max(self._mgun_ad_rate, 1.0)
-        if self.own_flag == "F":
+        if flag == "F":
             return self._reload_time / max(self._rfire_ad_rate, 1.0)
         return self._reload_time
+
+    def _effective_reload_time(self) -> float:
+        """Reload-Zeit je nach aktiver eigener Flagge."""
+        return self._reload_time_for_flag(self.own_flag)
+
+    def _enemy_slots_empty(self, info, now: float) -> bool:
+        """True, wenn ALLE Schuss-Slots des Gegners im Cooldown sind (leergeschossen). Ein nie
+        gesehener/fehlender Slot (len < _max_shots) gilt als geladen → False (P4-TAC-05, konservativ)."""
+        slots = info.slot_reload_at
+        n = max(self._max_shots, 1)
+        if len(slots) < n:
+            return False
+        return all(t > now for t in slots[:n])
+
+    def _enemy_next_slot_ready_in(self, info, now: float) -> float:
+        """Sekunden, bis der erste Gegner-Slot wieder bereit ist (0.0, wenn bereits einer frei bzw.
+        ein Slot nie gesehen wurde) — das Ausbruchs-/Peek-Fenster für COVER_HOLD (P4-TAC-05)."""
+        slots = info.slot_reload_at
+        n = max(self._max_shots, 1)
+        if len(slots) < n:
+            return 0.0
+        return max(0.0, min(slots[:n]) - now)
 
     def _own_flag_bytes(self) -> bytes:
         """2-Byte-Wire-Encoding der eigenen Flagge (Protokoll-FlagAbbr mit
