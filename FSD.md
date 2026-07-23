@@ -389,6 +389,8 @@ Taktische und infrastrukturelle Verbesserungen ohne harte Produktionsrelevanz.
 | P4-TAC-05 | Gegner-Schuss-Slots tracken und passend aus der Deckung kommen (Peek-/Ausbruch-Timing in COVER_HOLD) | ✅ | P4-TAC-02 |
 | P4-TAC-06 | Landing-Shot nicht ausführen, wenn Landung > eigener Z | ✅ | — |
 | P4-TAC-07 | Landing-Shot eher ausführen, wenn Landung < eigener Z | ✅ | — |
+| P4-TAC-08 | Kontrolliertes Verlassen der Deckung: kurzer, halb-verbindlicher Ausbruch mit Schuss (COVER_END) statt Rückfall in den normalen Kampf — verzögert, bis die noch fliegenden Schüsse des Gegners die Ausbruchsstelle passiert haben | 📋 | P4-TAC-05 |
+| P4-TAC-09 | Bedrohungsreaktion in Deckung: durch die Deckung blockierte Schüsse lösen kein Ausweichen aus; ein Ausweichsprung nur, wenn er den Bot nicht aus der Deckung heraushebt | 📋 | P4-TAC-02 |
 
 **Performance / Infrastruktur (P4-INF)**
 

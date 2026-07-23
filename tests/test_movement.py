@@ -1092,15 +1092,15 @@ class TestEarlyAdvance:
         assert bot._nav_path == [(10.0, 0.0, 0.0)]
 
     def test_no_early_advance_when_next_beyond_horizon(self, bot):
-        """Nächster WP jenseits des Horizonts (>16u) → altes Verhalten, kein Skip."""
+        """Nächster WP jenseits des Horizonts (>40u) → altes Verhalten, kein Skip."""
         _build_nav(bot, [])
         bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
         bot.azimuth = 0.0
         bot.target_pos = (10.0, 0.0)
-        bot._nav_path = [(10.0, 0.0, 0.0), (30.0, 0.0, 0.0)]   # bot→next = 30u > 16u
+        bot._nav_path = [(10.0, 0.0, 0.0), (50.0, 0.0, 0.0)]   # bot→next = 50u > 40u
         bot._wp_start_time = None
         bot._move_to_target(0.02, bot.world_half)
-        assert bot._nav_path == [(10.0, 0.0, 0.0), (30.0, 0.0, 0.0)]
+        assert bot._nav_path == [(10.0, 0.0, 0.0), (50.0, 0.0, 0.0)]
 
     def test_no_early_advance_over_platform_edge(self, bot):
         """Beide WPs auf gleicher Plattform-Höhe (z=10), aber die gerade Abkürzung führt über die
