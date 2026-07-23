@@ -47,6 +47,12 @@ class BZBotBase:
     _burrow_speed_ad: Any
     _combat_avoid: dict
     _connection_lost: bool
+    # P4-TAC-02: float-Zeitstempel bleiben `Any` (boxed) — float in @trait-Basis crasht mypyc
+    # (ValueError in emitfunc.get_attr_expr, s. DEVELOPER.md Sektion 12).
+    _cover_cooldown_until: Any
+    _cover_hold_until: Any
+    _cover_peek_phase: int
+    _cover_peek_until: Any
     _debug_log_dodge: bool
     _debug_log_flag: bool
     _debug_log_path: bool
@@ -290,6 +296,12 @@ class BZBotBase:
         raise NotImplementedError
     def _corridor_no_dropoff(self, ex: float, ey: float, ref_z: float) -> bool:
         raise NotImplementedError
+    def _cover_edge_ahead(self, pid: int, now: float=0.0) -> bool:
+        raise NotImplementedError
+    def _cover_silhouette_blocked(self, ex: float, ey: float, oz: float, cx: float, cy: float, cz: float) -> bool:
+        raise NotImplementedError
+    def _covered_from(self, pid: int, now: float=0.0) -> bool:
+        raise NotImplementedError
     def _cross_floor_indirect(self, info) -> bool:
         raise NotImplementedError
     def _effective_fov(self) -> float:
@@ -408,6 +420,8 @@ class BZBotBase:
         raise NotImplementedError
     def _should_early_advance(self) -> bool:
         raise NotImplementedError
+    def _should_hold_in_cover(self, now: float) -> bool:
+        raise NotImplementedError
     def _should_reverse_to_wp(self) -> bool:
         raise NotImplementedError
     def _should_update_player(self, info, px: float, py: float, pz: float, now: float) -> bool:
@@ -423,6 +437,8 @@ class BZBotBase:
     def _threat_unseen(self, shooter) -> bool:
         raise NotImplementedError
     def _tick_combat(self, now: float) -> None:
+        raise NotImplementedError
+    def _tick_cover_hold(self, now: float) -> None:
         raise NotImplementedError
     def _transition_to(self, state: AIState) -> None:
         raise NotImplementedError

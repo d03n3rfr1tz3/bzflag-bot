@@ -1843,13 +1843,40 @@ halbe Weltgröße wäre zu großzügig; Wert beim Umsetzen festlegen) — oder p
 (`MsgNearFlag`) bzw. eigenem Grab/Drop. Einmal Gewusstes bleibt gemerkt; Invalidierung bei
 Flag-Reset (Status 0; via `_maxFlagGrabs` kann die Flagge Ort und Typ wechseln).
 
-**P4-TAC-05 → P4-TAC-02 — Schuss-Slots & Deckung.** Slot eines Fremdschusses =
+**P4-TAC-02 — Deckung hinter Gebäuden (umgesetzt).** Bewusst schlank: KEIN aktives
+Deckung-Anfahren, KEINE Pfadplanung (Kämpfe laufen zumeist im Direktmodus). Der Bot erkennt
+nur, dass er *jetzt* in Deckung steht, eine Tanklänge in Bewegungsrichtung aber nicht mehr
+(Deckungskante), und hält dann kurz defensiv im neuen State `COVER_HOLD`, statt offen
+anzugreifen. Design-Entscheidungen:
+- **Silhouetten- statt Zentrumstest** (`_covered_from`, `bot/ai/perception.py`): geprüft werden
+  die zwei Ränder ±`TANK_HALF_DIAG` senkrecht zur Linie Schütze→Bot, nicht die Tank-Mitte —
+  sonst gilt eine „herausschauende Nase" fälschlich als gedeckt. Ursprung ist die
+  Gegner-**Mündungshöhe** (`info.pos[2] + MUZZLE_HEIGHT`, Schuss- statt Sichtlinie); ein
+  springender Gegner schießt so über niedrige Boxen (Airborne-Fall). Alles über
+  `_segment_clear` (freier Ursprung, z-Slab, DDA-Broadphase) — kein neuer Raycast-Code.
+- **Kanten-Probe** (`_cover_edge_ahead`): derselbe Silhouetten-Test an einem Punkt eine
+  Tanklänge (`COVER_EDGE_PROBE_DIST`) voraus. Probe-Richtung ist die *effektive*
+  Bewegungsrichtung (Geschwindigkeitsvektor, sonst Azimut) — beim Wall-Slide zeigt der Azimut
+  gewollt leicht in die Wand, daher lenkt die Wand-Tangente aus `_steep_wall_ahead_raycast`
+  (jetzt mit `min_steep_deg`-Parameter, für die Probe `0.0` → jede Wand zählt) die Probe entlang
+  der tatsächlichen Schleif-Richtung. Beide Prädikate sind per-Tick memoized.
+- **State `COVER_HOLD`** (`bot/ai/states.py`, `bot/ai/combat.py`): Eingang aus COMBAT über
+  `_should_hold_in_cover` (Direktmodus via `not _nav_path`; A*-Nav nie unterbrochen). 10-Hz-Tick
+  `_tick_cover_hold` (Dodge behält Vorrang), 60-Hz-Ausführung im Dispatch (Vortrieb 0, auf Ziel
+  drehen, Peek-Zyklus). Peek = kurz vorfahren (`COVER_PEEK_OUT_S`) und sofort rückwärts zurück
+  (`COVER_PEEK_BACK_S`); Schießen läuft ohnehin global (`_maybe_shoot`, feuert beim freien
+  Mündungs-/LoS-Fenster). Hysterese über `COVER_HOLD_COOLDOWN_S`, Scope nur auf `target_player`.
+  Ausnahmen: SB (durchschlägt Wände) / SW (radial) → nie halten; GM (Deckung bricht Lock) →
+  erwünscht. Ricochet um die Deckung herum bleibt bewusst der Dodge-Kaskade (`_ricochet_paths`)
+  überlassen.
+- **TAC-05-Einstöpselstelle:** `COVER_HOLD_MAX_S` (10 s) ist nur ein großzügiger Notausgang.
+  Der klugе, frühe Ausgang („Gegner-Schuss-Slots leer → jetzt raus und angreifen") gehört zu
+  P4-TAC-05 und wird in `_should_hold_in_cover` (Eingang) sowie den Timeout-Zweig von
+  `_tick_cover_hold` (Ausgang) eingehängt.
+
+**P4-TAC-05 — Gegner-Schuss-Slots (offen, hängt an TAC-02).** Slot eines Fremdschusses =
 `shot_id & 0xFF`; `maxShots`/`_reloadTime` sind serverweit bekannt, `MsgShotBegin` kommt
 zuverlässig per TCP → per-Gegner-Slot-Cooldowns als neues Feld an `PlayerInfo`, befüllt in
-`_on_shot_begin` (Flag-Modifikatoren des Gegners analog `_effective_reload_time`). Der Wert
-liegt im Peek-Timing für die Deckung (TAC-02): „beide Slots gerade leergeschossen → ~3 s
-Fenster zum Rauskommen". Für TAC-02 existieren die Geometrie-Primitive bereits
-(`_segment_clear`, LoS-Ray-Grid `query_ray`, `query_segment`, Punkt-Sampler in
-`bot/ai/combat.py`); offene Verhaltensfragen: Hysterese gegen Deckung↔Angriff-Oszillation,
-Scope auf die stärkste Bedrohung, Ausnahmen SB (durchschlägt Wände) / SW (radial) / GM
-(Deckung bricht den Lock).
+`_on_shot_begin` (Flag-Modifikatoren des Gegners analog `_effective_reload_time`). Nutzen: das
+Peek-/Ausbruch-Timing im bestehenden `COVER_HOLD` — „beide Slots gerade leergeschossen → ~3 s
+Fenster zum Rauskommen" ersetzt bzw. verkürzt den `COVER_HOLD_MAX_S`-Notausgang (s. o.).

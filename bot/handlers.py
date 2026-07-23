@@ -337,6 +337,8 @@ class HandlersMixin(BZBotBase):
         self._landing_second_shot_at = None
         self._rico_aim_cache      = None
         self._indirect_hold_until = None
+        self._cover_peek_phase    = 0     # P4-TAC-02: Peek-Zyklus beim Spawn zurücksetzen
+        self._cover_cooldown_until = 0.0
         with self._shots_lock:
             self._shots.clear()
             self._ricochet_paths.clear()
