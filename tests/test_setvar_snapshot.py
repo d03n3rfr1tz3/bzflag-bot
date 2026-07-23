@@ -79,7 +79,6 @@ SIMPLE_FLOAT_VARS = [
     ("_tinyFactor",        "_tiny_factor",        0.5),
     ("_thiefTinyFactor",   "_thief_tiny_factor",  0.6),
     ("_thiefVelAd",        "_thief_vel_ad",       1.9),
-    ("_narrowHW",          "_narrow_hw",          0.4),
     # W3/F8: Nachführung neu ergänzt (vorher rechnete der Steamroller-Radius
     # immer mit dem 0.8-Default)
     ("_srRadiusMult",      "_sr_radius_mult",     1.2),
@@ -164,7 +163,6 @@ class TestSetVarSnapshot:
         ("_shotSpeed",   "_shot_speed",   0.0),
         ("_gmTurnAngle", "_gm_turn_angle", -1.0),
         ("_shockInRadius", "_shock_in_radius", -1.0),  # >= 0 verlangt
-        ("_narrowHW",    "_narrow_hw",    -0.1),
     ])
     def test_guard_rejects_value(self, bot, var, attr, bad):  # noqa: F811
         before = getattr(bot, attr)

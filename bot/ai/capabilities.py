@@ -6,7 +6,8 @@ from bot.constants import (
     TANK_WIDTH,
     TANK_RADIUS_FACTOR,
     _TINY_FACTOR,
-    _NARROW_HW,
+    NARROW_FACTOR,
+    MIN_HITBOX_DIM,
     OPTIMAL_RANGE,
     OPTIMAL_RANGE_MG,
     OPTIMAL_RANGE_SW,
@@ -28,11 +29,13 @@ class CapabilityMixin(BZBotBase):
     """Mixin für BZBot — Methoden unverändert aus bzbot_ai.py verschoben (Track 4/W4)."""
 
     def _effective_half_width(self) -> float:
-        """Aktuelle Tank-Halbbreite je nach Flagge (T/N verkleinern den Tank)."""
+        """Aktuelle Tank-Halbbreite je nach Flagge (T/N verkleinern den Tank).
+        N nutzt NARROW_FACTOR (wie die Hitbox in _hitbox_half_dims), auf MIN_HITBOX_DIM
+        gefloort — eine einzige Narrow-Breiten-Quelle für Treffer und Navigation."""
         if self.own_flag == "T":
             return (TANK_WIDTH / 2.0) * _TINY_FACTOR
         if self.own_flag == "N":
-            return _NARROW_HW
+            return max((TANK_WIDTH / 2.0) * NARROW_FACTOR, MIN_HITBOX_DIM / 2.0)
         return TANK_WIDTH / 2.0
 
     def _effective_hit_radius(self) -> float:

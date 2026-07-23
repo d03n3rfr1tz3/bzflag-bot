@@ -1031,7 +1031,6 @@ class HandlersMixin(BZBotBase):
         "_lockOnAngle":      ("_lock_on_angle",      float, ">0",  "%.4f", None),
         "_obeseFactor":      ("_obese_factor",       float, ">0",  "%.2f", None),
         "_tinyFactor":       ("_tiny_factor",        float, ">0",  "%.3f", None),
-        "_narrowHW":         ("_narrow_hw",          float, ">=0", "%.3f", None),
         "_thiefTinyFactor":  ("_thief_tiny_factor",  float, ">0",  "%.3f", None),
         "_thiefVelAd":       ("_thief_vel_ad",       float, ">0",  "%.3f", None),
         "_thiefAdShotVel":   ("_thief_ad_shot_vel",  float, ">0",  "%.1f", None),

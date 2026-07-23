@@ -93,7 +93,11 @@ THIEF_AD_SHOT_VEL: Final = 8.0    # TH-Flagge: Schussgeschwindigkeit-Multiplikat
 THIEF_AD_LIFE: Final = 0.05   # TH-Flagge: Schuss-Lifetime in Sekunden (via MsgSetVar _thiefAdLife)
                              # ↔ self._thief_ad_life
 THIEF_AD_RANGE: Final = 120.0  # TH-Flagge: Reichweite (HIX hw=30→60u Gebäude × 2)
-_NARROW_HW: Final = 0.30   # N-Flagge: reduzierte Halbbreite ↔ _narrowHW ↔ self._narrow_hw
+NARROW_FACTOR: Final = 0.1   # N-Flagge: Breiten-Faktor auf _tank_width (analog _tinyFactor);
+                             # kein Server-Var (_narrowHW existiert in bzfs nicht). Der
+                             # MIN_HITBOX_DIM-Floor hebt das auf servertaugliche Mindestbreite.
+MIN_HITBOX_DIM: Final = 1.0  # Mindest-(Voll-)Dimension der Treffer-/Fahr-Hitbox in u: keine
+                             # Flagge darf eine Tank-Dimension unter diesen Wert verkleinern.
 SR_RADIUS_MULT: Final = 0.8    # ↔ _srRadiusMult ↔ self._sr_radius_mult
 
 # ── Schuss-Typ-Multiplikatoren (via _on_set_var überschreibbar) ───────────
@@ -328,8 +332,8 @@ FLAG_NAME_TO_ABBR: dict[str, str] = {
     "Blue Team": "B*",              "Purple Team": "P*",
 }
 
-# Alles GROSSGESCHRIEBENE exportieren — inkl. der historisch _-präfixierten
-# _TINY_FACTOR/_NARROW_HW (str.isupper ignoriert Unterstriche), die `import *`
+# Alles GROSSGESCHRIEBENE exportieren — inkl. des historisch _-präfixierten
+# _TINY_FACTOR (str.isupper ignoriert Unterstriche), das `import *`
 # sonst überspringen würde. NAV_CELL_SIZE wird bewusst mit re-exportiert.
 # STATISCHE Liste (früher dynamisch via `[_n for _n in globals() if _n.isupper()]`):
 # mypy/mypyc können ein dynamisch berechnetes __all__ nicht auswerten, wodurch
@@ -347,7 +351,7 @@ __all__ = [
     'VELOCITY_AD', 'AGILITY_AD_VEL', 'LG_GRAVITY', 'BURROW_DEPTH', 'BURROW_SPEED_AD',
     'BURROW_ANG_AD', 'ANGULAR_AD', 'SHIELD_FLIGHT', 'IDENTIFY_RANGE', 'OBESITY_FACTOR',
     '_TINY_FACTOR', 'THIEF_TINY_FACTOR', 'THIEF_VEL_AD', 'THIEF_AD_SHOT_VEL', 'THIEF_AD_LIFE',
-    'THIEF_AD_RANGE', '_NARROW_HW', 'SR_RADIUS_MULT', 'MGUN_AD_RATE', 'MGUN_AD_LIFE',
+    'THIEF_AD_RANGE', 'NARROW_FACTOR', 'MIN_HITBOX_DIM', 'SR_RADIUS_MULT', 'MGUN_AD_RATE', 'MGUN_AD_LIFE',
     'MGUN_AD_VEL', 'RFIRE_AD_RATE', 'RFIRE_AD_VEL', 'RFIRE_AD_LIFE', 'LASER_AD_VEL',
     'LASER_AD_RATE', 'LASER_AD_LIFE', 'UPDATE_RATE_HZ', 'SERVER_UPDATE_RATE_HZ', 'AI_RATE_HZ',
     'SHOOT_INTERVAL_RANDOM_MAX', 'MIN_BURST_INTERVAL', 'GM_BURST_INTERVAL',

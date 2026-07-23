@@ -123,7 +123,6 @@ class BZBotBase:
     _move_reverse: bool
     _muzzle_front: Any
     _muzzle_height: Any
-    _narrow_hw: Any
     _nav_goal: Any
     _nav_goal_z: Any
     _nav_graph: Any

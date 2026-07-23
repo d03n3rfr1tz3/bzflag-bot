@@ -73,7 +73,6 @@ from bot.constants import (
     THIEF_VEL_AD,
     THIEF_AD_SHOT_VEL,
     THIEF_AD_LIFE,
-    _NARROW_HW,
     SR_RADIUS_MULT,
 
     MGUN_AD_RATE,
@@ -263,7 +262,6 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._thief_vel_ad       = THIEF_VEL_AD        # via MsgSetVar _thiefVelAd
         self._thief_ad_shot_vel  = THIEF_AD_SHOT_VEL   # via MsgSetVar _thiefAdShotVel
         self._thief_ad_life      = THIEF_AD_LIFE        # via MsgSetVar _thiefAdLife
-        self._narrow_hw          = _NARROW_HW          # via MsgSetVar _narrowHW
         self._angular_ad      = ANGULAR_AD
         self._shield_flight   = SHIELD_FLIGHT
         self._identify_range  = IDENTIFY_RANGE
