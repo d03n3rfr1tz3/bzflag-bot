@@ -1895,3 +1895,79 @@ Slot gilt **geladen** (konservativ — ein nie gesehener Schuss heißt nicht lee
 Fenster ≥ `COVER_BREAKOUT_MIN_WINDOW_S` → gar nicht verstecken), **Ausgang** (`_tick_cover_hold`:
 zusätzlich eigener Slot bereit → früh raus, vor dem `COVER_HOLD_MAX_S`-Notausgang), **Peek-Gate**
 (leerer Gegner → kein Peek, der Ausbruchszweig übernimmt).
+
+**P4-TAC-08/09 — Kontrolliertes Verlassen der Deckung (geplant, noch nicht umgesetzt).** Der
+Live-Test von TAC-02/05 zeigt zwei Schwächen beim *Ausbruch*: (1) `_tick_cover_hold` verlässt die
+Deckung, sobald der Gegner leergeschossen ist — genau die Schüsse, die ihn geleert haben, sind aber
+noch unterwegs, `_handle_threat` schlägt an und schickt den Bot nach EVADING (tolerierbar) oder
+DODGE_JUMP (der Bot springt aus der Deckung und wird zum leichten Ziel). (2) Danach übernimmt
+COMBAT — ist die Optimaldistanz schon erreicht, hält `_execute_combat_move` die Position und der
+Bot bleibt schlicht hinter der Deckung stehen, der Ausbruch verpufft. Verschärfend: der
+**Direkt-Zweig von `_find_incoming_shot` prüft keine Wand-Occlusion**; einen wandtreuen Pfad-Cache
+(`_ricochet_paths`) bekommen Schüsse nur bei Server-Ricochet oder vorhandenen Teleportern
+(`_on_shot_begin`) — ohne beides gilt ein Schuss, der in die Deckungswand einschlägt, weiterhin als
+Bedrohung.
+
+- **Warten gehört nach COVER_HOLD, nicht in den neuen State.** Der kluge Ausbruchszweig
+  (Slot-leer + Fenster + eigener Slot bereit) transitioniert künftig nach `COVER_END` statt in den
+  Boden-State — aber erst, wenn kein Gegner-Schuss mehr an der Ausbruchsstelle vorbeikommt. In der
+  Deckung zu warten ist gratis, deshalb braucht COVER_END keine Warte-Phase. Prüf-Prädikat ist das
+  vorhandene `_find_incoming_shot(now)` (Direkt- **und** Rico-Zweig; liefert `None`, sobald jeder
+  Schuss seinen Punkt kleinster Annäherung passiert hat). Umsetzung als Nachlauf-Zeitstempel:
+  solange ein Schuss gefunden wird `_cover_breakout_at = now + COVER_END_CLEAR_MARGIN_S`, Ausbruch
+  erst bei `now >= _cover_breakout_at` — der Nachlauf deckt ab, dass die Ausbruchsstelle 1–2
+  Tanklängen vor der aktuellen Position liegt. Kosten: ein zusätzlicher Scan im 10-Hz-Tick, dank
+  N2-Early-Out (`if not self._shots`) im Normalfall gratis. Der Notausgang `COVER_HOLD_MAX_S` und
+  alle „Deckung ungültig"-Ausgänge (Ziel tot/weg/pausiert, SB/SW, außer Reichweite, Zu-nah-Exit,
+  `not _covered_from`) bleiben unverändert und gehen direkt in den Boden-State — nur der *kluge*
+  Ausbruch läuft über COVER_END, damit die Wartebedingung COVER_HOLD nicht blockieren kann.
+- **`COVER_END` ist halb-verbindlich.** Im State wird `_enemy_slots_empty` /
+  `_enemy_next_slot_ready_in` **nicht mehr nachgeprüft**: lädt der Gegner mitten im Ausbruch nach,
+  braucht sein Schuss auf Distanz trotzdem Flugzeit. Die Lücke muss nur groß genug sein, um kurz
+  herauszukommen und zu schießen; danach übernimmt der normale Kampf (Ausweichen), und der eigene
+  Schuss hat bereits Druck aufgebaut (der Gegner muss ggf. selbst ausweichen). Zeitdeckel
+  `COVER_END_MAX_S`.
+- **Ausbruchsrichtung einmalig** (passend zum Commitment): Kandidaten sind die beiden Vorzeichen
+  der Wand-Tangente aus `_steep_wall_ahead_raycast(az, COVER_EDGE_PROBE_DIST, 0.0)` — dieselbe
+  Quelle, die `_cover_edge_ahead` schon für den Wall-Slide nutzt. Bewertet wird je Kandidat ein
+  Probe-Punkt `COVER_END_STEP_DIST` voraus: bevorzugt die Seite, an der
+  `_cover_silhouette_blocked` **nicht mehr** blockt (dort öffnet sich die Schusslinie). Ohne
+  Tangente oder wenn keine Seite aufklärt: Azimut direkt zum Gegner.
+- **Ausführung zweiphasig**, weil BZFlag-Panzer nur entlang ihres Azimuts fahren (Fahr- und
+  Zielrichtung sind dieselbe Achse): Phase 0 dreht auf die Ausbruchsrichtung und fährt mit vollem
+  `_tank_speed` (nicht die 0.6 des Peeks — der Ausbruch soll schnell sein), bis LoS steht oder
+  `COVER_END_STEP_DIST` zurückgelegt ist; Phase 1 stoppt und dreht auf den Gegner. Gefeuert wird
+  nicht im State: `_maybe_shoot` läuft global in jedem Tick (nur Z_ATTACK/LANDING_SHOT sind
+  ausgenommen) und schießt, sobald Aim-, Mündungs- und LoS-Gate passen; „Schuss abgegeben" ist
+  billig daran erkennbar, dass `_next_slot_ready(now)` von `True` auf `False` kippt. Ausgänge:
+  Bedrohung zuerst, Ziel tot/weg → Boden-State, Schuss abgegeben oder Zeitdeckel → COMBAT; **bei
+  jedem Ausgang** `_cover_cooldown_until` setzen (der Bot steht noch an der Kante, sonst greift
+  `_should_hold_in_cover` sofort wieder → Oszillation). Stolperfalle wie bei TAC-02:
+  `AIState.COVER_END` muss in **beide** Tupel in `_dispatch_movement` — `_GROUND_STATES` und die
+  60-Hz-Bewegungs-Ausschlussliste; fehlt Letzteres, fährt der Eintritts-Tick noch einmal durch
+  `_move_to_target`.
+- **Springen bleibt erlaubt — nur nicht aus der Deckung heraus (TAC-09).** Kein pauschales
+  Sprungverbot: gegen Abpraller, die um die Deckung herumkommen, ist der Dodge-Sprung legitim. Das
+  Kriterium ist rein **vertikal**, denn DODGE_JUMP behält die Horizontalgeschwindigkeit bei und in
+  COVER_HOLD steht der Bot ohnehin (`vel ≈ 0`) — der Sprung hebt ihn also nur *über* die Deckung.
+  Neues, per-Tick memoiziertes Prädikat `_jump_stays_covered(pid)`: steht der Bot ohnehin frei
+  (`not _covered_from`) → `True` (nichts zu verlieren), sonst `_cover_silhouette_blocked` mit
+  angehobenem `cz` (`pos_z + _effective_jump_height() + _muzzle_height`, Ursprung weiter die
+  Gegner-Mündung) — bewertet wird der Scheitel als schlechtester Punkt des Bogens. Angebunden über
+  `_handle_threat(now, cover_pid=…)` statt eines `allow_jump`-Flags, damit das Prädikat **lazy**
+  erst im Sprung-Zweig ausgewertet wird; ist es falsch, fällt der Tick in den vorhandenen
+  Notschuss-Zweig durch. Bewusste Grenze: niedrige Deckung (Kiste, halbhohe Wand) → kein Sprung;
+  hohe Deckung (Gebäudeecke) → Sprung erlaubt. In COVER_END trägt ein Sprung den Bot ohnehin nach
+  draußen, was dort gewollt ist — das Prädikat liefert dann über `_covered_from == False`
+  automatisch `True`.
+- **Blockierte Schüsse zählen in Deckung nicht (TAC-09).** In den Cover-States wird ein Schuss
+  ignoriert, dessen Weg zum Bot durch die Deckung blockiert ist: ein `_segment_clear` von der
+  Schussposition am Punkt kleinster Annäherung (`position_at`) zum Tank-Zentrum. Bewusst **lokal**
+  in den Cover-States statt global in `_find_incoming_shot` — das hält Perf und die bestehende
+  Dodge-Kaskade unverändert. Für Rico-/Tele-Schüsse ist der Segment-Zweig bereits wandtreu; die
+  Prüfung zielt auf den Direkt-Zweig, wo sie fehlt.
+- **Neue Konstanten/Felder für die Umsetzung:** `COVER_END_MAX_S`, `COVER_END_CLEAR_MARGIN_S`,
+  `COVER_END_STEP_DIST` (in `__all__` aufnehmen); Instanz-Felder `_cover_breakout_at`,
+  `_cover_end_until`, `_cover_end_dir`, `_cover_end_phase` in `core.py`, in `_bot_base.py`
+  deklariert (float-Felder als `Any`, s. Sektion 12) und beim Respawn zurückgesetzt wie
+  `_cover_peek_phase`.
