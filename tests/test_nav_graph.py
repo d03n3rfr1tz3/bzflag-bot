@@ -14,7 +14,7 @@ import pytest
 from bzflag.world_map import BoxObstacle, WorldMap
 from bzflag.nav_graph import (
     NavGraph, FloorLayer, CELL_SIZE, TANK_MARGIN, TANK_HEIGHT, THIN_WALL_MARGIN,
-    JUMP_EDGE_TOL, get_nav_graph,
+    JUMP_EDGE_TOL, NAV_RUNUP_MAX, get_nav_graph,
     _mark_blocked, _nearest_walkable, _smooth_path, _clip_to_footprint, _h,
     _segment_crosses_thin_obs, _obstacle_blocks_layer, _margin_for,
     _insert_jump_runups, _runup_crosses_thin_wall,
@@ -1332,17 +1332,39 @@ class TestJumpEdgeOriginatesAtPlatformEdge:
 # Run-up-Einfügung: VOR der Absprungzelle + Thin-Wall-Guard
 # ---------------------------------------------------------------------------
 
+class FakeLayer:
+    """Minimaler FloorLayer-Stub für _insert_jump_runups: standardmäßig überall begehbar;
+    ``blocked`` (Liste aus (xmin,xmax,ymin,ymax)) markiert optional Sperrzonen (dicke
+    Obstacles, die real über is_walkable_xy blockieren würden)."""
+    def __init__(self, blocked=None):
+        self._blocked = blocked or []
+
+    def contains_xy(self, x, y):
+        return True
+
+    def is_walkable_xy(self, x, y):
+        return not any(xmin <= x <= xmax and ymin <= y <= ymax
+                       for xmin, xmax, ymin, ymax in self._blocked)
+
+
 class TestRunupInsertion:
     """Der Run-up-WP muss VOR der Absprungzelle liegen (Bot erreicht sie ausgerichtet und
-    springt von dort ab), und darf keine dünne Wand kreuzen."""
+    springt von dort ab), darf keine dünne Wand kreuzen und keine unbegehbare Fläche treffen.
+    P4-MOV-02c: die Anlauflänge skaliert mit der effektiven Beschleunigungsgrenze
+    (lin_accel_eff), gekappt auf NAV_RUNUP_MAX, mit Fallback-Leiter bis CELL_SIZE."""
 
     class _FakeNav:
-        """Minimaler NavGraph-Stub für _insert_jump_runups (flacher Boden, keine Obstacles)."""
-        def __init__(self, obs=None):
+        """Minimaler NavGraph-Stub für _insert_jump_runups (flacher Boden, ein Layer)."""
+        def __init__(self, obs=None, blocked=None):
             self._obs = obs or []
             self._tele_exit_wps = set()   # keine Teleporter im Stub
+            self._v0 = 19.0
+            self._g = 9.8
+            self.layers = [FakeLayer(blocked)]
         def get_floor_z(self, x, y, z, overhang=0.0):
             return 0.0
+        def find_layer_at(self, x, y, z):
+            return 0
 
     def test_runup_inserted_before_launch_cell(self):
         # Pfad auf z=0 bis zur Absprungzelle (20,0), dann Sprung-rauf auf z=15 bei (40,0).
@@ -1380,6 +1402,91 @@ class TestRunupInsertion:
         assert _runup_crosses_thin_wall(nav, 0.0, 0.0, 0.0, 6.0, 0.0, 20.0, 0.0) is True
         # Segmente vollständig rechts der Wand → False
         assert _runup_crosses_thin_wall(nav, 0.0, 12.0, 0.0, 16.0, 0.0, 20.0, 0.0) is False
+
+    def _jump_idx(self, out):
+        return next(i for i in range(1, len(out)) if out[i][2] - out[i - 1][2] > 1.5)
+
+    def test_runup_length_scales_with_accel(self):
+        # Langer, flacher Sprung (jlen=100, dz=2.0) treibt calc über tank_speed(25) → gekappt auf
+        # target_speed=25 → runup_target = 25²/(2·20) = 15.625 (> CELL_SIZE, < NAV_RUNUP_MAX).
+        path = [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0), (120.0, 0.0, 2.0)]
+        out = _insert_jump_runups(path, self._FakeNav(), tank_speed=25.0, lin_accel_eff=20.0)
+        jump_idx = self._jump_idx(out)
+        launch, runup = out[jump_idx - 1], out[jump_idx - 2]
+        dist = math.hypot(runup[0] - launch[0], runup[1] - launch[1])
+        assert dist == pytest.approx(25.0 * 25.0 / (2.0 * 20.0), abs=0.01)
+        assert dist > CELL_SIZE
+
+    def test_runup_capped_at_max(self):
+        # Gleiche Geometrie, sehr kleine Beschleunigung → Ziel-Anlauf weit über NAV_RUNUP_MAX,
+        # wird auf NAV_RUNUP_MAX gekappt.
+        path = [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0), (120.0, 0.0, 2.0)]
+        out = _insert_jump_runups(path, self._FakeNav(), tank_speed=25.0, lin_accel_eff=0.5)
+        jump_idx = self._jump_idx(out)
+        launch, runup = out[jump_idx - 1], out[jump_idx - 2]
+        dist = math.hypot(runup[0] - launch[0], runup[1] - launch[1])
+        assert dist == pytest.approx(NAV_RUNUP_MAX, abs=0.01)
+
+    def test_runup_falls_back_to_shorter_distance_when_long_target_blocked(self):
+        # accel=25 → runup_target=12.5 (Kandidatenleiter 12.5, 8.5, 4.5, 4.0). pred liegt weit
+        # abseits in y (0,100), damit die Dünnwand nur die runup→launch-Strecke des VOLL-Targets
+        # (rx=7.5) trifft, nicht die kürzeren Kandidaten.
+        wall = _make_box(cx=9.5, cy=0.0, bz=0.0, hw=0.5, hd=0.3, height=5.0)
+        nav = self._FakeNav(obs=[wall])
+        path = [(0.0, 100.0, 0.0), (20.0, 0.0, 0.0), (120.0, 0.0, 2.0)]
+        out = _insert_jump_runups(path, nav, tank_speed=25.0, lin_accel_eff=25.0)
+        jump_idx = self._jump_idx(out)
+        runup = out[jump_idx - 2]
+        assert abs(runup[0] - 11.5) < 0.01, "Voll-Target (rx=7.5) blockiert → Fallback auf 8.5u (rx=11.5)"
+
+    def test_runup_rejected_by_thick_obstacle_at_full_target(self):
+        # Wie oben, aber via Walkability-Gate: dickes Obstacle (kein Dünnwand-Treffer) sperrt die
+        # Voll-Target-Zelle über den FakeLayer-Stub → Fallback auf den nächstkürzeren Kandidaten.
+        nav = self._FakeNav(blocked=[(7.0, 8.0, -1.0, 1.0)])
+        path = [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0), (120.0, 0.0, 2.0)]
+        out = _insert_jump_runups(path, nav, tank_speed=25.0, lin_accel_eff=25.0)
+        jump_idx = self._jump_idx(out)
+        runup = out[jump_idx - 2]
+        assert abs(runup[0] - 11.5) < 0.01, "Voll-Target (rx=7.5) non-walkable → Fallback auf 8.5u (rx=11.5)"
+
+    def test_runup_unlimited_accel_matches_legacy(self):
+        # None und 0.0 verhalten sich identisch zum Alt-Verhalten (einzelner CELL_SIZE-Kandidat).
+        path = [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0), (40.0, 0.0, 15.0)]
+        nav = self._FakeNav()
+        for accel in (None, 0.0):
+            out = _insert_jump_runups(path, nav, tank_speed=25.0, lin_accel_eff=accel)
+            jump_idx = self._jump_idx(out)
+            launch, runup = out[jump_idx - 1], out[jump_idx - 2]
+            assert abs(runup[0] - (launch[0] - CELL_SIZE)) < 0.01
+
+
+class TestRunupIntegration:
+    """Integrationstest über die echte plan_path()-Pipeline (Muster von
+    TestJumpEdgeOriginatesAtPlatformEdge): lin_accel_eff verlängert den Run-up-WP messbar über
+    CELL_SIZE hinaus; ohne den Parameter bleibt exakt das Alt-Verhalten (CELL_SIZE)."""
+
+    def _setup(self):
+        base = _make_box(cx=0.0, cy=0.0, bz=0.0, hw=20.0, hd=20.0, height=15.0)
+        wm = _make_world(boxes=[base], world_half=100.0)
+        return NavGraph(wm, max_jump_h=18.4)
+
+    @staticmethod
+    def _runup_dist(path):
+        jump_idx = next(i for i in range(1, len(path)) if path[i][2] - path[i - 1][2] > 1.5)
+        launch, runup = path[jump_idx - 1], path[jump_idx - 2]
+        return math.hypot(runup[0] - launch[0], runup[1] - launch[1])
+
+    def test_runup_exact_cell_size_without_lin_accel_eff(self):
+        nav = self._setup()
+        path = nav.plan_path(-30.0, 0.0, 0.0, 0.0, 0.0, goal_z=15.0)
+        assert path
+        assert self._runup_dist(path) == pytest.approx(CELL_SIZE, abs=0.01)
+
+    def test_runup_longer_than_cell_size_with_lin_accel_eff(self):
+        nav = self._setup()
+        path = nav.plan_path(-30.0, 0.0, 0.0, 0.0, 0.0, goal_z=15.0, lin_accel_eff=2.0)
+        assert path
+        assert self._runup_dist(path) > CELL_SIZE + 1.0
 
 
 # ---------------------------------------------------------------------------

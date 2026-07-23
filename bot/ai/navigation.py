@@ -439,11 +439,12 @@ class NavigationMixin(BZBotBase):
         # Reisegeschwindigkeit einmal snapshotten (Flaggen-Boost → weitere Sprünge planbar,
         # deckungsgleich zum reaktiven Executor). Plain-Value → reentrant an Sync- und Async-Plan.
         ts = self._travel_tank_speed()
+        eff_accel = self._eff_linear_accel()
         t0 = time.perf_counter()
         path = nav.plan_path(sx, sy, sz, goal_x, goal_y,
                              blocked_jump_wps=blocked, goal_z=goal_z,
                              label="Schnellplan", partial_level=logging.DEBUG,
-                             tank_speed=ts)
+                             tank_speed=ts, lin_accel_eff=eff_accel)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         if self._debug_log_path:
             logger.debug("[%s] Pfad: %d WPs von (%.0f,%.0f) → (%.0f,%.0f) [%.0fms]%s",
@@ -454,7 +455,8 @@ class NavigationMixin(BZBotBase):
         # nachschieben — sie übernimmt später, falls sie eine bessere Route findet (P4-INF-01).
         if elapsed_ms > NAV_ASYNC_TRIGGER_MS:
             self._submit_async_plan(sx, sy, sz, goal_x, goal_y, goal_z,
-                                    blocked, cap_wps, self._plan_gen, tank_speed=ts)
+                                    blocked, cap_wps, self._plan_gen, tank_speed=ts,
+                                    lin_accel_eff=eff_accel)
 
     def _apply_planned_path(self, path, goal_x: float, goal_y: float,
                             cap_wps: int | None = None) -> None:
@@ -490,7 +492,8 @@ class NavigationMixin(BZBotBase):
     def _submit_async_plan(self, sx: float, sy: float, sz: float,
                            goal_x: float, goal_y: float, goal_z: float | None,
                            blocked: set, cap_wps: int | None, gen: int,
-                           tank_speed: float | None = None) -> None:
+                           tank_speed: float | None = None,
+                           lin_accel_eff: float | None = None) -> None:
         """Startet (höchstens einen) Hintergrund-Thread mit großen A*-Limits (P4-INF-01).
 
         Der NavGraph ist reentrant; der Worker bekommt nur Plain-Value-Snapshots und liest nie
@@ -515,7 +518,7 @@ class NavigationMixin(BZBotBase):
                                   max_expansions=NAV_ASYNC_MAX_EXPANSIONS,
                                   max_ms=NAV_ASYNC_MAX_MS, cancel=cancel,
                                   label="Vollsuche", partial_level=logging.INFO,
-                                  tank_speed=tank_speed)
+                                  tank_speed=tank_speed, lin_accel_eff=lin_accel_eff)
             except Exception:
                 logger.exception("[%s] Async-Pfadplanung fehlgeschlagen", self.callsign)
                 p = None

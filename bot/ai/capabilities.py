@@ -5,7 +5,6 @@ import math
 from bot.constants import (
     TANK_WIDTH,
     TANK_RADIUS_FACTOR,
-    TANK_RADIUS,
     _TINY_FACTOR,
     _NARROW_HW,
     OPTIMAL_RANGE,
@@ -14,6 +13,8 @@ from bot.constants import (
     OPTIMAL_RANGE_GM,
     JUMP_COOLDOWN,
     MOMENTUM_LIN_ACC_FACTOR,
+    FLAG_GRAB_RADIUS,
+    FLAG_GRAB_MARGIN,
 )
 from bot.util import _wrap
 
@@ -41,11 +42,19 @@ class CapabilityMixin(BZBotBase):
         if self.own_flag == "O":   scale = self._obese_factor
         elif self.own_flag == "T": scale = _TINY_FACTOR
         else:                       scale = 1.0
-        return TANK_RADIUS * scale * 0.99
+        return self._effective_tank_radius() * scale * 0.99
 
     def _effective_tank_radius(self) -> float:
         """Aktueller Tank-Radius aus der nachgeführten Server-Variable (_tankRadius = 0.72 * _tankLength)."""
         return TANK_RADIUS_FACTOR * self._tank_length
+
+    def _flag_grab_radius(self) -> float:
+        """Grab-Anfahrtsradius: Parität zum bisherigen FLAG_GRAB_RADIUS auf Default-Servern,
+        skaliert mit _tankLength/_flagRadius nach oben; max() → nie schlechter als heute.
+        Weit unter der bzfs-Toleranz (tankSpeed+tankRadius+flagRadius, Lag-Puffer) —
+        bewusst NICHT ausgereizt (menschlich-plausibel bleiben)."""
+        return max(FLAG_GRAB_RADIUS,
+                   self._effective_tank_radius() + self._flag_radius + FLAG_GRAB_MARGIN)
 
     def _effective_optimal_range(self) -> float:
         """Optimale Kampfdistanz je nach eigener Flagge UND Gegner-Flagge.
@@ -245,6 +254,15 @@ class CapabilityMixin(BZBotBase):
         if self.own_flag == "M":
             return (self._momentum_lin_acc, self._momentum_ang_acc)
         return (self._linear_acceleration, self._angular_acceleration)
+
+    def _eff_linear_accel(self) -> float:
+        """Effektive lineare Beschleunigungsgrenze (bereits mit MOMENTUM_LIN_ACC_FACTOR gefaltet,
+        0.0 = unbegrenzt) — dieselbe Klemme wie _ramp_linear_speed. Für die Sprung-Anlauf-
+        Längenplanung (P4-MOV-02c, nav.plan_path(lin_accel_eff=…))."""
+        lin_acc = self._accel_limits()[0]
+        if lin_acc <= 0.0:
+            return 0.0
+        return MOMENTUM_LIN_ACC_FACTOR * lin_acc
 
     def _ramp_toward(self, current: float, target: float, max_delta: float) -> float:
         """Klemmt target auf [current-max_delta, current+max_delta]."""

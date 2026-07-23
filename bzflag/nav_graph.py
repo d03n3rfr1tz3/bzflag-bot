@@ -49,6 +49,9 @@ JUMP_EDGE_TOL: Final = 1.4          # = TANK_WIDTH/2: zulässiger Überhang des 
                              # nur ein Pixel seiner Hitbox aufliegt — der Mittelpunkt darf also um
                              # bis zu eine halbe Tankbreite über die Kante hinausragen. Gilt für den
                              # Absprung (Überhang am Quellrand) wie für die Landung (Front-Catch).
+NAV_RUNUP_MAX: Final = CELL_SIZE * 4.0  # 16.0u — Obergrenze Anlauf; deckt M-Default (15,6u) mit
+                             # Marge; bei extrem niedrigem -a kappen statt Route auszuufern
+                             # (Unterschwingen fängt der Landing-Wrong-Layer-Replan in _tick_nav_jump).
 MAX_ROOF_H: Final = 55.0          # Maximale Dach-Höhe für Roof-Layer (≈ 3 × max_jump_h)
 _ASTAR_WEIGHT: Final = 1.5          # Weighted/Epsilon-optimal A*: 2–4× schneller, max. 50% suboptimal
 NAV_JUMP_UP_PENALTY: Final = 150.0  # Sicherheits-Aufschlag auf Sprung-hoch-Kanten NUR auf Teleporter-Karten:
@@ -396,19 +399,23 @@ class NavGraph:
         blocked_jump_wps=None, goal_z: float | None = None,
         max_expansions: int | None = None, max_ms: float | None = None,
         cancel=None, label: str = "A*", partial_level: int = logging.WARNING,
-        tank_speed: float | None = None,
+        tank_speed: float | None = None, lin_accel_eff: float | None = None,
     ) -> List[Tuple[float, float, float]]:
         """
         A*-Pfadsuche von (sx,sy,sz) nach (gx,gy).
         Rückgabe: Liste von (wx, wy, layer_z)-Wegpunkten oder [].
 
-        Reentrant: ``blocked_jump_wps``, ``max_expansions``, ``max_ms``, ``cancel`` und
-        ``tank_speed`` werden als lokale Parameter durch ``_astar`` gereicht — kein geteilter
-        Mutable-Zustand auf ``self``. So können Haupt- und Hintergrund-Thread denselben gecachten
-        Graph parallel beplanen (P4-INF-01). ``cancel`` ist ein Objekt mit ``.is_set()`` (z.B.
-        threading.Event). ``tank_speed`` (None → Basis ``self._tank_speed`` 25.0) ist die
-        horizontale Sprung-Reisegeschwindigkeit; höher (Velocity/Thief) ⇒ weitere Sprünge machbar,
-        deckungsgleich zum reaktiven Executor (bot/ai/capabilities._travel_tank_speed).
+        Reentrant: ``blocked_jump_wps``, ``max_expansions``, ``max_ms``, ``cancel``,
+        ``tank_speed`` und ``lin_accel_eff`` werden als lokale Parameter durch ``_astar``/
+        ``_insert_jump_runups`` gereicht — kein geteilter Mutable-Zustand auf ``self``. So können
+        Haupt- und Hintergrund-Thread denselben gecachten Graph parallel beplanen (P4-INF-01).
+        ``cancel`` ist ein Objekt mit ``.is_set()`` (z.B. threading.Event). ``tank_speed`` (None →
+        Basis ``self._tank_speed`` 25.0) ist die horizontale Sprung-Reisegeschwindigkeit; höher
+        (Velocity/Thief) ⇒ weitere Sprünge machbar, deckungsgleich zum reaktiven Executor
+        (bot/ai/capabilities._travel_tank_speed). ``lin_accel_eff`` (None/0.0 → unbegrenzt) ist die
+        effektive lineare Beschleunigungsgrenze (bot/ai/capabilities._eff_linear_accel) und bemisst
+        NUR die Länge des Sprung-Anlauf-Wegpunkts (P4-MOV-02c) — ändert NICHT ``_vn_cache`` oder
+        die Sprungkanten-Feasibility.
         """
         bjw = blocked_jump_wps or frozenset()
         # Start-Knoten
@@ -513,8 +520,9 @@ class NavGraph:
             prev_z, prev_wx, prev_wy = layer.z, wx, wy
             prev_node = (lid, ix, iy)
 
-        return _insert_jump_runups(
-            _smooth_path(waypoints, self._thin_blocked, keep_idx), self)
+        ts_final = self._tank_speed if tank_speed is None else tank_speed
+        return _insert_jump_runups(_smooth_path(waypoints, self._thin_blocked, keep_idx),
+                                   self, ts_final, lin_accel_eff)
 
     # ── A* ────────────────────────────────────────────────────────────────
 
@@ -1349,14 +1357,24 @@ def _runup_crosses_thin_wall(
 
 
 def _insert_jump_runups(
-    path: List[Tuple[float, float, float]], nav: "NavGraph"
+    path: List[Tuple[float, float, float]], nav: "NavGraph",
+    tank_speed: float = 25.0, lin_accel_eff: float | None = None,
 ) -> List[Tuple[float, float, float]]:
     """Fügt vor jeder Absprungzelle (Höhenwechsel) einen Run-up-WP ein.
 
-    Der Run-up-WP liegt CELL_SIZE hinter der Absprungzelle in Sprungrichtung und wird VOR ihr in
-    den Pfad eingefügt. Dadurch erreicht der Bot die Absprungzelle bereits in Sprungrichtung
-    ausgerichtet und springt von dort ab (nicht vom Run-up dahinter) — er muss am Absprung weder
-    drehen noch zurücksetzen.
+    Der Run-up-WP liegt in Sprungrichtung vor der Absprungzelle und wird VOR ihr in den Pfad
+    eingefügt. Dadurch erreicht der Bot die Absprungzelle bereits in Sprungrichtung ausgerichtet
+    und springt von dort ab (nicht vom Run-up dahinter) — er muss am Absprung weder drehen noch
+    zurücksetzen.
+
+    Anlauflänge (P4-MOV-02c): ohne Beschleunigungslimit (``lin_accel_eff`` None/≤0.0 = unbegrenzt,
+    z.B. ohne -a und ohne M-Flag) liegt die Absprung-Geschwindigkeit instant an → CELL_SIZE reicht
+    (Alt-Verhalten). Mit Limit (-a bzw. M-Flag) braucht der Bot v²/(2·accel) Anlauf, um die für den
+    Sprung nötige Ziel-Geschwindigkeit (Formel wie ``_initiate_nav_jump``) zu erreichen — gekappt
+    auf ``NAV_RUNUP_MAX``. Fallback-Leiter von der Ziel-Länge abwärts (in CELL_SIZE-Schritten) bis
+    exakt CELL_SIZE: der erste Kandidat, dessen Boden auf Absprunghöhe liegt, dessen Layer ihn als
+    walkable meldet und dessen Anfahrt/Absprung keine dünne Wand kreuzt, wird eingefügt. Bemisst
+    NUR die Anlauf-Distanz — ändert NICHT ``_vn_cache`` oder die Sprungkanten-Feasibility.
     """
     if len(path) < 2:
         return path
@@ -1373,13 +1391,41 @@ def _insert_jump_runups(
             if jlen > 0.1:
                 jdx /= jlen
                 jdy /= jlen
-                rx = prev[0] - jdx * CELL_SIZE
-                ry = prev[1] - jdy * CELL_SIZE
                 pred = result[-2]               # WP vor der Absprungzelle (Anfahrt)
-                fz = nav.get_floor_z(rx, ry, prev[2] + 1.0)
-                if abs(fz - prev[2]) < 1.0 and not _runup_crosses_thin_wall(
-                        nav, prev[2], pred[0], pred[1], rx, ry, prev[0], prev[1]):
-                    # VOR der Absprungzelle einfügen (Bot fährt pred → runup → Absprung → Sprung)
-                    result.insert(len(result) - 1, (rx, ry, prev[2]))
+                r_layer = nav.layers[nav.find_layer_at(prev[0], prev[1], prev[2])]
+
+                # Ziel-Anlauflänge: v²/(2·accel), gekappt auf [CELL_SIZE, NAV_RUNUP_MAX]. Ohne
+                # Limit (None/≤0.0) bleibt es beim Alt-Verhalten (nur CELL_SIZE-Kandidat).
+                accel = lin_accel_eff if lin_accel_eff is not None else 0.0
+                runup_target = float(CELL_SIZE)
+                if accel > 0.0:
+                    dz   = wp[2] - prev[2]
+                    disc = nav._v0 * nav._v0 - 2.0 * nav._g * dz
+                    target_speed = tank_speed
+                    if disc >= 0:
+                        t_desc = (nav._v0 + math.sqrt(disc)) / nav._g
+                        calc   = (jlen + 2.5) / max(t_desc, 0.01)
+                        if 1.0 < calc <= tank_speed:
+                            target_speed = calc
+                    runup_target = min(NAV_RUNUP_MAX,
+                                       max(CELL_SIZE, target_speed * target_speed / (2.0 * accel)))
+
+                # Fallback-Leiter: Ziel-Länge, Ziel-Länge−CELL_SIZE, …, exakt CELL_SIZE.
+                dist = runup_target
+                while True:
+                    cand = dist if dist > CELL_SIZE else CELL_SIZE
+                    rx = prev[0] - jdx * cand
+                    ry = prev[1] - jdy * cand
+                    fz = nav.get_floor_z(rx, ry, prev[2] + 1.0)
+                    if (abs(fz - prev[2]) < 1.0 and r_layer.contains_xy(rx, ry)
+                            and r_layer.is_walkable_xy(rx, ry)
+                            and not _runup_crosses_thin_wall(
+                                nav, prev[2], pred[0], pred[1], rx, ry, prev[0], prev[1])):
+                        # VOR der Absprungzelle einfügen (pred → runup → Absprung → Sprung)
+                        result.insert(len(result) - 1, (rx, ry, prev[2]))
+                        break
+                    if cand <= CELL_SIZE:
+                        break
+                    dist -= CELL_SIZE
         result.append(wp)
     return result

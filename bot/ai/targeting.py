@@ -9,8 +9,6 @@ import logging
 from bzflag.protocol import MsgGrabFlag
 from bot.constants import (
     TANK_RADIUS,
-    FLAG_GRAB_RADIUS,
-    IDENTIFY_RANGE,
     WP_TIMEOUT_BASE,
     WP_TIMEOUT_SCALE,
     UNREACH_AVOID_PENALTY,
@@ -177,7 +175,7 @@ class TargetingMixin(BZBotBase):
     def _new_target(self) -> None:
         """Setzt Navigationsziel abhängig vom eigenen Flag-Zustand.
         Kein Flag: nächste on-ground Flag (Typ unbekannt).
-        ID-Flag: gute Flags in IDENTIFY_RANGE bevorzugen, ID ggf. ablegen.
+        ID-Flag: gute Flags in _identify_range bevorzugen, ID ggf. ablegen.
         Andere Flag: zufälliger Wegpunkt."""
         self.target_player = None
 
@@ -211,7 +209,8 @@ class TargetingMixin(BZBotBase):
                     for fx, fy in via:
                         if nav:
                             seg = nav.plan_path(px, py, pz, fx, fy,
-                                                blocked_jump_wps=blocked)
+                                                blocked_jump_wps=blocked,
+                                                lin_accel_eff=self._eff_linear_accel())
                             if seg:
                                 all_wps.extend(seg)
                                 px, py, pz = seg[-1][0], seg[-1][1], seg[-1][2]
@@ -219,7 +218,8 @@ class TargetingMixin(BZBotBase):
                         seg = nav.plan_path(px, py, pz,
                                             best_pos[0], best_pos[1],
                                             blocked_jump_wps=blocked,
-                                            goal_z=best_pos[2])
+                                            goal_z=best_pos[2],
+                                            lin_accel_eff=self._eff_linear_accel())
                         if seg:
                             all_wps.extend(seg)
                     if all_wps:
@@ -247,10 +247,10 @@ class TargetingMixin(BZBotBase):
                 if fi.status != 1:
                     continue
                 d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
-                if d < IDENTIFY_RANGE and fi.abbr in self.good_flags and d < best_d_good:
+                if d < self._identify_range and fi.abbr in self.good_flags and d < best_d_good:
                     if self._debug_log_flag:
                         logger.debug("[%s] Flagge: ID-B1 – gute Flagge %r d=%.1fu (< %.0fu)",
-                                     self.callsign, fi.abbr, d, IDENTIFY_RANGE)
+                                     self.callsign, fi.abbr, d, self._identify_range)
                     best_d_good = d
                     best_pos_good = (fi.pos[0], fi.pos[1])
                 elif fi.abbr:
@@ -273,7 +273,7 @@ class TargetingMixin(BZBotBase):
             # Keine gute Flag in Erkennungsradius → nächste unbekannte Flag ansteuern
             if self._debug_log_flag:
                 logger.debug("[%s] Flagge: ID-B2 – kein Ziel in %.0fu, scanne %d Flaggen (%d recent)",
-                             self.callsign, IDENTIFY_RANGE, len(self.flags), len(_recent))
+                             self.callsign, self._identify_range, len(self.flags), len(_recent))
             best_d = float("inf")
             best_pos = None
             for fi in list(self.flags.values()):
@@ -282,8 +282,8 @@ class TargetingMixin(BZBotBase):
                 if (round(fi.pos[0]), round(fi.pos[1])) in _recent:
                     continue
                 d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
-                # Innerhalb IDENTIFY_RANGE bereits als nicht-gut erkannte Flags überspringen
-                if d < IDENTIFY_RANGE and fi.abbr and fi.abbr not in self.good_flags:
+                # Innerhalb _identify_range bereits als nicht-gut erkannte Flags überspringen
+                if d < self._identify_range and fi.abbr and fi.abbr not in self.good_flags:
                     continue
                 if d < best_d:
                     best_d = d
@@ -314,12 +314,14 @@ class TargetingMixin(BZBotBase):
         """Sendet MsgGrabFlag wenn Bot nah an einer onGround-Flag ist."""
         if self.own_flag or self.player_id is None: return
         if now - self._last_grab_attempt < 0.5: return
+        grab_r  = self._flag_grab_radius()                          # schleifeninvariant (60-Hz-Pfad)
+        ahead_r = max(TANK_RADIUS, self._effective_tank_radius())
         for fi in list(self.flags.values()):
             if fi.status != 1: continue
             if abs(fi.pos[2] - self.pos_z) > 0.5: continue
             d = math.hypot(fi.pos[0] - self.pos_x, fi.pos[1] - self.pos_y)
-            if d >= FLAG_GRAB_RADIUS: continue
-            if d > TANK_RADIUS and not self._is_ahead(fi.pos[0], fi.pos[1]): continue
+            if d >= grab_r: continue
+            if d > ahead_r and not self._is_ahead(fi.pos[0], fi.pos[1]): continue
             self._last_grab_attempt = now
             self._try_grab_flag(fi.flag_id)
             return

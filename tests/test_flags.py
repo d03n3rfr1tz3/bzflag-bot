@@ -242,6 +242,44 @@ class TestFlagGrabFOV:
 
 
 # ---------------------------------------------------------------------------
+# Konstanten-Audit (Commit B): Flag-Grab-Radius folgt der nachgeführten
+# Server-Var _tank_length/_flag_radius statt der starren FLAG_GRAB_RADIUS-Konstante.
+# Bot darf nie schlechter dastehen als mit der alten Konstante (max()-Helper).
+# ---------------------------------------------------------------------------
+
+class TestFlagGrabRadiusScaling:
+
+    def test_flag_grab_radius_never_below_legacy(self, bot):
+        """Kleine _tank_length → Radius bleibt beim alten FLAG_GRAB_RADIUS (~8.64u),
+        wird NICHT kleiner (max()-Helper schützt vor Verschlechterung)."""
+        from bot.constants import FLAG_GRAB_RADIUS
+        bot._tank_length = 1.0   # winziger Custom-Tank
+        assert bot._flag_grab_radius() == pytest.approx(FLAG_GRAB_RADIUS)
+
+    def test_flag_grab_radius_scales_up(self, bot):
+        """Große _tank_length → Radius wächst über den Legacy-Wert hinaus
+        (effektiver Tank-Radius + Flag-Radius + Marge)."""
+        from bot.constants import FLAG_GRAB_RADIUS, FLAG_GRAB_MARGIN, TANK_RADIUS_FACTOR
+        bot._tank_length = 20.0   # großer Custom-Tank
+        expected = TANK_RADIUS_FACTOR * 20.0 + bot._flag_radius + FLAG_GRAB_MARGIN
+        assert expected > FLAG_GRAB_RADIUS
+        assert bot._flag_grab_radius() == pytest.approx(expected)
+
+    def test_opportunistic_grab_uses_scaled_radius(self, bot):
+        """_check_opportunistic_grab nutzt den skalierten Radius: eine Flagge außerhalb
+        des Legacy-FLAG_GRAB_RADIUS (~8.64u), aber innerhalb des durch große _tank_length
+        vergrößerten Radius, wird gegriffen."""
+        from bot.models import FlagInfo
+        bot._tank_length = 20.0   # großer Custom-Tank → Grab-Radius deutlich > 8.64u
+        bot.azimuth = 0.0
+        bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+        bot.flags[3] = FlagInfo(3, "GM", 1, [12.0, 0.0, 0.0])  # außerhalb Legacy-Radius
+        bot._last_grab_attempt = 0.0
+        bot._check_opportunistic_grab(time.monotonic())
+        bot.client.send.assert_called()
+
+
+# ---------------------------------------------------------------------------
 # Schritt 4: Neutrale Flags sofort droppen, bad-Flags mit shakeTimeout
 # ---------------------------------------------------------------------------
 
