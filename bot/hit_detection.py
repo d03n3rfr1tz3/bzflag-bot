@@ -13,6 +13,8 @@ from bzflag.protocol import (
 from bot.constants import (
     RESPAWN_DELAY,
     HIT_RADIUS,
+    NARROW_FACTOR,
+    MIN_HITBOX_DIM,
     KILL_REASON_SHOT,
     KILL_REASON_RUNOVER,
     KILL_REASON_GENOCIDED,
@@ -33,16 +35,23 @@ class HitDetectionMixin(BZBotBase):
 
     def _hitbox_half_dims(self) -> Tuple[float, float, float]:
         """Halbe Hitbox-Maße (len, w, h) des eigenen Tanks inkl. Flaggen-Skalierung
-        (O/T/TH), N-Sonderfall (schmale Quer-Hitbox) und Schussradius-Aufschlag.
+        (O/T/TH), N-Sonderfall (schmale Quer-Hitbox über NARROW_FACTOR) und
+        Schussradius-Aufschlag. Jede von einer Flagge verkleinerte Dimension wird per
+        MIN_HITBOX_DIM (volle Mindest-Dimension) auf ein servertaugliches Minimum
+        gefloort — der Floor greift auf das geometrische Maß VOR dem Schussradius.
         Einzige Quelle für die OBB-Treffertests (F9 — vorher 3× dupliziert)."""
         if   self.own_flag == "O":  sc = self._obese_factor
         elif self.own_flag == "T":  sc = self._tiny_factor
         elif self.own_flag == "TH": sc = self._thief_tiny_factor
         else:                       sc = 1.0
-        half_w   = (self._narrow_hw if self.own_flag == "N"
-                    else self._tank_width / 2 * sc) + self._shot_radius
-        half_len = self._tank_length / 2 * sc + self._shot_radius
-        half_h   = self._tank_height / 2 * sc + self._shot_radius
+        # N verkleinert nur die Breite (Länge/Höhe bleiben voll, sc=1.0) — als Faktor
+        # auf _tank_width, damit große Server-Tank-Maße mitskalieren.
+        w_geom = (self._tank_width / 2 * NARROW_FACTOR if self.own_flag == "N"
+                  else self._tank_width / 2 * sc)
+        floor    = MIN_HITBOX_DIM / 2
+        half_w   = max(w_geom,                   floor) + self._shot_radius
+        half_len = max(self._tank_length / 2 * sc, floor) + self._shot_radius
+        half_h   = max(self._tank_height / 2 * sc, floor) + self._shot_radius
         return half_len, half_w, half_h
 
     def _phantom_shot_harmless(self, shot: Shot) -> bool:
@@ -223,13 +232,25 @@ class HitDetectionMixin(BZBotBase):
                                                    shot.pos[0], shot.pos[1], shot.pos[2]):
                             to_remove.append(key)
                             continue
+                        # Kern-Treffer: für N liefert eff_r 0.0 (schmale Quer-Hitbox) —
+                        # dann prüft der GM-Zweig wie die Bullet-Zweige gegen das OBB,
+                        # sonst die isotrope GM-Kugel _segment_point_dist3d < eff_r.
+                        if self.own_flag == "N":
+                            _gm_core_hit = _segment_hits_obb_3d(
+                                prev_x, prev_y, prev_z,
+                                shot.pos[0], shot.pos[1], shot.pos[2],
+                                tank_cx, tank_cy, tank_cz, self.azimuth,
+                                _half_len, _half_w, _half_h)
+                        else:
+                            _gm_core_hit = _segment_point_dist3d(
+                                prev_x, prev_y, prev_z,
+                                shot.pos[0], shot.pos[1], shot.pos[2],
+                                tank_cx, tank_cy, tank_cz) < eff_r
                         # Wand-Occlusion (Sicherheitsnetz): die lokale GM-Integration kennt keine
                         # Wände. Steckt eine solide Wand zwischen Rakete und Tank, zählt kein
                         # Treffer (rundet die Rakete die Wand später, greift er dann). Ohne NavGraph
                         # liefert _segment_clear True → Verhalten wie bisher.
-                        hit = (_segment_point_dist3d(prev_x, prev_y, prev_z,
-                                                     shot.pos[0], shot.pos[1], shot.pos[2],
-                                                     tank_cx, tank_cy, tank_cz) < eff_r
+                        hit = (_gm_core_hit
                                and self._segment_clear(shot.pos[0], shot.pos[1], shot.pos[2],
                                                        tank_cx, tank_cy, tank_cz))
                     else:

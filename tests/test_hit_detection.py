@@ -331,6 +331,56 @@ def test_narrow_front_miss_via_obb(bot):
     assert not _was_killed(bot)
 
 
+# ── _hitbox_half_dims: Flaggen-Skalierung + MIN_HITBOX_DIM-Floor ──────────────
+
+def test_hitbox_dims_no_flag(bot):
+    """Ohne Flagge: volle Maße + Schussradius (len 3.5 / w 1.9 / h 1.525)."""
+    bot.own_flag = ""
+    half_len, half_w, half_h = bot._hitbox_half_dims()
+    assert half_len == pytest.approx(3.5)
+    assert half_w == pytest.approx(1.9)
+    assert half_h == pytest.approx(1.525)
+
+
+def test_hitbox_dims_narrow_uses_factor_and_floor(bot):
+    """N: Breite = _tank_width/2 * NARROW_FACTOR (0.14) → auf Floor 0.5 gehoben → +0.5 = 1.0.
+    Länge/Höhe bleiben voll (N schrumpft nur die Breite)."""
+    bot.own_flag = "N"
+    half_len, half_w, half_h = bot._hitbox_half_dims()
+    assert half_w == pytest.approx(1.0)      # max(0.14, 0.5) + 0.5
+    assert half_len == pytest.approx(3.5)    # unverändert voll
+    assert half_h == pytest.approx(1.525)    # unverändert voll
+
+
+def test_hitbox_dims_tiny_height_floored(bot):
+    """T (0.4): Höhe 0.41 unter Floor 0.5 → 0.5 → +0.5 = 1.0; Breite 0.56 > Floor."""
+    bot.own_flag = "T"
+    bot._tiny_factor = 0.4
+    half_len, half_w, half_h = bot._hitbox_half_dims()
+    assert half_len == pytest.approx(1.7)    # max(1.2, 0.5) + 0.5
+    assert half_w == pytest.approx(1.06)     # max(0.56, 0.5) + 0.5
+    assert half_h == pytest.approx(1.0)      # max(0.41, 0.5) + 0.5
+
+
+def test_hitbox_dims_extreme_tiny_all_floored(bot):
+    """T (0.2): alle geom. Halbmaße < 0.5 → alle auf Floor (voll 1.0)."""
+    bot.own_flag = "T"
+    bot._tiny_factor = 0.2
+    half_len, half_w, half_h = bot._hitbox_half_dims()
+    assert half_len == pytest.approx(1.1)    # max(0.6, 0.5) + 0.5
+    assert half_w == pytest.approx(1.0)      # max(0.28, 0.5) + 0.5
+    assert half_h == pytest.approx(1.0)      # max(0.205, 0.5) + 0.5
+
+
+def test_hitbox_dims_narrow_scales_with_large_server_tank(bot):
+    """Server mit großem _tank_width: N-Breite = width/2 * 0.1 trägt über den Floor
+    hinaus (20/2*0.1 = 1.0 > 0.5) → half_w = 1.0 + 0.5 = 1.5."""
+    bot.own_flag = "N"
+    bot._tank_width = 20.0
+    _, half_w, _ = bot._hitbox_half_dims()
+    assert half_w == pytest.approx(1.5)      # max(1.0, 0.5) + 0.5
+
+
 # ── GM (Guided Missile) ───────────────────────────────────────────────────────
 
 def test_gm_targeting_self_hits(bot):
@@ -340,6 +390,31 @@ def test_gm_targeting_self_hits(bot):
               is_gm=True, flag_abbr=b"GM", gm_target_pid=1)
     _resolve_incoming_shots(bot)
     assert _was_killed(bot)
+
+
+def test_gm_hits_narrow_bot(bot):
+    """N-Flagge: GM auf Kollisionskurs trifft jetzt (früher eff_r=0 → nie).
+    Der GM-Zweig prüft für N gegen das OBB (half_w=1.0) statt der Null-Kugel."""
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    bot.own_flag = "N"
+    bot.azimuth = 0.0
+    make_shot(bot, pos=(1.0, 0.0, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+              is_gm=True, flag_abbr=b"GM", gm_target_pid=1)
+    _resolve_incoming_shots(bot)
+    assert _was_killed(bot)
+
+
+def test_gm_narrow_side_miss_uses_obb(bot):
+    """N-Flagge: GM zieht ohne Ziel geradeaus 1.2u seitlich am Bot vorbei (>OBB half_w=1.0)
+    → MISS via OBB. Eine isotrope Kugel (eff_r≈4.28) würde hier fälschlich treffen —
+    sichert, dass der N-GM-Zweig wirklich das schmale OBB nutzt."""
+    bot.pos_x = 0.0; bot.pos_y = 0.0; bot.pos_z = 0.0
+    bot.own_flag = "N"
+    bot.azimuth = 0.0
+    make_shot(bot, pos=(1.0, 1.2, TANK_CZ), vel=(-100.0, 0.0, 0.0),
+              is_gm=True, flag_abbr=b"GM", gm_target_pid=255)
+    bot._resolve_incoming_shots(time.monotonic(), 0.02)
+    assert not _was_killed(bot)
 
 
 def test_gm_no_target_misses(bot):

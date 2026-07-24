@@ -59,11 +59,9 @@ SIMPLE_FLOAT_VARS = [
     ("_shieldFlight",      "_shield_flight",      3.0),
     ("_identifyRange",     "_identify_range",     60.0),
     ("_mGunAdRate",        "_mgun_ad_rate",       12.0),
-    ("_mGunAdLife",        "_mgun_ad_life",       1.8),
     ("_mGunAdVel",         "_mgun_ad_vel",        0.2),
     ("_rFireAdRate",       "_rfire_ad_rate",      3.0),
     ("_rFireAdVel",        "_rfire_ad_vel",       1.8),
-    ("_rFireAdLife",       "_rfire_ad_life",      0.4),
     ("_laserAdVel",        "_laser_ad_vel",       900.0),
     ("_laserAdRate",       "_laser_ad_rate",      0.6),
     ("_laserAdLife",       "_laser_ad_life",      0.2),
@@ -79,7 +77,6 @@ SIMPLE_FLOAT_VARS = [
     ("_tinyFactor",        "_tiny_factor",        0.5),
     ("_thiefTinyFactor",   "_thief_tiny_factor",  0.6),
     ("_thiefVelAd",        "_thief_vel_ad",       1.9),
-    ("_narrowHW",          "_narrow_hw",          0.4),
     # W3/F8: Nachführung neu ergänzt (vorher rechnete der Steamroller-Radius
     # immer mit dem 0.8-Default)
     ("_srRadiusMult",      "_sr_radius_mult",     1.2),
@@ -164,7 +161,6 @@ class TestSetVarSnapshot:
         ("_shotSpeed",   "_shot_speed",   0.0),
         ("_gmTurnAngle", "_gm_turn_angle", -1.0),
         ("_shockInRadius", "_shock_in_radius", -1.0),  # >= 0 verlangt
-        ("_narrowHW",    "_narrow_hw",    -0.1),
     ])
     def test_guard_rejects_value(self, bot, var, attr, bad):  # noqa: F811
         before = getattr(bot, attr)
@@ -192,3 +188,39 @@ class TestSetVarSnapshot:
         payload = setvar_payload([("_tankSpeed", 30.0)])
         for cut in (1, 3, 5, len(payload) - 1):
             bot._on_set_var(0, payload[:cut])
+
+    # ── _reload_time-Ableitung (BZDB-Default-Expression _shotRange/_shotSpeed) ─────
+    #
+    # bzfs sendet _reloadTime nur bei explizitem Server-Override numerisch (die
+    # Default-Expression "_shotRange / _shotSpeed" wird nie als Zahl übertragen,
+    # global.cxx:127) — der Bot muss sie selbst nachbilden, solange kein
+    # numerisches _reloadTime empfangen wurde.
+
+    def test_shot_range_derives_reload_time(self, bot):  # noqa: F811
+        """_shotRange=700 bei Speed-Default (100) → _reload_time = 7.0."""
+        send(bot, "_shotRange", 700.0)
+        assert bot._reload_time == pytest.approx(7.0)
+
+    def test_shot_speed_derives_reload_time(self, bot):  # noqa: F811
+        """_shotSpeed=50 bei Range-Default (350) → _reload_time = 7.0."""
+        send(bot, "_shotSpeed", 50.0)
+        assert bot._reload_time == pytest.approx(7.0)
+
+    def test_explicit_reload_time_wins_over_later_shot_range(self, bot):  # noqa: F811
+        """Numerisches _reloadTime gewinnt dauerhaft gegen die Default-Ableitung."""
+        send(bot, "_reloadTime", 5.0)
+        send(bot, "_shotRange", 700.0)
+        assert bot._reload_time == pytest.approx(5.0)
+
+    def test_explicit_reload_time_wins_regardless_of_order(self, bot):  # noqa: F811
+        """Reihenfolge egal: _shotRange zuerst, dann numerisches _reloadTime gewinnt."""
+        send(bot, "_shotRange", 700.0)
+        send(bot, "_reloadTime", 5.0)
+        assert bot._reload_time == pytest.approx(5.0)
+
+    def test_derived_reload_time_recomputes_sw_expand_speed(self, bot):  # noqa: F811
+        """Bei Ableitung wird auch _sw_expand_speed nachgezogen (kein numerisches _reloadTime)."""
+        send(bot, "_shotRange", 700.0)
+        expected = ((bot._shock_out_radius - bot._shock_in_radius)
+                    / (bot._reload_time * bot._shock_ad_life))
+        assert bot._sw_expand_speed == pytest.approx(expected)

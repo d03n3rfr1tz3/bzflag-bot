@@ -73,15 +73,12 @@ from bot.constants import (
     THIEF_VEL_AD,
     THIEF_AD_SHOT_VEL,
     THIEF_AD_LIFE,
-    _NARROW_HW,
     SR_RADIUS_MULT,
 
     MGUN_AD_RATE,
-    MGUN_AD_LIFE,
     MGUN_AD_VEL,
     RFIRE_AD_RATE,
     RFIRE_AD_VEL,
-    RFIRE_AD_LIFE,
     LASER_AD_VEL,
     LASER_AD_RATE,
     LASER_AD_LIFE,
@@ -198,6 +195,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._slot_reload_at = []
         self._spawn_sent_at = None
         self._reload_time = RELOAD_TIME_DEFAULT
+        self._reload_time_explicit = False
 
     def _init_server_vars(self):
         """Server-Variablen-Defaults (via MsgSetVar/MsgGameSettings überschrieben, s. bot/constants.py)."""
@@ -263,7 +261,6 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._thief_vel_ad       = THIEF_VEL_AD        # via MsgSetVar _thiefVelAd
         self._thief_ad_shot_vel  = THIEF_AD_SHOT_VEL   # via MsgSetVar _thiefAdShotVel
         self._thief_ad_life      = THIEF_AD_LIFE        # via MsgSetVar _thiefAdLife
-        self._narrow_hw          = _NARROW_HW          # via MsgSetVar _narrowHW
         self._angular_ad      = ANGULAR_AD
         self._shield_flight   = SHIELD_FLIGHT
         self._identify_range  = IDENTIFY_RANGE
@@ -285,11 +282,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
 
         # Schuss-Typ-Multiplikatoren (via MsgSetVar)
         self._mgun_ad_rate  = MGUN_AD_RATE
-        self._mgun_ad_life  = MGUN_AD_LIFE
         self._mgun_ad_vel   = MGUN_AD_VEL
         self._rfire_ad_rate = RFIRE_AD_RATE
         self._rfire_ad_vel  = RFIRE_AD_VEL
-        self._rfire_ad_life = RFIRE_AD_LIFE
         self._laser_ad_vel  = LASER_AD_VEL
         self._laser_ad_rate = LASER_AD_RATE
         self._laser_ad_life = LASER_AD_LIFE

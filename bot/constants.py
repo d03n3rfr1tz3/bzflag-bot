@@ -93,16 +93,22 @@ THIEF_AD_SHOT_VEL: Final = 8.0    # TH-Flagge: Schussgeschwindigkeit-Multiplikat
 THIEF_AD_LIFE: Final = 0.05   # TH-Flagge: Schuss-Lifetime in Sekunden (via MsgSetVar _thiefAdLife)
                              # ↔ self._thief_ad_life
 THIEF_AD_RANGE: Final = 120.0  # TH-Flagge: Reichweite (HIX hw=30→60u Gebäude × 2)
-_NARROW_HW: Final = 0.30   # N-Flagge: reduzierte Halbbreite ↔ _narrowHW ↔ self._narrow_hw
+NARROW_FACTOR: Final = 0.1   # N-Flagge: Breiten-Faktor auf _tank_width (analog _tinyFactor);
+                             # kein Server-Var (_narrowHW existiert in bzfs nicht). Der
+                             # MIN_HITBOX_DIM-Floor hebt das auf servertaugliche Mindestbreite.
+MIN_HITBOX_DIM: Final = 1.0  # Mindest-(Voll-)Dimension der Treffer-/Fahr-Hitbox in u: keine
+                             # Flagge darf eine Tank-Dimension unter diesen Wert verkleinern.
 SR_RADIUS_MULT: Final = 0.8    # ↔ _srRadiusMult ↔ self._sr_radius_mult
 
 # ── Schuss-Typ-Multiplikatoren (via _on_set_var überschreibbar) ───────────
 MGUN_AD_RATE: Final = 10.0     # _mGunAdRate  (reloadTime / MGUN_AD_RATE = MG-Reload) ↔ self._mgun_ad_rate
-MGUN_AD_LIFE: Final = 0.1      # _mGunAdLife  (= 1/_mGunAdRate; × shotLifetime) ↔ self._mgun_ad_life
+                                # (auch MG-Lifetime: base / _mgun_ad_rate — _mGunAdLife ist in bzfs
+                                # nur die Expression "1.0 / _mGunAdRate", kommt nicht numerisch an)
 MGUN_AD_VEL: Final = 1.5      # _mGunAdVel   (× shotSpeed = MG-Schussgeschwindigkeit) ↔ self._mgun_ad_vel
 RFIRE_AD_RATE: Final = 2.0      # _rFireAdRate (F- und TR-Reload-Divisor) ↔ self._rfire_ad_rate
+                                # (auch F-Lifetime: base / _rfire_ad_rate — _rFireAdLife ist in bzfs
+                                # nur die Expression "1.0 / _rFireAdRate", kommt nicht numerisch an)
 RFIRE_AD_VEL: Final = 1.5      # _rFireAdVel  (× shotSpeed = TR-Schussgeschwindigkeit) ↔ self._rfire_ad_vel
-RFIRE_AD_LIFE: Final = 0.5      # _rFireAdLife (= 1/_rFireAdRate; × shotRange) ↔ self._rfire_ad_life
 LASER_AD_VEL: Final = 1000.0   # _laserAdVel  (× shotSpeed ≈ Laser-Länge) ↔ self._laser_ad_vel
 LASER_AD_RATE: Final = 0.5      # _laserAdRate (× _rFireAdRate = Laser-Reload-Faktor) ↔ self._laser_ad_rate
 LASER_AD_LIFE: Final = 0.1      # _laserAdLife (Laser-Lifetime in s) ↔ self._laser_ad_life
@@ -328,8 +334,8 @@ FLAG_NAME_TO_ABBR: dict[str, str] = {
     "Blue Team": "B*",              "Purple Team": "P*",
 }
 
-# Alles GROSSGESCHRIEBENE exportieren — inkl. der historisch _-präfixierten
-# _TINY_FACTOR/_NARROW_HW (str.isupper ignoriert Unterstriche), die `import *`
+# Alles GROSSGESCHRIEBENE exportieren — inkl. des historisch _-präfixierten
+# _TINY_FACTOR (str.isupper ignoriert Unterstriche), das `import *`
 # sonst überspringen würde. NAV_CELL_SIZE wird bewusst mit re-exportiert.
 # STATISCHE Liste (früher dynamisch via `[_n for _n in globals() if _n.isupper()]`):
 # mypy/mypyc können ein dynamisch berechnetes __all__ nicht auswerten, wodurch
@@ -347,8 +353,8 @@ __all__ = [
     'VELOCITY_AD', 'AGILITY_AD_VEL', 'LG_GRAVITY', 'BURROW_DEPTH', 'BURROW_SPEED_AD',
     'BURROW_ANG_AD', 'ANGULAR_AD', 'SHIELD_FLIGHT', 'IDENTIFY_RANGE', 'OBESITY_FACTOR',
     '_TINY_FACTOR', 'THIEF_TINY_FACTOR', 'THIEF_VEL_AD', 'THIEF_AD_SHOT_VEL', 'THIEF_AD_LIFE',
-    'THIEF_AD_RANGE', '_NARROW_HW', 'SR_RADIUS_MULT', 'MGUN_AD_RATE', 'MGUN_AD_LIFE',
-    'MGUN_AD_VEL', 'RFIRE_AD_RATE', 'RFIRE_AD_VEL', 'RFIRE_AD_LIFE', 'LASER_AD_VEL',
+    'THIEF_AD_RANGE', 'NARROW_FACTOR', 'MIN_HITBOX_DIM', 'SR_RADIUS_MULT', 'MGUN_AD_RATE',
+    'MGUN_AD_VEL', 'RFIRE_AD_RATE', 'RFIRE_AD_VEL', 'LASER_AD_VEL',
     'LASER_AD_RATE', 'LASER_AD_LIFE', 'UPDATE_RATE_HZ', 'SERVER_UPDATE_RATE_HZ', 'AI_RATE_HZ',
     'SHOOT_INTERVAL_RANDOM_MAX', 'MIN_BURST_INTERVAL', 'GM_BURST_INTERVAL',
     'LANDING_DOUBLE_SHOT_DELAY', 'RESPAWN_DELAY', 'EXPLODE_TIME', 'ROUND_END_LINGER',

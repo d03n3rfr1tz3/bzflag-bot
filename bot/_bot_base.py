@@ -115,7 +115,6 @@ class BZBotBase:
     _lock_on_angle: Any
     _max_bump_height: Any
     _max_shots: int
-    _mgun_ad_life: Any
     _momentum_lin_acc: Any
     _momentum_ang_acc: Any
     _mgun_ad_rate: Any
@@ -123,7 +122,6 @@ class BZBotBase:
     _move_reverse: bool
     _muzzle_front: Any
     _muzzle_height: Any
-    _narrow_hw: Any
     _nav_goal: Any
     _nav_goal_z: Any
     _nav_graph: Any
@@ -159,7 +157,7 @@ class BZBotBase:
     _recent_flag_targets: Any
     _reconnect_needed: bool
     _reload_time: Any
-    _rfire_ad_life: Any
+    _reload_time_explicit: bool
     _rfire_ad_rate: Any
     _rfire_ad_vel: Any
     _rico_aim_cache: Any

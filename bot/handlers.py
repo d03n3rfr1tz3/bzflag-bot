@@ -587,6 +587,13 @@ class HandlersMixin(BZBotBase):
         Flaggen; alle Multiplikatoren folgen Server-Vars (MsgSetVar). Parallel zu
         `_effective_shot_lifetime` (eigene Flagge), aber gekeyed auf `flag_abbr`-Bytes.
 
+        MG/F sind ein Sonderfall: `_mGunAdLife`/`_rFireAdLife` sind in bzfs
+        Default-Expressions ("1.0 / _mGunAdRate" bzw. "1.0 / _rFireAdRate",
+        global.cxx), MsgSetVar sendet aber Roh-Strings (PackVars nutzt BZDB.get,
+        kein eval) — der Bot wertet Expressions nicht aus. Die zugehörige Rate
+        (`_mGunAdRate`/`_rFireAdRate`) kommt dagegen numerisch an, deshalb rechnen
+        wir hier per Division statt Multiplikation mit dem (unbrauchbaren) AdLife.
+
         Wirkung SW: base(=reloadTime)·_shock_ad_life == _reload_time·_shock_ad_life
         (siehe _recompute_sw_expand_speed) → der Shot verfällt exakt dann, wenn die
         expandierende Front _shock_out_radius erreicht (BZFlags setExpired()); kein
@@ -594,8 +601,8 @@ class HandlersMixin(BZBotBase):
         """
         if flag_abbr == b"SW":   return base * self._shock_ad_life
         if flag_abbr == b"GM":   return base * self._gm_ad_life
-        if flag_abbr == b"MG":   return base * self._mgun_ad_life
-        if flag_abbr == b"F\x00": return base * self._rfire_ad_life
+        if flag_abbr == b"MG":   return base / max(self._mgun_ad_rate, 1.0)
+        if flag_abbr == b"F\x00": return base / max(self._rfire_ad_rate, 1.0)
         if flag_abbr == b"L\x00": return base * self._laser_ad_life
         if flag_abbr == b"TH":   return base * self._thief_ad_life
         return base
@@ -1000,7 +1007,7 @@ class HandlersMixin(BZBotBase):
     _SETVAR_VARS = {
         # Server-Var         (Attribut,             cast,  guard,  fmt,    Hook)
         "_maxShots":         ("_max_shots",          int,   ">0",  "%d",   None),
-        "_reloadTime":       ("_reload_time",        float, ">0",  "%.2f", "_recompute_sw_expand_speed"),
+        "_reloadTime":       ("_reload_time",        float, ">0",  "%.2f", "_mark_reload_time_explicit"),
         "_shotSpeed":        ("_shot_speed",         float, ">0",  "%.1f", "_recompute_shot_derived"),
         "_shotRange":        ("_shot_range",         float, ">0",  "%.1f", "_recompute_shot_lifetime"),
         "_shotRadius":       ("_shot_radius",        float, ">=0", "%.2f", None),
@@ -1031,7 +1038,6 @@ class HandlersMixin(BZBotBase):
         "_lockOnAngle":      ("_lock_on_angle",      float, ">0",  "%.4f", None),
         "_obeseFactor":      ("_obese_factor",       float, ">0",  "%.2f", None),
         "_tinyFactor":       ("_tiny_factor",        float, ">0",  "%.3f", None),
-        "_narrowHW":         ("_narrow_hw",          float, ">=0", "%.3f", None),
         "_thiefTinyFactor":  ("_thief_tiny_factor",  float, ">0",  "%.3f", None),
         "_thiefVelAd":       ("_thief_vel_ad",       float, ">0",  "%.3f", None),
         "_thiefAdShotVel":   ("_thief_ad_shot_vel",  float, ">0",  "%.1f", None),
@@ -1052,11 +1058,9 @@ class HandlersMixin(BZBotBase):
         # Funktionserweiterung dieses Refactors.
         "_srRadiusMult":     ("_sr_radius_mult",     float, ">0",  "%.2f", None),
         "_mGunAdRate":       ("_mgun_ad_rate",       float, ">0",  "%.1f", None),
-        "_mGunAdLife":       ("_mgun_ad_life",       float, ">0",  "%.2f", None),
         "_mGunAdVel":        ("_mgun_ad_vel",        float, ">0",  "%.3f", None),
         "_rFireAdRate":      ("_rfire_ad_rate",      float, ">0",  "%.1f", None),
         "_rFireAdVel":       ("_rfire_ad_vel",       float, ">0",  "%.2f", None),
-        "_rFireAdLife":      ("_rfire_ad_life",      float, ">0",  "%.3f", None),
         "_laserAdVel":       ("_laser_ad_vel",       float, ">0",  "%.1f", None),
         "_laserAdRate":      ("_laser_ad_rate",      float, ">0",  "%.2f", None),
         "_laserAdLife":      ("_laser_ad_life",      float, ">0",  "%.3f", None),
@@ -1124,6 +1128,24 @@ class HandlersMixin(BZBotBase):
     def _recompute_shot_lifetime(self) -> None:
         """Schuss-Lifetime = _shotRange / _shotSpeed (beide nachgeführt)."""
         self._shot_lifetime = self._shot_range / self._shot_speed
+        self._recompute_reload_time()
+
+    def _recompute_reload_time(self) -> None:
+        """_reload_time = _shotRange / _shotSpeed (bzfs-Default-Expression, global.cxx:127).
+
+        bzfs sendet _reloadTime nur bei explizitem Server-Override numerisch per MsgSetVar —
+        die Default-Expression selbst wird nie als Zahl übertragen (PackVars macht kein eval).
+        Ohne diese Ableitung bliebe _reload_time auf RELOAD_TIME_DEFAULT stehen, obwohl der Bot
+        _shot_range/_shot_speed längst übernommen hat. Ein einmal numerisch empfangenes
+        _reloadTime (s. _mark_reload_time_explicit) gewinnt dauerhaft gegen diese Ableitung."""
+        if not self._reload_time_explicit:
+            self._reload_time = self._shot_range / self._shot_speed
+            self._recompute_sw_expand_speed()
+
+    def _mark_reload_time_explicit(self) -> None:
+        """Numerisch empfangenes _reloadTime gewinnt dauerhaft gegen _recompute_reload_time."""
+        self._reload_time_explicit = True
+        self._recompute_sw_expand_speed()
 
     def _recompute_shot_derived(self) -> None:
         """_shotSpeed ändert Lifetime UND GM-Homing-Grenze."""

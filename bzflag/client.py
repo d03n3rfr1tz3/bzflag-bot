@@ -460,10 +460,27 @@ class BZFlagClient:
             except OSError:
                 break
 
-            if len(data) < 4:
-                continue
-            length, code = struct.unpack_from(">HH", data)
-            payload = data[4: 4 + length]
+            self._dispatch_udp_datagram(data)
+
+    def _dispatch_udp_datagram(self, data: bytes) -> None:
+        """Dispatcht ALLE Nachrichten eines UDP-Datagramms der Reihe nach.
+
+        bzfs bündelt mehrere Nachrichten pro Datagramm (NetHandler::pwrite
+        sammelt bis MaxPacketLen=1024 in udpOutputBuffer); der echte Client
+        (ServerLink::read) leert das ganze Datagramm, bevor er das nächste
+        empfängt. Nur die erste Nachricht zu parsen hieße, alle dahinter
+        gebündelten zu verlieren (im Livetest: ~25 von 29 MsgShotBegin).
+        Keine Nachricht überspannt zwei Datagramme (überlange Nachrichten
+        sendet bzfs einzeln) → keine datagrammübergreifende Pufferung nötig.
+        """
+        off, n = 0, len(data)
+        while n - off >= 4:
+            length, code = struct.unpack_from(">HH", data, off)
+            total = 4 + length
+            if n - off < total:
+                break  # abgeschnittenes/verstümmeltes Datagramm-Ende
+            payload = data[off + 4: off + total]
+            off += total
             self._dispatch(code, payload)
 
     def _dispatch(self, code: int, payload: bytes) -> None:
