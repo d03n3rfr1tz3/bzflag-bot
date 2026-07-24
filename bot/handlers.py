@@ -1007,7 +1007,7 @@ class HandlersMixin(BZBotBase):
     _SETVAR_VARS = {
         # Server-Var         (Attribut,             cast,  guard,  fmt,    Hook)
         "_maxShots":         ("_max_shots",          int,   ">0",  "%d",   None),
-        "_reloadTime":       ("_reload_time",        float, ">0",  "%.2f", "_recompute_sw_expand_speed"),
+        "_reloadTime":       ("_reload_time",        float, ">0",  "%.2f", "_mark_reload_time_explicit"),
         "_shotSpeed":        ("_shot_speed",         float, ">0",  "%.1f", "_recompute_shot_derived"),
         "_shotRange":        ("_shot_range",         float, ">0",  "%.1f", "_recompute_shot_lifetime"),
         "_shotRadius":       ("_shot_radius",        float, ">=0", "%.2f", None),
@@ -1128,6 +1128,24 @@ class HandlersMixin(BZBotBase):
     def _recompute_shot_lifetime(self) -> None:
         """Schuss-Lifetime = _shotRange / _shotSpeed (beide nachgeführt)."""
         self._shot_lifetime = self._shot_range / self._shot_speed
+        self._recompute_reload_time()
+
+    def _recompute_reload_time(self) -> None:
+        """_reload_time = _shotRange / _shotSpeed (bzfs-Default-Expression, global.cxx:127).
+
+        bzfs sendet _reloadTime nur bei explizitem Server-Override numerisch per MsgSetVar —
+        die Default-Expression selbst wird nie als Zahl übertragen (PackVars macht kein eval).
+        Ohne diese Ableitung bliebe _reload_time auf RELOAD_TIME_DEFAULT stehen, obwohl der Bot
+        _shot_range/_shot_speed längst übernommen hat. Ein einmal numerisch empfangenes
+        _reloadTime (s. _mark_reload_time_explicit) gewinnt dauerhaft gegen diese Ableitung."""
+        if not self._reload_time_explicit:
+            self._reload_time = self._shot_range / self._shot_speed
+            self._recompute_sw_expand_speed()
+
+    def _mark_reload_time_explicit(self) -> None:
+        """Numerisch empfangenes _reloadTime gewinnt dauerhaft gegen _recompute_reload_time."""
+        self._reload_time_explicit = True
+        self._recompute_sw_expand_speed()
 
     def _recompute_shot_derived(self) -> None:
         """_shotSpeed ändert Lifetime UND GM-Homing-Grenze."""

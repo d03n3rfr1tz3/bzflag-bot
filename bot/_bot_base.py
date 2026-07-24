@@ -157,6 +157,7 @@ class BZBotBase:
     _recent_flag_targets: Any
     _reconnect_needed: bool
     _reload_time: Any
+    _reload_time_explicit: bool
     _rfire_ad_rate: Any
     _rfire_ad_vel: Any
     _rico_aim_cache: Any

@@ -195,6 +195,7 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
         self._slot_reload_at = []
         self._spawn_sent_at = None
         self._reload_time = RELOAD_TIME_DEFAULT
+        self._reload_time_explicit = False
 
     def _init_server_vars(self):
         """Server-Variablen-Defaults (via MsgSetVar/MsgGameSettings überschrieben, s. bot/constants.py)."""
