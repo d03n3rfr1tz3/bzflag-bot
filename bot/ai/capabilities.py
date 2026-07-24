@@ -174,8 +174,8 @@ class CapabilityMixin(BZBotBase):
         """Schuss-Lebensdauer (s) der aktiven Flagge (BZFlag: lifetime *= AdLife)."""
         f = self.own_flag
         if f == "L":  return self._shot_lifetime * self._laser_ad_life
-        if f == "MG": return self._shot_lifetime * self._mgun_ad_life
-        if f == "F":  return self._shot_lifetime * self._rfire_ad_life
+        if f == "MG": return self._shot_lifetime / max(self._mgun_ad_rate, 1.0)
+        if f == "F":  return self._shot_lifetime / max(self._rfire_ad_rate, 1.0)
         if f == "TH": return self._shot_lifetime * self._thief_ad_life
         if f == "GM": return self._shot_lifetime * self._gm_ad_life
         return self._shot_lifetime

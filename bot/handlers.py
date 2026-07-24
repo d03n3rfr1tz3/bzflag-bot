@@ -587,6 +587,13 @@ class HandlersMixin(BZBotBase):
         Flaggen; alle Multiplikatoren folgen Server-Vars (MsgSetVar). Parallel zu
         `_effective_shot_lifetime` (eigene Flagge), aber gekeyed auf `flag_abbr`-Bytes.
 
+        MG/F sind ein Sonderfall: `_mGunAdLife`/`_rFireAdLife` sind in bzfs
+        Default-Expressions ("1.0 / _mGunAdRate" bzw. "1.0 / _rFireAdRate",
+        global.cxx), MsgSetVar sendet aber Roh-Strings (PackVars nutzt BZDB.get,
+        kein eval) — der Bot wertet Expressions nicht aus. Die zugehörige Rate
+        (`_mGunAdRate`/`_rFireAdRate`) kommt dagegen numerisch an, deshalb rechnen
+        wir hier per Division statt Multiplikation mit dem (unbrauchbaren) AdLife.
+
         Wirkung SW: base(=reloadTime)·_shock_ad_life == _reload_time·_shock_ad_life
         (siehe _recompute_sw_expand_speed) → der Shot verfällt exakt dann, wenn die
         expandierende Front _shock_out_radius erreicht (BZFlags setExpired()); kein
@@ -594,8 +601,8 @@ class HandlersMixin(BZBotBase):
         """
         if flag_abbr == b"SW":   return base * self._shock_ad_life
         if flag_abbr == b"GM":   return base * self._gm_ad_life
-        if flag_abbr == b"MG":   return base * self._mgun_ad_life
-        if flag_abbr == b"F\x00": return base * self._rfire_ad_life
+        if flag_abbr == b"MG":   return base / max(self._mgun_ad_rate, 1.0)
+        if flag_abbr == b"F\x00": return base / max(self._rfire_ad_rate, 1.0)
         if flag_abbr == b"L\x00": return base * self._laser_ad_life
         if flag_abbr == b"TH":   return base * self._thief_ad_life
         return base
@@ -1051,11 +1058,9 @@ class HandlersMixin(BZBotBase):
         # Funktionserweiterung dieses Refactors.
         "_srRadiusMult":     ("_sr_radius_mult",     float, ">0",  "%.2f", None),
         "_mGunAdRate":       ("_mgun_ad_rate",       float, ">0",  "%.1f", None),
-        "_mGunAdLife":       ("_mgun_ad_life",       float, ">0",  "%.2f", None),
         "_mGunAdVel":        ("_mgun_ad_vel",        float, ">0",  "%.3f", None),
         "_rFireAdRate":      ("_rfire_ad_rate",      float, ">0",  "%.1f", None),
         "_rFireAdVel":       ("_rfire_ad_vel",       float, ">0",  "%.2f", None),
-        "_rFireAdLife":      ("_rfire_ad_life",      float, ">0",  "%.3f", None),
         "_laserAdVel":       ("_laser_ad_vel",       float, ">0",  "%.1f", None),
         "_laserAdRate":      ("_laser_ad_rate",      float, ">0",  "%.2f", None),
         "_laserAdLife":      ("_laser_ad_life",      float, ">0",  "%.3f", None),

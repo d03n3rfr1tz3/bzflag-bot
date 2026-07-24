@@ -76,11 +76,9 @@ from bot.constants import (
     SR_RADIUS_MULT,
 
     MGUN_AD_RATE,
-    MGUN_AD_LIFE,
     MGUN_AD_VEL,
     RFIRE_AD_RATE,
     RFIRE_AD_VEL,
-    RFIRE_AD_LIFE,
     LASER_AD_VEL,
     LASER_AD_RATE,
     LASER_AD_LIFE,
@@ -283,11 +281,9 @@ class BZBot(HitDetectionMixin, HandlersMixin, BZBotAI):
 
         # Schuss-Typ-Multiplikatoren (via MsgSetVar)
         self._mgun_ad_rate  = MGUN_AD_RATE
-        self._mgun_ad_life  = MGUN_AD_LIFE
         self._mgun_ad_vel   = MGUN_AD_VEL
         self._rfire_ad_rate = RFIRE_AD_RATE
         self._rfire_ad_vel  = RFIRE_AD_VEL
-        self._rfire_ad_life = RFIRE_AD_LIFE
         self._laser_ad_vel  = LASER_AD_VEL
         self._laser_ad_rate = LASER_AD_RATE
         self._laser_ad_life = LASER_AD_LIFE

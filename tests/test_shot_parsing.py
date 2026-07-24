@@ -254,14 +254,12 @@ def test_gm_own_shot_no_kill(bot):
 @pytest.mark.parametrize("flag,attr", [
     (b"SW",     "_shock_ad_life"),
     (b"GM",     "_gm_ad_life"),
-    (b"MG",     "_mgun_ad_life"),
-    (b"F\x00",  "_rfire_ad_life"),
     (b"L\x00",  "_laser_ad_life"),
     (b"TH",     "_thief_ad_life"),
 ])
 def test_incoming_shot_lifetime_applies_adlife(bot, flag, attr):
     """Wie der echte BZFlag-Client justiert der Bot die Server-Lifetime pro Flagge
-    mit *<flag>AdLife nach (SW/GM/L/MG/F/TH). Basis-Lifetime aus dem Paket = 3,5s."""
+    mit *<flag>AdLife nach (SW/GM/L/TH). Basis-Lifetime aus dem Paket = 3,5s."""
     from bzflag.protocol import MsgShotBegin
     bot.player_id = 1
     # quer zur Schussachse (+x) versetzen: weit weg UND nicht im Strahl — ein
@@ -278,6 +276,40 @@ def test_incoming_shot_lifetime_applies_adlife(bot, flag, attr):
     with bot._shots_lock:
         s = bot._shots[(2, 3)]
     assert s.lifetime == pytest.approx(3.5 * getattr(bot, attr))
+
+
+@pytest.mark.parametrize("flag,attr", [
+    (b"MG",     "_mgun_ad_rate"),
+    (b"F\x00",  "_rfire_ad_rate"),
+])
+def test_incoming_shot_lifetime_applies_adrate(bot, flag, attr):
+    """MG/F justieren die Fremdschuss-Lifetime über die Rate (base / <flag>AdRate),
+    nicht über AdLife: bzfs sendet `_mGunAdLife`/`_rFireAdLife` als Expression-String
+    ("1.0 / _mGunAdRate"), den der Bot nicht auswertet — die Rate kommt numerisch an.
+    Basis-Lifetime aus dem Paket = 3,5s."""
+    from bzflag.protocol import MsgShotBegin
+    bot.player_id = 1
+    bot.pos_x = 500.0; bot.pos_y = 500.0; bot.pos_z = 0.0
+    bot.alive = True
+    payload = _build_shot_packet(
+        shooter_id=2, shot_id=3,
+        pos=(0.0, 0.0, 1.025), vel=(50.0, 0.0, 0.0),
+        flag_type=flag, lifetime=3.5,
+    )
+    bot._on_shot_begin(MsgShotBegin, payload)
+    with bot._shots_lock:
+        s = bot._shots[(2, 3)]
+    assert s.lifetime == pytest.approx(3.5 / getattr(bot, attr))
+
+
+def test_incoming_shot_lifetime_mg_follows_setvar_rate(bot):
+    """_mGunAdLife ist in bzfs nur eine Expression ("1.0 / _mGunAdRate") und kommt
+    per MsgSetVar nicht numerisch an — der Bot rechnet daher über die Rate. Ändert
+    ein SetVar `_mGunAdRate`, muss sich die MG-Lifetime entsprechend verschieben
+    (base=3,5s, rate=10 → 0,35s Default; rate=20 → 0,175s nach SetVar)."""
+    assert bot._incoming_shot_lifetime(b"MG", 3.5) == pytest.approx(0.35)
+    bot._mgun_ad_rate = 20.0
+    assert bot._incoming_shot_lifetime(b"MG", 3.5) == pytest.approx(0.175)
 
 
 @pytest.mark.parametrize("flag,attr", [

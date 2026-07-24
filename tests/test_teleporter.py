@@ -298,8 +298,8 @@ def test_effective_shot_range_per_flag(bot):
     assert bot._effective_shot_range()    == pytest.approx(base_s * base_l)
     cases = {
         "L":  (base_s * bot._laser_ad_vel,      base_l * bot._laser_ad_life),
-        "MG": (base_s * bot._mgun_ad_vel,       base_l * bot._mgun_ad_life),
-        "F":  (base_s * bot._rfire_ad_vel,      base_l * bot._rfire_ad_life),
+        "MG": (base_s * bot._mgun_ad_vel,       base_l / bot._mgun_ad_rate),
+        "F":  (base_s * bot._rfire_ad_vel,      base_l / bot._rfire_ad_rate),
         "TH": (base_s * bot._thief_ad_shot_vel, base_l * bot._thief_ad_life),
         "GM": (base_s,                          base_l * bot._gm_ad_life),   # GM: Basis-Speed
     }
